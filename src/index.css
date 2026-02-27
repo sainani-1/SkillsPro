@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-800;
+}
+
+.btn-primary {
+  @apply bg-nani-accent text-white px-4 py-2 rounded hover:bg-opacity-90 transition-colors shadow-sm;
+}
+
+.btn-gold {
+  @apply bg-gold-400 text-nani-dark font-bold px-4 py-2 rounded hover:bg-gold-500 transition-colors shadow-md;
+}
+
+/* Custom scrollbar for all elements */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Custom scrollbar for sidebar */
+aside nav::-webkit-scrollbar {
+  width: 6px;
+}
+aside nav::-webkit-scrollbar-track {
+  background: rgba(26, 26, 46, 0.5);
+}
+aside nav::-webkit-scrollbar-thumb {
+  background: #FFD700;
+  border-radius: 3px;
+}
+aside nav::-webkit-scrollbar-thumb:hover {
+  background: #C5A000;
+}
+
+.certificate-bg {
+  background: radial-gradient(circle, rgba(255,255,255,1) 0%, rgba(240,240,240,1) 100%);
+  border: 10px solid #C5A000;
+  position: relative;
+}

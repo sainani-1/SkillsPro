@@ -1,0 +1,398 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../supabaseClient';
+import { Link } from 'react-router-dom';
+import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw } from 'lucide-react';
+import { format, addDays } from 'date-fns';
+import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
+
+// Offer congrats widget
+const OfferCongrats = ({ offer }) => (
+  <div className="bg-gradient-to-r from-pink-500 to-pink-700 p-6 rounded-xl text-white relative mb-6">
+    <h2 className="text-2xl font-bold mb-2">🎉 Special Offer!</h2>
+    <p className="mb-2">{offer.is_lifetime_free ? 'You have been granted Lifetime Free Access!' : offer.discount_type === 'percent' ? `You have a ${offer.discount_value}% discount!` : `Flat ₹${offer.discount_value} off!`}</p>
+    <p className="text-xs">{offer.title} - {offer.description}</p>
+  </div>
+);
+
+const StudentDashboard = () => {
+  const { profile, isPremium } = useAuth();
+  const [courses, setCourses] = useState([]);
+  const [teacher, setTeacher] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [showPremiumGift, setShowPremiumGift] = useState(false);
+  const [premiumDays, setPremiumDays] = useState(0);
+  const [certificates, setCertificates] = useState([]);
+  const [examResults, setExamResults] = useState({}); // courseId -> {passed, score, next_retry_date}
+  const [offers, setOffers] = useState([]);
+  const [showOfferCongrats, setShowOfferCongrats] = useState(false);
+
+  const certificateCourses = new Set(certificates.map(c => c.course_id));
+  const getCourseProgress = (course) => {
+    if (certificateCourses.has(course.course_id) || examResults[course.course_id]?.passed) return 100;
+    const raw = Number(course.progress) || 0;
+    return Math.min(Math.max(raw, 0), 100);
+  };
+
+  // Derived aggregates for cards
+  const passedExams = Math.max(
+    certificates.length,
+    courses.reduce((count, c) => count + (examResults[c.course_id]?.passed ? 1 : 0), 0)
+  );
+  const inProgressExams = Math.max(courses.length - passedExams, 0);
+  const completedCourses = courses.filter(c => c.completed || getCourseProgress(c) >= 100).length;
+  const inProgressCourses = Math.max(courses.length - completedCourses, 0);
+
+  useEffect(() => {
+    checkFirstLogin();
+    checkPremiumGift();
+    fetchData();
+    fetchOffers();
+  }, [profile]);
+
+  const fetchOffers = async () => {
+    if (!profile?.id) return;
+    // Fetch assigned offers
+    const { data: assignments } = await supabase
+      .from('offer_assignments')
+      .select('*, offers(*)')
+      .eq('user_id', profile.id);
+    const assignedOffers = (assignments || []).map(a => a.offers);
+
+    // Fetch global offers
+    const { data: globalOffers } = await supabase
+      .from('offers')
+      .select('*')
+      .eq('applies_to_all', true);
+
+    // Merge and deduplicate offers
+    const allOffers = [...assignedOffers, ...(globalOffers || [])];
+    const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex(o => o.id === offer.id) === idx);
+    setOffers(uniqueOffers);
+    if (uniqueOffers.length > 0) setShowOfferCongrats(true);
+  };
+
+  const checkFirstLogin = async () => {
+    const key = `welcomed_${profile.id}`;
+    const welcomed = localStorage.getItem(key);
+    if (!welcomed && profile.assigned_teacher_id) {
+      setShowWelcome(true);
+      localStorage.setItem(key, 'true');
+    }
+  };
+
+  const checkPremiumGift = () => {
+    if (profile.premium_until && isPremium(profile)) {
+      const premiumDate = new Date(profile.premium_until);
+      const today = new Date();
+      const daysRemaining = Math.ceil((premiumDate - today) / (1000 * 60 * 60 * 24));
+      
+      // Check if this is a new premium grant by comparing dates
+      const lastPremiumDate = localStorage.getItem(`last_premium_date_${profile.id}`);
+      const currentPremiumDate = profile.premium_until;
+      
+      if (lastPremiumDate !== currentPremiumDate) {
+        // New premium granted! Show celebration
+        setShowPremiumGift(true);
+        setPremiumDays(daysRemaining);
+        localStorage.setItem(`last_premium_date_${profile.id}`, currentPremiumDate);
+      }
+    }
+  };
+
+  const fetchData = async () => {
+    if (!profile?.id) return;
+    // Fetch enrolled courses
+    const { data: enrolled } = await supabase
+      .from('enrollments')
+      .select('*, courses(*)')
+      .eq('student_id', profile.id)
+      .limit(5);
+    setCourses(enrolled || []);
+    
+    // Fetch certificates
+    const { data: certs } = await supabase
+      .from('certificates')
+      .select('*')
+      .eq('user_id', profile.id);
+    setCertificates(certs || []);
+
+    // Fetch exam results for all courses
+    try {
+      const { data: exams } = await supabase
+        .from('exams')
+        .select('id, course_id');
+      
+      if (exams && exams.length > 0) {
+        const examsByourse = {};
+        for (const exam of exams) {
+          const { data: submissions } = await supabase
+            .from('exam_submissions')
+            .select('*')
+            .eq('exam_id', exam.id)
+            .eq('user_id', profile.id);
+          
+          if (submissions && submissions.length > 0) {
+            examsByourse[exam.course_id] = submissions[0];
+          }
+        }
+        setExamResults(examsByourse);
+      }
+    } catch (err) {
+      console.error('Error fetching exam results:', err);
+    }
+    
+    // Fetch assigned teacher
+    if(profile.assigned_teacher_id) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', profile.assigned_teacher_id)
+        .single();
+      setTeacher(data);
+    }
+  };
+
+  const getDaysUntilRetry = (nextAttemptDate) => {
+    if (!nextAttemptDate) return 0;
+    const next = new Date(nextAttemptDate);
+    const now = new Date();
+    const diff = next - now;
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Premium Gift Celebration */}
+      {showPremiumGift && (
+        <PremiumGiftCelebration 
+          premiumDays={premiumDays}
+          onClose={() => setShowPremiumGift(false)}
+        />
+      )}
+
+      {/* Discounts & Offers Section */}
+      <div className="bg-white rounded-xl shadow p-6 mb-6">
+        <h2 className="text-xl font-bold mb-4">Discounts & Offers</h2>
+        {offers.length === 0 ? (
+          <div className="text-slate-500">No active offers or coupons available.</div>
+        ) : (
+          <div className="space-y-4">
+            {offers.map(offer => (
+              <div key={offer.id} className="bg-pink-50 border border-pink-200 rounded-lg p-4 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-pink-700">{offer.title}</span>
+                  <span className="ml-2 text-xs text-slate-500">{offer.is_lifetime_free ? 'Lifetime Free' : offer.discount_type === 'percent' ? `${offer.discount_value}% Off` : `Flat ₹${offer.discount_value} Off`}</span>
+                </div>
+                <div className="text-xs text-slate-500">{offer.description}</div>
+                <button className="bg-green-500 text-white px-4 py-2 rounded font-semibold mt-2 w-max" onClick={() => window.location.href='/app/payment'}>
+                  Claim Offer
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Congratulations Banner */}
+      {showWelcome && teacher && (
+        <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-6 rounded-xl text-white relative">
+          <button 
+            onClick={() => setShowWelcome(false)}
+            className="absolute top-4 right-4 text-white/80 hover:text-white text-xl"
+          >
+            ✕
+          </button>
+          <div className="flex items-center gap-4">
+            <Award className="text-gold-300" size={48} />
+            <div>
+              <h2 className="text-2xl font-bold mb-1">🎉 Congratulations!</h2>
+              <p className="text-green-100">
+                You've been assigned to <span className="font-semibold">{teacher.full_name}</span> as your teacher! 
+                You can now chat with them and attend live classes.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome Banner */}
+      <div className="bg-gradient-to-r from-nani-dark to-nani-accent rounded-2xl p-8 text-white flex justify-between items-center shadow-lg">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Welcome back, {profile.full_name}! 👋</h1>
+          <p className="text-slate-200 opacity-90">
+            {isPremium(profile)
+              ? `You have Premium Access valid until ${format(new Date(profile.premium_until || new Date()), 'MMM dd, yyyy')}` 
+              : "Upgrade to Premium to access all courses, exams, and guidance."}
+          </p>
+          {!isPremium(profile) && (
+            <Link to="/app/payment" className="mt-4 inline-block bg-gold-500 text-white px-6 py-3 rounded-lg hover:bg-gold-600 font-semibold">
+              Get Premium (₹1999)
+            </Link>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="text-4xl font-bold">{certificates.length}</p>
+          <p className="text-slate-200">Certificates Earned</p>
+        </div>
+      </div>
+
+      {isPremium(profile) ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Course Progress with Exam Status */}
+            <div>
+               <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-slate-800">Your Courses & Exams</h2>
+                <span className="text-xs text-slate-500">{completedCourses} completed • {inProgressCourses} in progress</span>
+                  <Link to="/app/courses" className="text-nani-light text-sm hover:underline">View All</Link>
+               </div>
+               <div className="space-y-4">
+                   {courses.length > 0 ? courses.map(c => {
+                     const result = examResults[c.course_id];
+                     const daysLeft = result ? getDaysUntilRetry(result.next_attempt_allowed_at) : null;
+                     
+                     return (
+                       <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                           <div className="flex items-center justify-between">
+                               <div className="flex items-center space-x-4 flex-1">
+                                   <div className="w-12 h-12 bg-slate-200 rounded-lg flex-shrink-0"></div>
+                                   <div className="flex-1">
+                                       <h3 className="font-bold">{c.courses?.title || 'Course'}</h3>
+                                       <p className="text-xs text-slate-500">
+                                         {result?.passed ? '✓ Exam Passed' : result ? `⚠ Score: ${result.score_percent?.toFixed(1)}%` : 'Exam pending'}
+                                       </p>
+                                   </div>
+                               </div>
+                               <div className="flex items-center space-x-3">
+                                  <div className="w-24 bg-slate-200 rounded-full h-2">
+                                      <div
+                                        className="bg-gold-400 h-2 rounded-full"
+                                          style={{ width: `${getCourseProgress(c)}%` }}
+                                      ></div>
+                                  </div>
+                                  <div className="text-right min-w-max">
+                                    {result?.passed ? (
+                                      <Link to="/app/mycertificates" className="text-green-600 font-semibold text-sm hover:underline flex items-center gap-1">
+                                        <CheckCircle size={16} /> View Cert
+                                      </Link>
+                                    ) : result && daysLeft > 0 ? (
+                                      <div className="text-orange-600 font-semibold text-sm flex items-center gap-1">
+                                        <Clock size={16} /> {daysLeft}d left
+                                      </div>
+                                    ) : result && daysLeft === 0 ? (
+                                      <Link to={`/exam/${c.courses?.id}`} className="text-blue-600 font-semibold text-sm hover:underline flex items-center gap-1">
+                                        <RotateCcw size={16} /> Retry
+                                      </Link>
+                                    ) : (
+                                      <Link to={`/exam/${c.courses?.id}`} className="text-nani-accent font-semibold text-sm hover:underline">
+                                          Resume
+                                      </Link>
+                                    )}
+                                  </div>
+                               </div>
+                           </div>
+                       </div>
+                     );
+                   }) : <p>No courses started.</p>}
+               </div>
+            </div>
+          </div>
+
+          {/* Sidebar Widgets */}
+          <div className="space-y-8">
+              {/* Teacher Card */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                  <h3 className="font-bold mb-4 flex items-center gap-2">
+                      <UserBadge /> Your Mentor
+                  </h3>
+                  {teacher ? (
+                      <div className="text-center">
+                          <img src={teacher.avatar_url || "https://via.placeholder.com/60"} className="w-20 h-20 rounded-full mx-auto mb-2 object-cover" />
+                          <p className="font-bold">{teacher.full_name}</p>
+                          <p className="text-xs text-slate-500 mb-4">Senior Instructor</p>
+                          <button 
+                              onClick={() => setChatOpen(true)}
+                              className="w-full bg-nani-light text-white py-2 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-opacity-90"
+                          >
+                              <MessageCircle size={16} /> Ask a Doubt
+                          </button>
+                      </div>
+                  ) : (
+                      <div className="text-center py-4">
+                          <p className="text-sm text-slate-500 mb-2">No teacher assigned yet.</p>
+                          <button className="text-xs bg-slate-200 px-3 py-1 rounded">Request Assignment</button>
+                      </div>
+                  )}
+              </div>
+
+              {/* Exam Status Summary */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                  <h3 className="font-bold mb-4 flex items-center gap-2">
+                      <Award size={18} /> Exam Progress
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                      <span className="text-sm font-medium text-green-900">Passed</span>
+                      <span className="text-2xl font-bold text-green-600">{passedExams}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg">
+                      <span className="text-sm font-medium text-orange-900">In Progress</span>
+                      <span className="text-2xl font-bold text-orange-600">{inProgressExams}</span>
+                    </div>
+                  </div>
+              </div>
+
+              {/* Daily Schedule */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                  <h3 className="font-bold mb-4 flex items-center gap-2">
+                      <Calendar size={18} /> Today's Sessions
+                  </h3>
+                  <div className="space-y-3">
+                      <div className="p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                          <p className="font-bold text-sm">Morning Session</p>
+                          <p className="text-xs text-slate-500">09:00 AM - 10:00 AM</p>
+                          <Link to="#" className="text-blue-600 text-xs font-bold mt-1 block">Join Link</Link>
+                      </div>
+                      <div className="p-3 bg-indigo-50 rounded-lg border-l-4 border-indigo-500">
+                          <p className="font-bold text-sm">Evening Session</p>
+                          <p className="text-xs text-slate-500">05:00 PM - 06:00 PM</p>
+                          <Link to="#" className="text-indigo-600 text-xs font-bold mt-1 block">Join Link</Link>
+                      </div>
+                  </div>
+              </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm text-center">
+          <p className="text-lg font-semibold text-slate-800">Upgrade to Premium to unlock courses, progress tracking, guidance, and certificates.</p>
+          <Link to="/app/courses" className="text-nani-light font-semibold mt-3 inline-block">View course list</Link>
+        </div>
+      )}
+      
+      {/* Live Chat Drawer (Simple implementation) */}
+      {chatOpen && (
+          <div className="fixed bottom-0 right-4 w-80 bg-white shadow-2xl rounded-t-xl border border-slate-200 z-50 h-96 flex flex-col">
+              <div className="p-3 bg-nani-dark text-white rounded-t-xl flex justify-between">
+                  <span className="font-bold">Chat with {teacher?.full_name}</span>
+                  <button onClick={() => setChatOpen(false)}>✕</button>
+              </div>
+              <div className="flex-1 p-4 overflow-y-auto bg-slate-50">
+                  <div className="text-center text-xs text-slate-400 my-2">Today</div>
+                  <div className="bg-blue-100 p-2 rounded-lg rounded-tl-none max-w-[80%] mb-2 text-sm">Hello! How can I help you today?</div>
+              </div>
+              <div className="p-2 border-t flex">
+                  <input className="flex-1 border rounded px-2 text-sm" placeholder="Type a message..." />
+                  <button className="ml-2 p-2 text-blue-600">➤</button>
+              </div>
+          </div>
+      )}
+    </div>
+  );
+};
+
+const UserBadge = () => <div className="w-4 h-4 bg-gold-400 rounded-full inline-block"></div>;
+
+export default StudentDashboard;

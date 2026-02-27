@@ -1,0 +1,298 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
+import { Award, Users, Calendar, Search } from 'lucide-react';
+import AlertModal from '../components/AlertModal';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+const ManagePremium = () => {
+  const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [validUntil, setValidUntil] = useState('');
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
+  const [userToRevoke, setUserToRevoke] = useState(null);
+  const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'student')
+      .order('full_name');
+    setUsers(data || []);
+  };
+
+  const grantPremium = async () => {
+    if (!selectedUser || !validUntil) {
+      setAlertModal({
+        show: true,
+        title: 'Missing Information',
+        message: 'Please select a user and set a valid date',
+        type: 'warning'
+      });
+      return;
+    }
+    setShowModal(true);
+  };
+
+  const confirmGrant = async () => {
+    setLoading(true);
+
+    await supabase.from('profiles').update({
+      premium_until: validUntil
+    }).eq('id', selectedUser.id);
+
+    await supabase.from('premium_grants').insert({
+      user_id: selectedUser.id,
+      granted_by: (await supabase.auth.getUser()).data.user.id,
+      valid_until: validUntil,
+      reason
+    });
+
+    // Show success alert
+    setShowModal(false);
+    setAlertModal({
+      show: true,
+      title: 'Success',
+      message: '✅ Premium access granted successfully!',
+      type: 'success'
+    });
+    setSelectedUser(null);
+    setValidUntil('');
+    setReason('');
+    loadUsers();
+    setLoading(false);
+  };
+
+  const revokePremium = async (userId) => {
+    const user = users.find(u => u.id === userId);
+    setUserToRevoke(user);
+    setShowRevokeModal(true);
+  };
+
+  const confirmRevoke = async () => {
+    if (!userToRevoke) return;
+    await supabase.from('profiles').update({ premium_until: null }).eq('id', userToRevoke.id);
+    setShowRevokeModal(false);
+    setUserToRevoke(null);
+    setAlertModal({
+      show: true,
+      title: 'Success',
+      message: '✅ Premium access revoked successfully!',
+      type: 'success'
+    });
+    loadUsers();
+  };
+
+  const filtered = users.filter(u =>
+    u.full_name.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Manage Premium Access</h1>
+        <p className="text-slate-500">Grant or revoke premium subscriptions</p>
+      </div>
+
+      <div className="bg-white rounded-xl p-6 border">
+        <h2 className="text-lg font-bold mb-4">Grant Premium</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Select Student</label>
+            <select 
+              className="w-full border rounded-lg p-2"
+              onChange={e => setSelectedUser(users.find(u => u.id === e.target.value))}
+              value={selectedUser?.id || ''}
+            >
+              <option value="">Choose student...</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Valid Until</label>
+            <input 
+              type="date"
+              value={validUntil}
+              onChange={e => setValidUntil(e.target.value)}
+              className="w-full border rounded-lg p-2"
+            />
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-2">Reason (optional)</label>
+          <textarea 
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="Why granting premium..."
+            className="w-full border rounded-lg p-2"
+            rows={2}
+          />
+        </div>
+        <button 
+          onClick={grantPremium}
+          disabled={loading}
+          className="bg-gold-600 text-white px-6 py-2 rounded-lg hover:bg-gold-700 disabled:opacity-50"
+        >
+          {loading ? 'Granting...' : 'Grant Premium'}
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">Premium Users</h2>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-10 pr-4 py-2 border rounded-lg"
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          {filtered.map(user => {
+            const isPremium = user.premium_until && new Date(user.premium_until) > new Date();
+            return (
+              <div key={user.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center gap-3">
+                  <img 
+                    src={user.avatar_url || 'https://via.placeholder.com/40'} 
+                    alt={user.full_name}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                  <div>
+                    <p className="font-semibold">{user.full_name}</p>
+                    <p className="text-xs text-slate-500">{user.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {isPremium ? (
+                    <>
+                      <span className="text-xs bg-gold-100 text-gold-800 px-3 py-1 rounded-full">
+                        Premium until {new Date(user.premium_until).toLocaleDateString()}
+                      </span>
+                      <button 
+                        onClick={() => revokePremium(user.id)}
+                        className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-lg hover:bg-red-200"
+                      >
+                        Revoke
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full">
+                      Free Plan
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Confirmation Modal */}
+      {showModal && selectedUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold mb-4">Confirm Premium Grant</h2>
+            
+            <div className="mb-4 p-3 bg-slate-100 rounded">
+              <p className="text-sm">
+                <strong>Student:</strong> {selectedUser.full_name}
+              </p>
+              <p className="text-sm text-slate-600">{selectedUser.email}</p>
+            </div>
+
+            <div className="mb-4 p-3 bg-gold-50 rounded">
+              <p className="text-sm">
+                <strong>Valid Until:</strong> {new Date(validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
+              {reason && (
+                <p className="text-sm mt-2">
+                  <strong>Reason:</strong> {reason}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowModal(false)}
+                className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmGrant}
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-gold-600 text-white rounded-lg hover:bg-gold-700 disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : 'Confirm Grant'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revoke Confirmation Modal */}
+      {showRevokeModal && userToRevoke && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold mb-4">Revoke Premium Access</h2>
+            
+            <div className="mb-4 p-3 bg-slate-100 rounded">
+              <p className="text-sm">
+                <strong>Student:</strong> {userToRevoke.full_name}
+              </p>
+              <p className="text-sm text-slate-600">{userToRevoke.email}</p>
+            </div>
+
+            <div className="mb-4 p-3 bg-red-50 rounded text-sm text-red-800">
+              <p>This will immediately revoke premium access for this user.</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowRevokeModal(false);
+                  setUserToRevoke(null);
+                }}
+                className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRevoke}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Revoke Premium
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AlertModal
+        show={alertModal.show}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
+      />
+    </div>
+  );
+};
+
+export default ManagePremium;

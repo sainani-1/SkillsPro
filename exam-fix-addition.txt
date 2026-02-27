@@ -1,0 +1,26 @@
+Add this code block right after the "if (isBlocked)" section and before "// Exam already passed":
+
+  // User locked from retaking exam (failed before)
+  if (examStatus === 'locked') {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-orange-50">
+        <div className="max-w-md text-center space-y-6 p-8 bg-white rounded-2xl shadow-lg border border-red-200">
+          <div className="w-16 h-16 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+            <Clock size={32} className="text-red-600" />
+          </div>
+          <h1 className="text-3xl font-bold text-red-700">Exam Locked</h1>
+          <div className="text-slate-600">
+            <p className="mb-2">This exam is locked for the next:</p>
+            <p className="text-4xl font-bold text-red-600 mb-2">{daysLeft} day{daysLeft > 1 ? 's' : ''}</p>
+            <p className="text-sm text-slate-500">You can retake after the lock period expires.</p>
+          </div>
+          <button 
+            onClick={() => navigate('/app/courses')}
+            className="w-full bg-slate-200 text-slate-700 py-3 rounded-lg hover:bg-slate-300 font-semibold"
+          >
+            Back to Courses
+          </button>
+        </div>
+      </div>
+    );
+  }

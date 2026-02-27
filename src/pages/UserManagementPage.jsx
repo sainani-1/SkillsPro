@@ -1,0 +1,446 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { Plus, Users, X } from 'lucide-react';
+
+const UserManagementPage = () => {
+    const [users, setUsers] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [roleFilter, setRoleFilter] = useState('all');
+    const [showAddUserModal, setShowAddUserModal] = useState(false);
+    const [changingRole, setChangingRole] = useState(null);
+
+    useEffect(() => { loadUsers(); }, []);
+
+    const loadUsers = async () => {
+        setLoading(true);
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject')
+          .order('full_name');
+        setUsers(data || []);
+        setLoading(false);
+    };
+
+    const filtered = users.filter(u => {
+      const matchesSearch = u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+                           u.email?.toLowerCase().includes(search.toLowerCase());
+      const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+      return matchesSearch && matchesRole;
+    });
+
+    const changeUserRole = async (userId, newRole) => {
+      if (changingRole) return;
+      
+      setChangingRole(userId);
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ role: newRole, updated_at: new Date().toISOString() })
+          .eq('id', userId);
+        
+        if (error) throw error;
+        
+        // Refresh users list
+        loadUsers();
+      } catch (error) {
+        alert('Error changing role: ' + error.message);
+      } finally {
+        setChangingRole(null);
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 rounded-xl text-white">
+          <h1 className="text-2xl font-bold mb-1">User Management</h1>
+          <p className="text-blue-100">Students, teachers, and admins with status, premium, and lock info.</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm space-y-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-2 flex-wrap items-center justify-between">
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setRoleFilter('all')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    roleFilter === 'all' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  All Users ({users.length})
+                </button>
+                <button
+                  onClick={() => setRoleFilter('student')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    roleFilter === 'student' 
+                      ? 'bg-green-600 text-white' 
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Students ({users.filter(u => u.role === 'student').length})
+                </button>
+                <button
+                  onClick={() => setRoleFilter('teacher')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    roleFilter === 'teacher' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Teachers ({users.filter(u => u.role === 'teacher').length})
+                </button>
+                <button
+                  onClick={() => setRoleFilter('admin')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    roleFilter === 'admin' 
+                      ? 'bg-red-600 text-white' 
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Admins ({users.filter(u => u.role === 'admin').length})
+                </button>
+              </div>
+              <button
+                onClick={() => setShowAddUserModal(true)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Add User Directly
+              </button>
+            </div>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by name or email"
+              className="px-3 py-2 border rounded-lg w-full md:w-64"
+            />
+          </div>
+        </div>
+
+        {showAddUserModal && (
+          <AddUserModal 
+            onClose={() => setShowAddUserModal(false)} 
+            onSuccess={() => {
+              setShowAddUserModal(false);
+              loadUsers();
+            }}
+          />
+        )}
+
+        <AddTeacherForm />
+
+        <div className="border border-slate-200 rounded-xl overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Email</th>
+                <th className="px-4 py-3 text-left">Role</th>
+                <th className="px-4 py-3 text-left">Phone</th>
+                <th className="px-4 py-3 text-left">Subject</th>
+                <th className="px-4 py-3 text-left">Premium</th>
+                <th className="px-4 py-3 text-left">Lock</th>
+                <th className="px-4 py-3 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={8} className="px-4 py-6 text-center"><LoadingSpinner fullPage={false} message="Loading users..." /></td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-500">No users found</td></tr>
+              ) : (
+                filtered.map(u => {
+                  const premiumActive = u.premium_until && new Date(u.premium_until) > new Date();
+                  return (
+                    <tr key={u.id} className="border-t">
+                      <td className="px-4 py-3 flex items-center gap-2">
+                        <img
+                          src={u.avatar_url || 'https://via.placeholder.com/32'}
+                          alt={u.full_name}
+                          className="w-8 h-8 rounded-full object-cover"
+                          onError={e => { e.currentTarget.src = 'https://via.placeholder.com/32'; }}
+                        />
+                        <span className="font-semibold text-slate-800">{u.full_name}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{u.email}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          u.role === 'admin' ? 'bg-red-100 text-red-700' :
+                          u.role === 'teacher' ? 'bg-blue-100 text-blue-700' :
+                          'bg-green-100 text-green-700'
+                        }`}>
+                          {u.role === 'admin' ? 'Nani' : u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{u.phone || '—'}</td>
+                      <td className="px-4 py-3 text-slate-600">{u.core_subject || '—'}</td>
+                      <td className="px-4 py-3">
+                        {premiumActive ? (
+                          <span className="text-xs text-gold-600 font-semibold">Until {new Date(u.premium_until).toLocaleDateString()}</span>
+                        ) : (
+                          <span className="text-xs text-slate-500">No</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {u.is_locked ? (
+                          <span className="text-xs text-red-600 font-semibold">Locked{u.locked_until ? ` until ${new Date(u.locked_until).toLocaleDateString()}` : ''}</span>
+                        ) : (
+                          <span className="text-xs text-green-600 font-semibold">Active</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={u.role}
+                          onChange={(e) => changeUserRole(u.id, e.target.value)}
+                          disabled={changingRole === u.id}
+                          className="px-2 py-1 border rounded text-xs font-medium disabled:opacity-50"
+                        >
+                          <option value="student">Student</option>
+                          <option value="teacher">Teacher</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+};
+
+const AddUserModal = ({ onClose, onSuccess }) => {
+    const [form, setForm] = useState({
+        email: '',
+        fullName: '',
+        phone: '',
+        role: 'student',
+        coreSubject: 'Computer Science'
+    });
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState({ text: '', type: '' });
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setMessage({ text: '', type: '' });
+
+        if (!form.email.trim() || !form.fullName.trim() || !form.phone.trim()) {
+            setMessage({ text: 'Please fill all required fields', type: 'error' });
+            return;
+        }
+
+        setLoading(true);
+        try {
+            // Generate a simple temporary ID (in real app, you might use UUID)
+            const tempId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            // Insert user directly into profiles table
+            const { error } = await supabase
+                .from('profiles')
+                .insert([{
+                    email: form.email.trim(),
+                    full_name: form.fullName.trim(),
+                    phone: form.phone.trim(),
+                    role: form.role,
+                    core_subject: form.role === 'teacher' ? form.coreSubject : null,
+                    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80'
+                }]);
+
+            if (error) throw error;
+
+            setMessage({ text: '✓ User added successfully!', type: 'success' });
+            setTimeout(() => {
+                setForm({ email: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });
+                onSuccess();
+            }, 1500);
+        } catch (error) {
+            setMessage({ text: error.message, type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+                <div className="flex items-center justify-between p-4 border-b">
+                    <h2 className="text-lg font-bold">Add User Directly</h2>
+                    <button
+                        onClick={onClose}
+                        className="text-slate-500 hover:text-slate-700 transition-colors"
+                    >
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Email *</label>
+                        <input
+                            type="email"
+                            value={form.email}
+                            onChange={e => setForm({ ...form, email: e.target.value })}
+                            placeholder="user@example.com"
+                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name *</label>
+                        <input
+                            type="text"
+                            value={form.fullName}
+                            onChange={e => setForm({ ...form, fullName: e.target.value })}
+                            placeholder="John Doe"
+                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Phone *</label>
+                        <input
+                            type="tel"
+                            value={form.phone}
+                            onChange={e => setForm({ ...form, phone: e.target.value })}
+                            placeholder="+1234567890"
+                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Role *</label>
+                        <select
+                            value={form.role}
+                            onChange={e => setForm({ ...form, role: e.target.value })}
+                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="student">Student</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+
+                    {form.role === 'teacher' && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Core Subject</label>
+                            <select
+                                value={form.coreSubject}
+                                onChange={e => setForm({ ...form, coreSubject: e.target.value })}
+                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option>Computer Science</option>
+                                <option>Information Technology</option>
+                                <option>Electronics</option>
+                                <option>Mechanical</option>
+                                <option>Civil</option>
+                                <option>Business</option>
+                                <option>Design</option>
+                            </select>
+                        </div>
+                    )}
+
+                    {message.text && (
+                        <div className={`px-3 py-2 rounded-lg text-sm ${
+                            message.type === 'error' 
+                                ? 'bg-red-100 text-red-700' 
+                                : 'bg-green-100 text-green-700'
+                        }`}>
+                            {message.text}
+                        </div>
+                    )}
+
+                    <div className="flex gap-2 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-60"
+                        >
+                            {loading ? 'Adding...' : 'Add User'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+const AddTeacherForm = () => {
+    const [form, setForm] = useState({ email: '', password: '', fullName: '', coreSubject: 'Computer Science' });
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState('');
+    const endpoint = import.meta.env.VITE_ADMIN_CREATE_TEACHER_ENDPOINT || '/api/admin/create-teacher';
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setMessage('');
+        setLoading(true);
+        try {
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: form.email,
+                    password: form.password,
+                    full_name: form.fullName,
+                    core_subject: form.coreSubject,
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(err || 'Failed to create teacher');
+            }
+
+            setMessage('Teacher created. Refresh the list after your backend updates profiles.');
+            setForm({ email: '', password: '', fullName: '', coreSubject: 'Computer Science' });
+        } catch (error) {
+            setMessage(error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-slate-200 rounded-xl p-4">
+            <div className="col-span-full flex items-center gap-2 text-sm text-slate-500">
+                <Plus size={14} />
+                <span>Calls {endpoint}. Replace with your secured admin endpoint that uses the Supabase service role.</span>
+            </div>
+            <input className="p-3 border rounded-lg" placeholder="Teacher email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+            <input className="p-3 border rounded-lg" placeholder="Temp password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required />
+            <input className="p-3 border rounded-lg" placeholder="Full name" value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} required />
+            <select className="p-3 border rounded-lg" value={form.coreSubject} onChange={e => setForm({ ...form, coreSubject: e.target.value })}>
+                <option>Computer Science</option>
+                <option>Information Technology</option>
+                <option>Electronics</option>
+                <option>Mechanical</option>
+                <option>Civil</option>
+                <option>Business</option>
+                <option>Design</option>
+            </select>
+            <div className="col-span-full flex items-center gap-3">
+                <button disabled={loading} className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors disabled:opacity-60">
+                    {loading ? 'Creating...' : 'Create Teacher'}
+                </button>
+                {message && <span className="text-xs text-slate-600">{message}</span>}
+            </div>
+        </form>
+    );
+};
+
+export default UserManagementPage;
