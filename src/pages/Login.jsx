@@ -2,15 +2,19 @@ import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
+import Toast from '../components/Toast';
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setLoggingIn(true);
     try {
       // First, sign in
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
@@ -21,6 +25,7 @@ const Login = () => {
           message: signInError.message,
           type: 'error'
         });
+        setLoggingIn(false);
         return;
       }
 
@@ -30,7 +35,10 @@ const Login = () => {
         .select('id, role, is_disabled')
         .eq('id', signInData.user.id)
         .single();
-      if (profileError) throw profileError;
+      if (profileError) {
+        setLoggingIn(false);
+        throw profileError;
+      }
 
       // Check if account is disabled
       if (userProfile.is_disabled) {
@@ -41,6 +49,7 @@ const Login = () => {
           message: 'Your account has been disabled by an administrator. Please contact support.',
           type: 'error'
         });
+        setLoggingIn(false);
         return;
       }
 
@@ -48,17 +57,25 @@ const Login = () => {
       if (userProfile.role === 'admin') {
         // Check if MFA is enabled for admin
         const { data: factors, error: mfaError } = await supabase.auth.mfa.listFactors();
-        if (mfaError) throw mfaError;
+        if (mfaError) {
+          setLoggingIn(false);
+          throw mfaError;
+        }
         const hasMFA = factors?.totp && factors.totp.length > 0;
         if (!hasMFA) {
+          setLoggingIn(false);
           navigate('/admin-mfa-setup');
           return;
         }
+        setLoggingIn(false);
+        setToast({ show: true, message: 'Logged in successfully!', type: 'success' });
         navigate('/admin-mfa-verify');
         return;
       }
 
       // Account is active, proceed to app
+      setLoggingIn(false);
+      setToast({ show: true, message: 'Logged in successfully!', type: 'success' });
       navigate('/app');
     } catch (error) {
       console.error('Error during login:', error);
@@ -68,12 +85,19 @@ const Login = () => {
         message: 'Failed to login. Please try again.',
         type: 'error'
       });
+      setLoggingIn(false);
       await supabase.auth.signOut();
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100">
+      <Toast
+        show={toast.show}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast({ show: false, message: '', type: 'success' })}
+      />
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
         <AlertModal
@@ -100,7 +124,9 @@ const Login = () => {
             onChange={e => setPassword(e.target.value)}
             required
           />
-          <button type="submit" className="w-full btn-gold py-3">Sign In</button>
+          <button type="submit" className="w-full btn-gold py-3" disabled={loggingIn}>
+            {loggingIn ? 'Logging in...' : 'Sign In'}
+          </button>
         </form>
         <p className="text-center mt-6 text-sm">
           New here? <Link to="/register" className="text-blue-600 font-bold">Create Account</Link>

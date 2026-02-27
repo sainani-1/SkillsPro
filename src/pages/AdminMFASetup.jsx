@@ -6,15 +6,6 @@ export default function AdminMFASetup() {
 
   const navigate = useNavigate();
 
-  const MFA_NAMES = [
-    "SkillPro",
-    "StepWithNani",
-    "SP Admin",
-    "SWN Admin",
-    "Nani"
-  ];
-
-  const [availableNames, setAvailableNames] = useState([]);
   const [selectedName, setSelectedName] = useState("");
   const [qr, setQr] = useState(null);
   const [factorId, setFactorId] = useState(null);
@@ -29,19 +20,8 @@ export default function AdminMFASetup() {
   }, []);
 
   const loadAvailableNames = async () => {
-
-    const { data } =
-      await supabase.auth.mfa.listFactors();
-
-    const usedNames =
-      data.totp.map(f => f.friendly_name);
-
-    const remaining =
-      MFA_NAMES.filter(
-        n => !usedNames.includes(n)
-      );
-
-    setAvailableNames(remaining);
+    // No need to restrict available names, allow custom input
+    // Optionally, you can fetch existing factors for display if needed
   };
 
   /* =====================
@@ -109,24 +89,12 @@ export default function AdminMFASetup() {
 
         {!qr && (
           <>
-            <select
+            <input
               className="border p-3 w-full mb-4"
+              placeholder="Enter MFA Name"
               value={selectedName}
-              onChange={(e) =>
-                setSelectedName(e.target.value)
-              }
-            >
-              <option value="">
-                Select MFA Name
-              </option>
-
-              {availableNames.map(name => (
-                <option key={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-
+              onChange={e => setSelectedName(e.target.value)}
+            />
             <button
               onClick={enrollMFA}
               className="bg-black text-white w-full py-2"
