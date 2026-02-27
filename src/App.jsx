@@ -1,5 +1,8 @@
 import AdminExamSettings from './pages/AdminExamSettings';
+import AdminContestSetup from './logicBuilding/AdminContestSetup';
+import LogicBuildingContest from './logicBuilding/LogicBuildingContest';
 import AdminChangeCourse from './pages/AdminChangeCourse';
+import AdminScoreboard from './logicBuilding/AdminScoreboard';
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
@@ -126,6 +129,8 @@ function App() {
 
         {/* Protected Routes */}
         <Route path="/app" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+                              <Route path="admin/logic-building-setup" element={<AdminRoute><AdminContestSetup /></AdminRoute>} />
+                    <Route path="logic-building-contest" element={<LogicBuildingContest />} />
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
           <Route index element={<Dashboard />} />
           <Route path="courses" element={<CourseList />} />
@@ -175,6 +180,7 @@ function App() {
           <Route path="admin/send-gift" element={<AdminRoute><AdminSendGift /></AdminRoute>} />
           <Route path="admin/active-coupons" element={<AdminRoute><AdminActiveCoupons /></AdminRoute>} />
           <Route path="admin/change-course" element={<AdminRoute><AdminChangeCourse /></AdminRoute>} />
+          <Route path="admin/logic-building-admin-scoreboard" element={<AdminRoute><AdminScoreboard /></AdminRoute>} />
         </Route>
 
         {/* Exam is outside layout for fullscreen enforcement */}

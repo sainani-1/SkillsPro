@@ -357,6 +357,16 @@ const Sidebar = () => {
           <LayoutDashboard size={28} />
           {shouldShowText && <span>Dashboard</span>}
         </NavLink>
+        <NavLink to="/app/logic-building-contest" className={navItemClass} title="Logic Building Contest">
+          <Sparkles size={28} />
+          {shouldShowText && <span>Logic Building</span>}
+        </NavLink>
+        {role === 'admin' && (
+          <NavLink to="/app/admin/logic-building-admin-scoreboard" className={navItemClass} title="Logic Building Admin Scoreboard">
+            <Award size={28} />
+            {shouldShowText && <span>Admin Scoreboard</span>}
+          </NavLink>
+        )}
 
         <NavLink to="/app/courses" className={navItemClass} title="Courses">
           <BookOpen size={28} />
@@ -496,6 +506,10 @@ const Sidebar = () => {
         {/* Admin Specific */}
         {role === 'admin' && (
           <>
+            <NavLink to="/app/admin/logic-building-setup" className={navItemClass} title="Logic Building Setup">
+              <Sparkles size={28} />
+              {shouldShowText && <span>Logic Building Setup</span>}
+            </NavLink>
             <NavLink to="/app/admin/change-course" className={navItemClass} title="Change Course">
               <BookOpen size={28} />
               {shouldShowText && <span>Change Course</span>}
