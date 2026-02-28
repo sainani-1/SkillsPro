@@ -18,11 +18,11 @@ const Login = () => {
     try {
       // First, sign in
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) {
+      if (signInError || !signInData?.user) {
         setAlertModal({
           show: true,
           title: 'Login Error',
-          message: signInError.message,
+          message: signInError ? signInError.message : 'No user returned from sign in. Please try again.',
           type: 'error'
         });
         setLoggingIn(false);
@@ -35,9 +35,18 @@ const Login = () => {
         .select('id, role, is_disabled')
         .eq('id', signInData.user.id)
         .single();
-      if (profileError) {
+
+      if (profileError || !userProfile) {
+        // Optionally, create profile if missing
+        // await supabase.from('profiles').insert({ id: signInData.user.id, role: 'student', is_disabled: false });
+        setAlertModal({
+          show: true,
+          title: 'Profile Error',
+          message: 'User profile not found or could not be loaded. Please contact support or try again.',
+          type: 'error'
+        });
         setLoggingIn(false);
-        throw profileError;
+        return;
       }
 
       // Check if account is disabled
@@ -58,8 +67,14 @@ const Login = () => {
         // Check if MFA is enabled for admin
         const { data: factors, error: mfaError } = await supabase.auth.mfa.listFactors();
         if (mfaError) {
+          setAlertModal({
+            show: true,
+            title: 'MFA Error',
+            message: 'Could not check MFA status. Please contact support.',
+            type: 'error'
+          });
           setLoggingIn(false);
-          throw mfaError;
+          return;
         }
         const hasMFA = factors?.totp && factors.totp.length > 0;
         if (!hasMFA) {

@@ -341,6 +341,17 @@ FULLSCREEN
   /* ======================
 EXAM UI
 ====================== */
+  // Track submission state
+  const [submitted, setSubmitted] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const handleSubmitExam = async () => {
+    if (submitted) return;
+    setSubmitted(true);
+    await submitExam();
+    setSubmitSuccess(true);
+  };
+
   return (
     <div ref={containerRef} className="relative p-6 min-h-screen bg-white">
       {/* Timer and video top-right */}
@@ -362,8 +373,9 @@ EXAM UI
                   <input
                     type="radio"
                     name={`q_${q.id}`}
-                    onChange={() => setAnswers(a => ({ ...a, [q.id]: o }))}
+                    onChange={() => !submitted && setAnswers(a => ({ ...a, [q.id]: o }))}
                     checked={answers[q.id] === o}
+                    disabled={submitted}
                   />
                   <span className="ml-2">{o}</span>
                 </label>
@@ -371,16 +383,23 @@ EXAM UI
             {q.type === "written" &&
               <textarea
                 className="border w-full"
-                onChange={e => setAnswers(a => ({ ...a, [q.id]: e.target.value }))}
+                onChange={e => !submitted && setAnswers(a => ({ ...a, [q.id]: e.target.value }))}
                 value={answers[q.id] || ""}
+                disabled={submitted}
               />}
           </div>
         ))}
-        <button
-          onClick={submitExam}
-          className="bg-green-600 text-white px-6 py-2">
-          Submit
-        </button>
+        {!submitSuccess ? (
+          <button
+            onClick={handleSubmitExam}
+            className="bg-green-600 text-white px-6 py-2"
+            disabled={submitted}
+          >
+            {submitted ? "Submitting..." : "Submit"}
+          </button>
+        ) : (
+          <div className="text-green-600 font-bold text-xl mt-4">Done</div>
+        )}
       </div>
     </div>
   );

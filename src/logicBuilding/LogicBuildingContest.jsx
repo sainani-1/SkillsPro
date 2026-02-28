@@ -1,14 +1,38 @@
+
 // Contest participation UI for students/teachers
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from './firebase';
 import { collection, doc, getDoc, setDoc, getDocs, updateDoc, increment } from 'firebase/firestore';
-import { useEffect } from 'react';
 import { isContestActive, getContestQuestions } from './contestModel';
 import { weeklyContest } from './contestModel';
 import { runCode } from './codeRunner';
+import Toast from '../components/Toast';
 
 export default function LogicBuildingContest() {
+        // State for inline while loop suggestion
+        const [showWhileSuggestion, setShowWhileSuggestion] = useState(false);
+      // Toast state for error messages
+      const [toast, setToast] = useState({ show: false, message: '', type: 'error' });
+    // Prevent copy/paste in code editor
+    useEffect(() => {
+      const blockCopyPaste = e => {
+        if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') {
+            e.preventDefault();
+            setToast({ show: true, message: 'Copy/Paste is not allowed!', type: 'error' });
+        }
+      };
+      document.addEventListener('copy', blockCopyPaste);
+      document.addEventListener('paste', blockCopyPaste);
+      document.addEventListener('cut', blockCopyPaste);
+      return () => {
+        document.removeEventListener('copy', blockCopyPaste);
+        document.removeEventListener('paste', blockCopyPaste);
+        document.removeEventListener('cut', blockCopyPaste);
+      };
+    }, []);
+  const [done, setDone] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
   const { profile, isPremium, loading } = useAuth();
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [code, setCode] = useState('');
@@ -18,6 +42,23 @@ export default function LogicBuildingContest() {
   const [contestActive, setContestActive] = useState(false);
   const [scoreMsg, setScoreMsg] = useState('');
   const [scoreboard, setScoreboard] = useState([]);
+
+  // Check if already solved when question changes
+  useEffect(() => {
+    async function checkDone() {
+      if (!selectedQuestion) return setDone(false);
+      let username = localStorage.getItem('logicbuilding_username');
+      if (!username) return setDone(false);
+      const userRef = doc(db, 'logicBuildingScores', username);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().solved && userSnap.data().solved[selectedQuestion.title]) {
+        setDone(true);
+      } else {
+        setDone(false);
+      }
+    }
+    checkDone();
+  }, [selectedQuestion]);
 
   React.useEffect(() => {
     async function checkActive() {
@@ -36,10 +77,18 @@ export default function LogicBuildingContest() {
   }, []);
 
   async function handleRun() {
-    if (!selectedQuestion) return;
+    if (!selectedQuestion || done) return;
     setScoreMsg('');
-    const res = await runCode(language, code, selectedQuestion.testCases);
-    setResults(res);
+      setToast({ show: false, message: '', type: 'error' });
+      setIsRunning(true); // Show running indicator
+      const res = await runCode(language, code, selectedQuestion.testCases);
+      setResults(res);
+      setIsRunning(false); // Hide running indicator
+      // Show error as toast if any test case has status 'Error'
+      if (res.some(r => r.status === 'Error')) {
+        setToast({ show: true, message: 'Code error detected! Please fix your code.', type: 'error' });
+      return;
+    }
     // Check if all test cases passed
     const allPassed = res.every(r => r.status && r.status.toLowerCase().includes('accepted'));
     if (allPassed) {
@@ -47,7 +96,6 @@ export default function LogicBuildingContest() {
       const points = Math.floor(Math.random() * 5) + 16;
       setScoreMsg(`Congratulations! All test cases passed. You earned ${points} points for this question.`);
       // Save/update score in Firestore (by user/question)
-      // For demo, use localStorage for username
       let username = localStorage.getItem('logicbuilding_username');
       if (!username) {
         username = prompt('Enter your name for the scoreboard:');
@@ -56,9 +104,46 @@ export default function LogicBuildingContest() {
       const userRef = doc(db, 'logicBuildingScores', username);
       const userSnap = await getDoc(userRef);
       let prevScore = 0;
-      if (userSnap.exists()) prevScore = userSnap.data().score || 0;
-      await setDoc(userRef, { name: username, score: prevScore + points }, { merge: true });
+      let solved = {};
+      if (userSnap.exists()) {
+        prevScore = userSnap.data().score || 0;
+        solved = userSnap.data().solved || {};
+      }
+      solved[selectedQuestion.title] = true;
+      await setDoc(userRef, { name: username, score: prevScore + points, solved, code }, { merge: true });
+      setDone(true);
       fetchScoreboard();
+
+      // Plagiarism check and penalty
+      // Fetch all submissions for this question
+      const snap = await getDocs(collection(db, 'logicBuildingScores'));
+      const submissions = [];
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (data.solved && data.solved[selectedQuestion.title] && data.code) {
+          submissions.push({ user: data.name, code: data.code, score: data.score });
+        }
+      });
+      // Compare codes for similarity
+      for (let i = 0; i < submissions.length; i++) {
+        for (let j = i + 1; j < submissions.length; j++) {
+          if (submissions[i].user !== submissions[j].user) {
+            // Use simple string comparison for now
+            const sim = submissions[i].code.trim() === submissions[j].code.trim();
+            if (sim) {
+              // Penalize both
+              let penaltyMsg = 'Copied code detected! Points reduced by 200.';
+              let newScoreI = submissions[i].score < 200 ? 0 : submissions[i].score - 200;
+              let newScoreJ = submissions[j].score < 200 ? 0 : submissions[j].score - 200;
+              const userRefI = doc(db, 'logicBuildingScores', submissions[i].user);
+              const userRefJ = doc(db, 'logicBuildingScores', submissions[j].user);
+              await setDoc(userRefI, { score: newScoreI }, { merge: true });
+              await setDoc(userRefJ, { score: newScoreJ }, { merge: true });
+              setScoreMsg(penaltyMsg);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -164,7 +249,66 @@ export default function LogicBuildingContest() {
         <div style={{ background: '#fff', borderRadius: '1.2rem', boxShadow: '0 2px 8px rgba(99,102,241,0.08)', padding: '2rem', marginBottom: '2rem' }}>
           <h3 style={{ fontSize: '1.5rem', color: '#6366f1', marginBottom: '1rem' }}>{selectedQuestion.title}</h3>
           <p style={{ fontSize: '1.1rem', color: '#334155', marginBottom: '1.5rem' }}>{selectedQuestion.description}</p>
-          <textarea value={code} onChange={e => setCode(e.target.value)} placeholder="Write your code here..." style={{ width: '100%', minHeight: '120px', fontSize: '1.1rem', borderRadius: '0.7rem', border: '1px solid #cbd5e1', padding: '1rem', marginBottom: '1rem', background: '#f3f4f6' }} />
+                    {/* Inline suggestion hint below editor */}
+                    <div style={{ marginBottom: '0.7rem', color: '#64748b', fontSize: '1rem' }}>
+                      Type <b>c!</b> for C structure, <b>cpp!</b> for C++ structure, <b>java!</b> for Java structure, <b>python!</b> for Python structure.<br />
+                      Type <b>while</b> to get a while loop suggestion.
+                    </div>
+                    <div style={{ display: 'flex', width: '100%', marginBottom: '1rem', borderRadius: '0.7rem', border: '1px solid #cbd5e1', background: '#f3f4f6', overflow: 'hidden', minHeight: '120px' }}>
+                      <div style={{ background: '#e0e7ff', color: '#6366f1', textAlign: 'right', padding: '1rem 0.5rem', fontSize: '1.1rem', minWidth: '2.5rem', userSelect: 'none', lineHeight: '1.6', borderRight: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        {Array.from({ length: Math.max(1, code.split('\n').length) }, (_, i) => (
+                          <span key={i}>{i + 1}</span>
+                        ))}
+                      </div>
+                      <textarea
+                        id="code-editor"
+                        value={code}
+                        onChange={e => {
+                          if (done) return;
+                          let val = e.target.value;
+                          // Auto-insert structure on language trigger
+                          let structureInserted = false;
+                          if (/^c!$/m.test(val.trim())) {
+                            val = '#include <stdio.h>\n#include <string.h>\nint main() {\n// Sample Code Auto Generated By SkillPro\n\nreturn 0;\n}';
+                            structureInserted = true;
+                          } else if (/^cpp!$/m.test(val.trim())) {
+                            val = '#include <iostream>\nusing namespace std;\nint main() {\n// Sample Code Auto Generated By SkillPro\n\nreturn 0;\n}';
+                            structureInserted = true;
+                          } else if (/^java!$/m.test(val.trim())) {
+                            val = 'public class Main {\n    public static void main(String[] args) {\n        // Sample Code Auto Generated By SkillPro\n    }\n}';
+                            structureInserted = true;
+                          } else if (/^python!$/m.test(val.trim())) {
+                            val = '# Sample Code Auto Generated By SkillPro\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()';
+                            structureInserted = true;
+                          }
+                          setCode(val);
+                          // Show while loop suggestion if typing 'while'
+                          setShowWhileSuggestion(/\bwhile\b/.test(val));
+                        }}
+                        placeholder="Write your code here..."
+                        style={{ flex: 1, minHeight: '120px', fontSize: '1.1rem', border: 'none', padding: '1rem', background: 'transparent', resize: 'vertical', lineHeight: '1.6', outline: 'none' }}
+                        disabled={done}
+                      />
+                      {/* Inline while loop suggestion */}
+                      {showWhileSuggestion && (
+                        <div style={{ position: 'absolute', right: '1rem', top: '1rem', background: '#e0e7ff', color: '#6366f1', borderRadius: '0.5rem', padding: '0.5rem 1rem', cursor: 'pointer', zIndex: 2, fontWeight: 'bold', boxShadow: '0 2px 8px rgba(99,102,241,0.08)' }}
+                          onClick={() => {
+                            let snippet = '';
+                            if (language === 'c' || language === 'cpp') snippet = 'int i = 0;\nwhile (i < 10) {\n    // loop body\n    i++;\n}';
+                            else if (language === 'java') snippet = 'int i = 0;\nwhile (i < 10) {\n    // loop body\n    i++;\n}';
+                            else if (language === 'python') snippet = 'i = 0\nwhile i < 10:\n    # loop body\n    i += 1';
+                            setCode(code + (code && !code.endsWith('\n') ? '\n' : '') + snippet);
+                            setShowWhileSuggestion(false);
+                            setTimeout(() => {
+                              const textarea = document.getElementById('code-editor');
+                              if (textarea) textarea.focus();
+                            }, 0);
+                          }}
+                        >Insert while loop</div>
+                      )}
+                    </div>
+            {/* Toast for error messages */}
+            <Toast show={toast.show} message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.5rem' }}>
             <label style={{ fontWeight: 'bold', color: '#334155' }}>Language:</label>
             <select value={language} onChange={e => setLanguage(e.target.value)} style={{ fontSize: '1.1rem', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}>
@@ -173,17 +317,32 @@ export default function LogicBuildingContest() {
               <option value="cpp">C++</option>
               <option value="c">C</option>
             </select>
-            <button onClick={handleRun} style={{ background: '#10b981', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: '0.7rem', padding: '0.7rem 2rem', fontSize: '1.1rem', cursor: 'pointer', boxShadow: '0 2px 8px rgba(16,185,129,0.15)' }}>Run & Test</button>
+            {!done ? (
+              <button onClick={handleRun} style={{ background: '#10b981', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: '0.7rem', padding: '0.7rem 2rem', fontSize: '1.1rem', cursor: 'pointer', boxShadow: '0 2px 8px rgba(16,185,129,0.15)' }}>Run & Test</button>
+            ) : (
+              <div style={{ color: '#10b981', fontWeight: 'bold', fontSize: '1.2rem', marginLeft: '1rem' }}>Done</div>
+            )}
           </div>
           {scoreMsg && <div style={{margin:'1rem 0',color:'#10b981',fontWeight:'bold',fontSize:'1.2rem'}}>{scoreMsg}</div>}
           <div style={{ marginTop: '1.5rem' }}>
             <h4 style={{ color: '#6366f1', fontWeight: 'bold', marginBottom: '0.7rem' }}>Test Results</h4>
+            {isRunning && <div style={{ color: '#6366f1', fontWeight: 'bold', marginBottom: '1rem' }}>Running...</div>}
             <ul style={{ listStyle: 'none', padding: 0 }}>
-              {results.length === 0 && <li style={{ color: '#64748b' }}>No test results yet. Click "Run & Test" to check your code.</li>}
+              {results.length === 0 && !isRunning && <li style={{ color: '#64748b' }}>No test results yet. Click "Run & Test" to check your code.</li>}
               {results.map((r, idx) => (
-                <li key={idx} style={{ background: r.hidden ? '#fca5a5' : '#a5b4fc', borderRadius: '0.5rem', padding: '0.7rem', marginBottom: '0.5rem', color: '#334155', fontWeight: 'bold' }}>
-                  {r.hidden ? 'Hidden' : 'Shown'} Test: <span style={{ color: r.status && r.status.toLowerCase().includes('accepted') ? '#10b981' : '#dc2626' }}>{r.status}</span>
-                </li>
+                r.hidden ? (
+                  <li key={idx} style={{ background: '#fca5a5', borderRadius: '0.5rem', padding: '0.7rem', marginBottom: '0.5rem', color: '#334155', fontWeight: 'bold' }}>
+                    Hidden Test: <span style={{ color: r.status && r.status.toLowerCase().includes('accepted') ? '#10b981' : '#dc2626' }}>{r.status}</span>
+                  </li>
+                ) : (
+                  <li key={idx} style={{ background: '#a5b4fc', borderRadius: '0.5rem', padding: '0.7rem', marginBottom: '0.5rem', color: '#334155', fontWeight: 'bold' }}>
+                    Shown Test:<br />
+                    <span style={{ color: r.status && r.status.toLowerCase().includes('accepted') ? '#10b981' : '#dc2626' }}>{r.status}</span><br />
+                    <span>Input: <code>{r.input}</code></span><br />
+                    <span>Expected Output: <code>{r.expectedOutput}</code></span><br />
+                    <span>Your Output: <code>{r.actualOutput}</code></span>
+                  </li>
+                )
               ))}
             </ul>
           </div>
