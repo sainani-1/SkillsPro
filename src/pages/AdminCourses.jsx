@@ -30,6 +30,34 @@ const AdminCourses = () => {
   });
   const [deleteModal, setDeleteModal] = useState({ show: false, courseId: null, courseTitle: '' });
   const itemsPerPage = 4;
+  const getQuestionDraftKey = (examId) => `exam_questions_draft_${examId}`;
+
+  const loadDraftQuestions = (examId) => {
+    try {
+      const raw = localStorage.getItem(getQuestionDraftKey(examId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveDraftQuestions = (examId, list) => {
+    try {
+      localStorage.setItem(getQuestionDraftKey(examId), JSON.stringify(list || []));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const clearDraftQuestions = (examId) => {
+    try {
+      localStorage.removeItem(getQuestionDraftKey(examId));
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   const paginatedCourses = courses.slice(
     (currentPage - 1) * itemsPerPage,
@@ -172,13 +200,16 @@ const AdminCourses = () => {
       if (error) throw error;
 
       // Create default exam for the course
-      await supabase
+      const { error: examCreateError } = await supabase
         .from('exams')
         .insert([{
           course_id: data.id,
           duration_minutes: 60,
           pass_percent: 70
         }]);
+      if (examCreateError) {
+        throw new Error(`Course created but exam creation failed: ${examCreateError.message}`);
+      }
 
       setAlertModal({
         show: true,
@@ -269,45 +300,75 @@ const AdminCourses = () => {
     setTimeout(() => setMessage(''), 2000);
   };
 
-  const handleQuestionChange = (examId, index, field, value) => {
-    setQuestions(prev => ({
-      ...prev,
-      [examId]: (prev[examId] || []).map((q, i) => 
-        i === index ? { ...q, [field]: value } : q
-      )
-    }));
-  };
-
-  const handleOptionChange = (examId, qIndex, optIndex, value) => {
-    setQuestions(prev => ({
-      ...prev,
-      [examId]: (prev[examId] || []).map((q, i) => {
-        if (i === qIndex) {
-          const newOptions = [...(q.options || [])];
-          newOptions[optIndex] = value;
-          return { ...q, options: newOptions };
-        }
-        return q;
-      })
-    }));
-  };
-
   const addQuestion = (examId) => {
-    setQuestions(prev => ({
-      ...prev,
-      [examId]: [
-        ...(prev[examId] || []),
-        { exam_id: examId, question: '', options: ['', '', '', ''], correct_index: 0, order_index: (prev[examId]?.length || 0) }
-      ]
-    }));
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: [
+          ...(prev[examId] || []),
+          { exam_id: examId, question: '', options: ['', '', '', ''], correct_index: 0, order_index: (prev[examId]?.length || 0) }
+        ]
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
+  const saveQuestionsDraft = (examId) => {
+    saveDraftQuestions(examId, questions[examId] || []);
+    setMessage('✅ Draft saved. Students cannot see these questions until you publish.');
+    setTimeout(() => setMessage(''), 2500);
   };
 
   const deleteQuestion = (examId, index) => {
-    setQuestions(prev => ({
-      ...prev,
-      [examId]: (prev[examId] || []).filter((_, i) => i !== index)
-    }));
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).filter((_, i) => i !== index)
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
   };
+
+  const handleQuestionChange = (examId, index, field, value) => {
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).map((q, i) => 
+          i === index ? { ...q, [field]: value } : q
+        )
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
+  const handleOptionChange = (examId, qIndex, optIndex, value) => {
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).map((q, i) => {
+          if (i === qIndex) {
+            const newOptions = [...(q.options || [])];
+            newOptions[optIndex] = value;
+            return { ...q, options: newOptions };
+          }
+          return q;
+        })
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'questions' || !selectedCourse || !exams[selectedCourse.id]?.id) return;
+    const examId = exams[selectedCourse.id].id;
+    const draft = loadDraftQuestions(examId);
+    if (!draft) return;
+    setQuestions(prev => ({ ...prev, [examId]: draft }));
+  }, [activeTab, selectedCourse, exams]);
 
   const handleSaveQuestions = async (examId) => {
     if (!questions[examId]) return;
@@ -336,7 +397,8 @@ const AdminCourses = () => {
         .insert(questionsToInsert);
 
       if (insertError) throw insertError;
-      setMessage('✅ Questions saved successfully');
+      clearDraftQuestions(examId);
+      setMessage('✅ Questions published successfully');
     } catch (err) {
       setMessage(`Error: ${err.message}`);
     }
@@ -879,11 +941,17 @@ const AdminCourses = () => {
                     <Plus size={16} /> Add Question
                   </button>
                   <button
+                    onClick={() => saveQuestionsDraft(exams[selectedCourse.id].id)}
+                    className="w-full flex items-center justify-center gap-2 bg-amber-600 text-white px-3 py-2 rounded text-sm hover:bg-amber-700 transition-colors font-semibold"
+                  >
+                    <Save size={16} /> Save Draft
+                  </button>
+                  <button
                     onClick={() => handleSaveQuestions(exams[selectedCourse.id].id)}
                     disabled={savingId === `questions-${exams[selectedCourse.id].id}`}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold disabled:opacity-60"
                   >
-                    <Save size={16} /> {savingId === `questions-${exams[selectedCourse.id].id}` ? 'Saving...' : 'Save All Questions'}
+                    <Save size={16} /> {savingId === `questions-${exams[selectedCourse.id].id}` ? 'Publishing...' : 'Publish Questions'}
                   </button>
                 </div>
               </div>

@@ -113,12 +113,38 @@ const CourseList = () => {
         });
         const [showExamQuestionsModal, setShowExamQuestionsModal] = useState(false);
         const [selectedCourseForExam, setSelectedCourseForExam] = useState(null);
+        const [selectedExamId, setSelectedExamId] = useState(null);
         const [examQuestions, setExamQuestions] = useState([]);
         const [newQuestion, setNewQuestion] = useState({
           question: '',
           options: ['', '', '', ''],
           correct_index: 0
         });
+        const getQuestionDraftKey = (examId) => `exam_questions_draft_${examId}`;
+        const loadQuestionDraft = (examId) => {
+          try {
+            const raw = localStorage.getItem(getQuestionDraftKey(examId));
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : null;
+          } catch {
+            return null;
+          }
+        };
+        const saveQuestionDraft = (examId, list) => {
+          try {
+            localStorage.setItem(getQuestionDraftKey(examId), JSON.stringify(list || []));
+          } catch {
+            // ignore storage errors
+          }
+        };
+        const clearQuestionDraft = (examId) => {
+          try {
+            localStorage.removeItem(getQuestionDraftKey(examId));
+          } catch {
+            // ignore storage errors
+          }
+        };
 
         const categories = ['All', 'Programming', 'CS Core', 'Web', 'DevOps', 'Data', 'Data Science', 'Design', 'Mobile', 'Security', 'Cloud', 'Productivity', 'Emerging Tech'];
 
@@ -215,9 +241,12 @@ const CourseList = () => {
             if (error) throw error;
 
             // Create default exam
-            await supabase
+            const { error: examCreateError } = await supabase
               .from('exams')
               .insert([{ course_id: data.id, duration_minutes: 60, pass_percent: 70 }]);
+            if (examCreateError) {
+              throw new Error(`Course added but exam creation failed: ${examCreateError.message}`);
+            }
 
             setCourses([data, ...courses]);
             setNewCourse({
@@ -299,48 +328,42 @@ const CourseList = () => {
         // Handle manage exam questions
         const openExamQuestionsModal = async (course) => {
           setSelectedCourseForExam(course);
+          setSelectedExamId(null);
           try {
             let { data: exams, error: examError } = await supabase
               .from('exams')
               .select('id')
               .eq('course_id', course.id)
-              .single();
+              .maybeSingle();
 
-            // If no exam exists, create one automatically
-            if (!exams || examError) {
-              const { data: newExam, error: createError } = await supabase
-                .from('exams')
-                .insert([{
-                  course_id: course.id,
-                  duration_minutes: 100,
-                  pass_percent: 70
-                }])
-                .select('id')
-                .single();
+            if (examError) {
+              openPopup('Error', `Failed to load exam: ${examError.message}`, 'error');
+              setExamQuestions([]);
+              setShowExamQuestionsModal(true);
+              return;
+            }
 
-              if (createError) {
-                openPopup('Error', `Failed to create exam: ${createError.message}`, 'error');
-                setExamQuestions([]);
-                setShowExamQuestionsModal(true);
-                return;
-              }
-
-              exams = newExam;
-              openPopup('Exam created', 'Exam created automatically. You can now add questions.', 'success');
+            if (!exams) {
+              setExamQuestions([]);
+              setShowExamQuestionsModal(true);
+              return;
             }
 
             if (exams) {
+              setSelectedExamId(exams.id);
               const { data: questions } = await supabase
                 .from('exam_questions')
                 .select('*')
                 .eq('exam_id', exams.id)
                 .order('order_index');
-              setExamQuestions(questions || []);
+              const draft = loadQuestionDraft(exams.id);
+              setExamQuestions(draft || questions || []);
             }
           } catch (error) {
             console.error('Error loading questions:', error);
             openPopup('Error', `Error loading exam: ${error.message}`, 'error');
             setExamQuestions([]);
+            setSelectedExamId(null);
           }
           setShowExamQuestionsModal(true);
         };
@@ -356,45 +379,106 @@ const CourseList = () => {
           }
 
           try {
-            const { data: exams, error: examError } = await supabase
-              .from('exams')
-              .select('id')
-              .eq('course_id', selectedCourseForExam.id)
-              .single();
-
-            if (examError || !exams) {
+            if (!selectedExamId) {
               openPopup('No exam found', 'Please create an exam for this course first.', 'warning');
               return;
             }
 
-            const { data, error } = await supabase
-              .from('exam_questions')
-              .insert([{
-                exam_id: exams.id,
+            const nextQuestions = [
+              ...examQuestions,
+              {
+                exam_id: selectedExamId,
                 question: newQuestion.question,
                 options: newQuestion.options,
                 correct_index: newQuestion.correct_index,
                 order_index: examQuestions.length
-              }])
-              .select();
-
-            if (error) throw error;
-
-            setExamQuestions([...examQuestions, data[0]]);
+              }
+            ];
+            setExamQuestions(nextQuestions);
+            saveQuestionDraft(selectedExamId, nextQuestions);
             setNewQuestion({ question: '', options: ['', '', '', ''], correct_index: 0 });
-            openPopup('Question added', 'Question added successfully.', 'success');
+            openPopup('Draft saved', 'Question saved to draft. Click Publish Questions to make it live.', 'success');
           } catch (error) {
             openPopup('Add failed', `Error adding question: ${error.message}`, 'error');
           }
         };
 
-        const handleDeleteQuestion = async (questionId) => {
+        const handleDeleteQuestion = async (questionIndex) => {
           try {
-            await supabase.from('exam_questions').delete().eq('id', questionId);
-            setExamQuestions(examQuestions.filter(q => q.id !== questionId));
-            openPopup('Question deleted', 'Question deleted successfully.', 'success');
+            const nextQuestions = examQuestions.filter((_, idx) => idx !== questionIndex);
+            setExamQuestions(nextQuestions);
+            if (selectedExamId) saveQuestionDraft(selectedExamId, nextQuestions);
+            openPopup('Draft updated', 'Question removed from draft. Publish to apply changes.', 'success');
           } catch (error) {
             openPopup('Delete failed', `Error deleting question: ${error.message}`, 'error');
+          }
+        };
+
+        const handleSaveDraftQuestions = async () => {
+          try {
+            if (!selectedExamId) throw new Error('No exam found for this course');
+            saveQuestionDraft(selectedExamId, examQuestions);
+            openPopup('Draft saved', 'Draft saved. Students cannot see these questions until publish.', 'success');
+          } catch (error) {
+            openPopup('Save failed', `Error saving draft: ${error.message}`, 'error');
+          }
+        };
+
+        const handlePublishQuestions = async () => {
+          try {
+            if (!selectedExamId) throw new Error('No exam found for this course');
+
+            const { error: deleteError } = await supabase
+              .from('exam_questions')
+              .delete()
+              .eq('exam_id', selectedExamId);
+            if (deleteError) throw deleteError;
+
+            if (examQuestions.length > 0) {
+              const payload = examQuestions.map((q, idx) => ({
+                exam_id: selectedExamId,
+                question: q.question,
+                options: q.options,
+                correct_index: q.correct_index,
+                order_index: idx
+              }));
+              const { error: insertError } = await supabase
+                .from('exam_questions')
+                .insert(payload);
+              if (insertError) throw insertError;
+            }
+
+            clearQuestionDraft(selectedExamId);
+            openPopup('Published', 'Questions published successfully.', 'success');
+          } catch (error) {
+            openPopup('Publish failed', `Error publishing questions: ${error.message}`, 'error');
+          }
+        };
+
+        const handleCreateExamForCourse = async () => {
+          try {
+            if (!selectedCourseForExam?.id) {
+              openPopup('Missing course', 'Please reopen the question manager and try again.', 'warning');
+              return;
+            }
+
+            const { data: newExam, error: createError } = await supabase
+              .from('exams')
+              .insert([{
+                course_id: selectedCourseForExam.id,
+                duration_minutes: 60,
+                pass_percent: 70
+              }])
+              .select('id')
+              .single();
+
+            if (createError) throw createError;
+
+            setSelectedExamId(newExam.id);
+            setExamQuestions([]);
+            openPopup('Exam created', 'Exam created successfully. You can now add questions.', 'success');
+          } catch (error) {
+            openPopup('Create exam failed', `Unable to create exam: ${error.message}`, 'error');
           }
         };
 
@@ -856,7 +940,10 @@ const CourseList = () => {
                  <p className="text-blue-100 text-sm">Manage Exam Questions</p>
                </div>
                <button
-                 onClick={() => setShowExamQuestionsModal(false)}
+                 onClick={() => {
+                   setShowExamQuestionsModal(false);
+                   setSelectedExamId(null);
+                 }}
                  className="text-white hover:bg-white/20 p-2 rounded-lg transition-colors"
                >
                  <X size={24} />
@@ -865,6 +952,18 @@ const CourseList = () => {
 
              <div className="p-6 max-h-96 overflow-y-auto">
                <h3 className="text-lg font-bold text-slate-900 mb-4">Questions ({examQuestions.length})</h3>
+               {!selectedExamId && (
+                 <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                   <p className="text-sm font-semibold text-amber-900">No exam found for this course.</p>
+                   <p className="text-xs text-amber-800 mt-1">Create exam first, then add and publish questions.</p>
+                   <button
+                     onClick={handleCreateExamForCourse}
+                     className="mt-3 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors text-sm font-semibold"
+                   >
+                     Create Exam
+                   </button>
+                 </div>
+               )}
                
                {examQuestions.length > 0 ? (
                  <div className="space-y-4 mb-6">
@@ -873,7 +972,7 @@ const CourseList = () => {
                        <div className="flex justify-between items-start mb-2">
                          <p className="font-semibold text-slate-900">Q{idx + 1}: {q.question}</p>
                          <button
-                           onClick={() => handleDeleteQuestion(q.id)}
+                           onClick={() => handleDeleteQuestion(idx)}
                            className="text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
                          >
                            <Trash2 size={18} />
@@ -948,9 +1047,27 @@ const CourseList = () => {
 
                    <button
                      onClick={handleAddQuestion}
-                     className="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                     disabled={!selectedExamId}
+                     title={!selectedExamId ? 'Create exam first' : 'Add question'}
+                     className="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                    >
                      Add Question
+                   </button>
+                   <button
+                     onClick={handleSaveDraftQuestions}
+                     disabled={!selectedExamId}
+                     title={!selectedExamId ? 'Create exam first' : 'Save draft'}
+                     className="w-full bg-amber-600 text-white font-semibold py-2 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                   >
+                     Save Draft
+                   </button>
+                   <button
+                     onClick={handlePublishQuestions}
+                     disabled={!selectedExamId}
+                     title={!selectedExamId ? 'Create exam first' : 'Publish questions'}
+                     className="w-full bg-emerald-600 text-white font-semibold py-2 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                   >
+                     Publish Questions
                    </button>
                  </div>
                </div>

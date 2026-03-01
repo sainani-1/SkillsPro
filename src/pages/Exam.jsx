@@ -87,6 +87,7 @@ export default function Exam() {
   const [showTabWarningModal, setShowTabWarningModal] = useState(false);
   const [retakeLockedUntil, setRetakeLockedUntil] = useState(null);
   const [passedExamInfo, setPassedExamInfo] = useState(null);
+  const [demoCourseBlocked, setDemoCourseBlocked] = useState(false);
   const [needsFullscreenResume, setNeedsFullscreenResume] = useState(false);
   const [resumeCountdown, setResumeCountdown] = useState(FULLSCREEN_TIMEOUT_SEC);
   const [showExitGestureConfirm, setShowExitGestureConfirm] = useState(false);
@@ -183,18 +184,36 @@ export default function Exam() {
       try {
       setRetakeLockedUntil(null);
       setPassedExamInfo(null);
+      setDemoCourseBlocked(false);
 
       // Final Exam route passes courseId. Questions are stored by exam_id.
-      const { data: examRow, error: examError } = await supabase
-        .from("exams")
-        .select("id")
-        .eq("course_id", courseId)
-        .maybeSingle();
+      const [{ data: examRow, error: examError }, { data: courseRow, error: courseError }] =
+        await Promise.all([
+          supabase
+            .from("exams")
+            .select("id")
+            .eq("course_id", courseId)
+            .maybeSingle(),
+          supabase
+            .from("courses")
+            .select("id, is_free")
+            .eq("id", courseId)
+            .maybeSingle(),
+        ]);
 
       if (!mounted) return;
 
       if (examError) {
         setErrorMsg("Error loading exam: " + examError.message);
+        return;
+      }
+      if (courseError) {
+        setErrorMsg("Error loading course: " + courseError.message);
+        return;
+      }
+      if (courseRow?.is_free) {
+        setDemoCourseBlocked(true);
+        safeSessionRemove(getSessionKey());
         return;
       }
 
@@ -1050,9 +1069,28 @@ export default function Exam() {
 
   if (bootstrappingExam) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-6 py-5 text-center">
-          <p className="text-slate-700 font-semibold">Checking exam access...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-emerald-50 flex items-center justify-center p-6">
+        <div className="max-w-2xl w-full rounded-3xl overflow-hidden border border-slate-200 bg-white shadow-xl">
+          <div className="px-8 py-7 bg-gradient-to-r from-slate-900 to-slate-700 text-white">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Checking Exam Access</h1>
+            <p className="text-sm text-slate-200 mt-1">
+              Validating eligibility, lock status, and question availability.
+            </p>
+          </div>
+          <div className="p-8">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
+              <div>
+                <p className="font-semibold text-slate-900">Please wait...</p>
+                <p className="text-sm text-slate-600">This usually takes a few seconds.</p>
+              </div>
+            </div>
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">Course + exam mapping</div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">Retake / pass checks</div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">Question readiness</div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1068,6 +1106,44 @@ export default function Exam() {
           </p>
           <p className="text-sm text-slate-600">
             You can retake after: {new Date(retakeLockedUntil).toLocaleString("en-IN")}
+          </p>
+          <button
+            onClick={() => navigate("/app/courses")}
+            className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
+          >
+            Back to Courses
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (demoCourseBlocked) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-blue-200 p-8 text-center space-y-4">
+          <h1 className="text-2xl font-bold text-blue-700">Demo Course</h1>
+          <p className="text-slate-700">
+            This is a demo course. This didnt have any exams, tests and certifications.
+          </p>
+          <button
+            onClick={() => navigate("/app/courses")}
+            className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
+          >
+            Back to Courses
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-amber-200 p-8 text-center space-y-4">
+          <h1 className="text-2xl font-bold text-amber-700">Exam Not Available</h1>
+          <p className="text-slate-700">
+            Still questions to be added. Please try again later.
           </p>
           <button
             onClick={() => navigate("/app/courses")}
@@ -1379,7 +1455,7 @@ export default function Exam() {
           ) : null}
 
           {(phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING) && !activeQuestion ? (
-            <p className="text-sm text-red-700">No questions found for this exam.</p>
+            <p className="text-sm text-red-700">Still questions to be added. Please try again later.</p>
           ) : null}
 
           {phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING ? (
