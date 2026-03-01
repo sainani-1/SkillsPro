@@ -9,6 +9,7 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [loggingIn, setLoggingIn] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const navigate = useNavigate();
 
@@ -19,34 +20,86 @@ const Login = () => {
       // First, sign in
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError || !signInData?.user) {
+        const signInMessage = signInError?.message || 'No user returned from sign in. Please try again.';
         setAlertModal({
           show: true,
           title: 'Login Error',
-          message: signInError ? signInError.message : 'No user returned from sign in. Please try again.',
+          message: signInMessage.includes('Email not confirmed')
+            ? 'Email not verified. Please verify your email first, then login.'
+            : signInMessage,
           type: 'error'
         });
         setLoggingIn(false);
         return;
       }
 
+      const isEmailVerified = !!(signInData.user.email_confirmed_at || signInData.user.confirmed_at);
+      if (!isEmailVerified) {
+        await supabase.auth.signOut();
+        setAlertModal({
+          show: true,
+          title: 'Email Not Verified',
+          message: 'Please verify your email before logging in. Use "Resend verification email" if needed.',
+          type: 'warning'
+        });
+        setLoggingIn(false);
+        return;
+      }
+
       // Fetch user profile
-      const { data: userProfile, error: profileError } = await supabase
+      let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
         .select('id, role, is_disabled')
         .eq('id', signInData.user.id)
         .single();
 
       if (profileError || !userProfile) {
-        // Optionally, create profile if missing
-        // await supabase.from('profiles').insert({ id: signInData.user.id, role: 'student', is_disabled: false });
-        setAlertModal({
-          show: true,
-          title: 'Profile Error',
-          message: 'User profile not found or could not be loaded. Please contact support or try again.',
-          type: 'error'
-        });
-        setLoggingIn(false);
-        return;
+        // Create profile on first verified login using auth metadata
+        const meta = signInData.user.user_metadata || {};
+        const { error: createProfileError } = await supabase.from('profiles').upsert({
+          id: signInData.user.id,
+          auth_user_id: signInData.user.id,
+          email: signInData.user.email || email.trim(),
+          full_name: meta.full_name || 'Student',
+          phone: meta.phone || null,
+          avatar_url: meta.avatar_url || null,
+          education_level: meta.education_level || null,
+          study_stream: meta.study_stream || null,
+          diploma_certificate: meta.diploma_certificate || null,
+          core_subject: meta.core_subject || null,
+          role: meta.role || 'student',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+
+        if (createProfileError) {
+          setAlertModal({
+            show: true,
+            title: 'Profile Error',
+            message: createProfileError.message || 'Could not create user profile.',
+            type: 'error'
+          });
+          setLoggingIn(false);
+          return;
+        }
+
+        const profileFetchRetry = await supabase
+          .from('profiles')
+          .select('id, role, is_disabled')
+          .eq('id', signInData.user.id)
+          .single();
+        userProfile = profileFetchRetry.data;
+        profileError = profileFetchRetry.error;
+
+        if (profileError || !userProfile) {
+          setAlertModal({
+            show: true,
+            title: 'Profile Error',
+            message: 'User profile not found or could not be loaded. Please contact support or try again.',
+            type: 'error'
+          });
+          setLoggingIn(false);
+          return;
+        }
       }
 
       // Check if account is disabled
@@ -105,6 +158,47 @@ const Login = () => {
     }
   };
 
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setAlertModal({
+        show: true,
+        title: 'Email Required',
+        message: 'Enter your email first, then click resend verification.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    setResendingVerification(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`
+        }
+      });
+
+      if (error) throw error;
+
+      setAlertModal({
+        show: true,
+        title: 'Verification Sent',
+        message: 'Verification email sent. Please check inbox/spam and verify before login.',
+        type: 'success'
+      });
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'Resend Failed',
+        message: error.message || 'Unable to resend verification email.',
+        type: 'error'
+      });
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100">
       <Toast
@@ -148,6 +242,17 @@ const Login = () => {
         </p>
         <p className="text-center mt-2 text-sm">
           Forgot password? <Link to="/reset-password" className="text-gold-600 font-bold">Reset here</Link>
+        </p>
+        <p className="text-center mt-2 text-sm text-slate-600">
+          Email not verified?{' '}
+          <button
+            type="button"
+            onClick={handleResendVerification}
+            disabled={resendingVerification}
+            className="text-blue-600 font-bold hover:underline disabled:opacity-60"
+          >
+            {resendingVerification ? 'Sending...' : 'Resend verification email'}
+          </button>
         </p>
       </div>
     </div>

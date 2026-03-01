@@ -57,7 +57,18 @@ const RegisterAdmin = () => {
     
     setLoading(true);
     try {
-      const { data: signUpData, error } = await supabase.auth.signUp({ email: form.email, password: form.password });
+      const { data: signUpData, error } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`,
+          data: {
+            full_name: form.fullName.trim(),
+            phone: form.phone.trim(),
+            role: 'admin'
+          }
+        }
+      });
       if (error) throw error;
       const user = signUpData?.user;
       if (!user) throw new Error('Unable to create user. Please try again.');
@@ -93,7 +104,9 @@ const RegisterAdmin = () => {
         avatar_url: avatarUrl,
         role: 'admin'
       }, { onConflict: 'id' });
-      if (profileError) throw profileError;
+      if (profileError && !String(profileError.message || '').toLowerCase().includes('row-level security')) {
+        throw profileError;
+      }
       setAlertModal({
         show: true,
         title: 'Success',

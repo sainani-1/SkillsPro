@@ -7,6 +7,9 @@ import { prepareAvatarFile } from '../utils/imageUtils';
 
 const Register = () => {
   const [loading, setLoading] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [registrationDone, setRegistrationDone] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', fullName: '', phone: '', coreSubject: 'Computer Science', educationLevel: '', studyStream: '', customStudyStream: '', diploma: '' });
   const [file, setFile] = useState(null);
   const [errors, setErrors] = useState({});
@@ -79,6 +82,47 @@ const Register = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleResendVerification = async () => {
+    const emailToUse = (registeredEmail || formData.email || '').trim();
+    if (!emailToUse) {
+      setAlertModal({
+        show: true,
+        title: 'Email Required',
+        message: 'Please enter your email address first.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    setResendingVerification(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: emailToUse,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`
+        }
+      });
+      if (error) throw error;
+
+      setAlertModal({
+        show: true,
+        title: 'Verification Sent',
+        message: `Verification email resent to ${emailToUse}. Please check inbox/spam.`,
+        type: 'success'
+      });
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'Resend Failed',
+        message: error.message || 'Unable to resend verification email.',
+        type: 'error'
+      });
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   const handleRegister = async (e) => {
     e.preventDefault();
     
@@ -88,10 +132,27 @@ const Register = () => {
     
     setLoading(true);
     try {
+        const resolvedStudyStream =
+          formData.studyStream === 'Others'
+            ? formData.customStudyStream.trim()
+            : formData.studyStream;
+
         // 1. Sign up auth
         const { data: { user }, error } = await supabase.auth.signUp({
             email: formData.email,
-            password: formData.password
+            password: formData.password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/login`,
+              data: {
+                full_name: formData.fullName.trim(),
+                phone: formData.phone.trim(),
+                education_level: formData.educationLevel,
+                study_stream: resolvedStudyStream,
+                diploma_certificate: formData.diploma || null,
+                core_subject: resolvedStudyStream || formData.coreSubject || null,
+                role: 'student'
+              }
+            }
         });
         if (error) throw error;
 
@@ -122,11 +183,6 @@ const Register = () => {
             }
         }
 
-        const resolvedStudyStream =
-          formData.studyStream === 'Others'
-            ? formData.customStudyStream.trim()
-            : formData.studyStream;
-
         // 3. Create/Update profile from registration details so user does not need to enter again.
         const { error: profileError } = await supabase.from('profiles').upsert([{
             id: user.id,
@@ -141,7 +197,9 @@ const Register = () => {
             role: 'student',
             updated_at: new Date().toISOString(),
         }], { onConflict: 'id' });
-        if(profileError) throw profileError;
+        if (profileError && !String(profileError.message || '').toLowerCase().includes('row-level security')) {
+          throw profileError;
+        }
 
         setAlertModal({
           show: true,
@@ -149,7 +207,8 @@ const Register = () => {
           message: 'Registration successful! Please check your email to confirm your account.',
           type: 'success'
         });
-        setTimeout(() => navigate('/login'), 2500);
+        setRegisteredEmail(formData.email.trim());
+        setRegistrationDone(true);
     } catch (error) {
         setAlertModal({
           show: true,
@@ -332,6 +391,28 @@ const Register = () => {
             <p className="text-center mt-6 text-sm">
                 Already have an account? <Link to="/login" className="text-blue-600 font-bold">Login</Link>
             </p>
+            {registrationDone && (
+              <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                <p className="text-xs text-blue-800 mb-2">
+                  Verification email sent to <span className="font-semibold">{registeredEmail}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendingVerification}
+                  className="w-full bg-blue-600 text-white text-sm font-semibold py-2 rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {resendingVerification ? 'Sending...' : 'Resend verification email'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/login')}
+                  className="w-full mt-2 border border-slate-300 text-slate-700 text-sm font-semibold py-2 rounded-lg hover:bg-slate-50"
+                >
+                  Go to Login
+                </button>
+              </div>
+            )}
             </>
             )}
         </div>
