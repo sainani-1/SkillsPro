@@ -17,6 +17,19 @@ const Sidebar = () => {
   const [newTeacherRequests, setNewTeacherRequests] = useState(0);
   const [newLeaveRequests, setNewLeaveRequests] = useState(0);
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
+
+  const isFetchNetworkIssue = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      details.includes('failed to fetch') ||
+      details.includes('cors') ||
+      message.includes('err_failed') ||
+      message.includes('525')
+    );
+  };
   // Fetch new guidance session requests (Admin only)
   useEffect(() => {
     if (!profile?.id || role !== 'admin') return;
@@ -114,6 +127,7 @@ const Sidebar = () => {
   // Fetch unread chats count
   useEffect(() => {
     if (!profile?.id) return;
+    if (role !== 'student' && role !== 'teacher') return;
 
     const fetchUnreadChats = async () => {
       try {
@@ -181,7 +195,10 @@ const Sidebar = () => {
 
         setUnreadChats(totalUnread);
       } catch (err) {
-        console.error('Error fetching unread chats:', err);
+        setUnreadChats(0);
+        if (!isFetchNetworkIssue(err)) {
+          console.error('Error fetching unread chats:', err);
+        }
       }
     };
 
@@ -198,7 +215,7 @@ const Sidebar = () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [profile?.id, location.pathname]);
+  }, [profile?.id, role, location.pathname]);
 
   // Fetch new user registrations count (Admin only)
   useEffect(() => {
@@ -383,10 +400,6 @@ const Sidebar = () => {
           {shouldShowText && <span>Profile</span>}
         </NavLink>
 
-        <NavLink to="/app/guidance" className={navItemClass} title="Career Mentorship">
-          <Video size={28} />
-          {shouldShowText && <span>Career Mentorship</span>}
-        </NavLink>
 
         <NavLink to="/app/guidance-sessions" className={navItemClass} title="Mentorship Sessions">
           <Calendar size={28} />
@@ -411,10 +424,6 @@ const Sidebar = () => {
         {/* Student Specific */}
         {role === 'student' && (
           <>
-            <NavLink to="/app/learning-path" className={navItemClass} title="AI Learning Path">
-              <Sparkles size={28} />
-              {shouldShowText && <span>AI Learning Path</span>}
-            </NavLink>
             <NavLink to="/app/my-certificates" className={navItemClass} title="My Certificates">
               <GraduationCap size={28} />
               {shouldShowText && <span>My Certificates</span>}
@@ -430,10 +439,6 @@ const Sidebar = () => {
             <NavLink to="/app/offers" className={navItemClass} title="Discounts & Offers">
               <Gift size={28} />
               {shouldShowText && <span>Discounts & Offers</span>}
-            </NavLink>
-            <NavLink to="/app/career-chatbot" className={navItemClass} title="Career AI Chat">
-              <MessageCircle size={28} />
-              {shouldShowText && <span>Career AI Chat</span>}
             </NavLink>
             <NavLink to="/app/attendance" className={navItemClass} title="Attendance">
               <ClipboardList size={28} />
@@ -612,6 +617,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/settings" className={navItemClass} title="Platform Settings">
               <Settings size={28} />
               {shouldShowText && <span>Platform Settings</span>}
+            </NavLink>
+            <NavLink to="/app/admin/reset-password" className={navItemClass} title="Reset Password">
+              <Lock size={28} />
+              {shouldShowText && <span>Reset Password</span>}
             </NavLink>
             {/* Send Gift - Admin only (single entry) */}
           </>

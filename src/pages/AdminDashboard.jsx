@@ -124,7 +124,7 @@ const UserManagement = () => {
         setLoading(true);
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject')
+          .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
           .order('full_name');
 
         const { data: certData } = await supabase
@@ -258,6 +258,7 @@ const UserManagement = () => {
                 <th className="px-4 py-3 text-left">Role</th>
                 <th className="px-4 py-3 text-left">Phone</th>
                 <th className="px-4 py-3 text-left">Subject</th>
+                <th className="px-4 py-3 text-left">Education</th>
                 <th className="px-4 py-3 text-left">Premium</th>
                 <th className="px-4 py-3 text-left">Lock</th>
                 <th className="px-4 py-3 text-left">Certificates</th>
@@ -265,9 +266,9 @@ const UserManagement = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-6 text-center"><LoadingSpinner fullPage={false} message="Loading users..." /></td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center"><LoadingSpinner fullPage={false} message="Loading users..." /></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-500">No users found</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-500">No users found</td></tr>
               ) : (
                 filtered.map(u => {
                   const premiumActive = u.premium_until && new Date(u.premium_until) > new Date();
@@ -296,6 +297,14 @@ const UserManagement = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-600">{u.phone || '—'}</td>
                       <td className="px-4 py-3 text-slate-600">{u.core_subject || '—'}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {u.education_level ? (
+                          <div className="leading-tight">
+                            <p>{u.education_level}</p>
+                            {u.study_stream ? <p className="text-xs text-slate-500">{u.study_stream}</p> : null}
+                          </div>
+                        ) : '—'}
+                      </td>
                       <td className="px-4 py-3">
                         {premiumActive ? (
                           <span className="text-xs text-gold-600 font-semibold">Until {new Date(u.premium_until).toLocaleDateString()}</span>
@@ -826,3 +835,4 @@ const LeaveRequests = () => {
 };
 
 export default AdminDashboard;
+

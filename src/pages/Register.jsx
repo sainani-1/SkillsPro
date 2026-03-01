@@ -3,19 +3,21 @@ import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { prepareAvatarFile } from '../utils/imageUtils';
 
 const Register = () => {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '', fullName: '', phone: '', coreSubject: 'Computer Science', educationLevel: '', studyStream: '', diploma: '' });
+  const [formData, setFormData] = useState({ email: '', password: '', fullName: '', phone: '', coreSubject: 'Computer Science', educationLevel: '', studyStream: '', customStudyStream: '', diploma: '' });
   const [file, setFile] = useState(null);
   const [errors, setErrors] = useState({});
   const [registrationPaused, setRegistrationPaused] = useState(false);
 
   // Stream options based on education level
   const streamOptions = {
-    'B.Tech': ['Computer Science', 'Information Technology', 'Electronics', 'Mechanical', 'Civil'],
-    '10th': ['State', 'CBSE', 'ICSE'],
-    'Intermediate': ['MPC', 'BIPC', 'MBPC']
+    'B.Tech': ['Computer Science', 'Information Technology', 'Electronics', 'Mechanical', 'Civil', 'Others'],
+    '12th': ['MPC', 'BIPC', 'MBIPC', 'Others'],
+    '10th': ['State', 'CBSE', 'ICSE', 'Others'],
+    'Intermediate': ['MPC', 'BIPC', 'MBIPC', 'Others']
   };
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const navigate = useNavigate();
@@ -69,6 +71,9 @@ const Register = () => {
     if (formData.educationLevel && !formData.studyStream) {
       newErrors.studyStream = 'Please select a stream/branch';
     }
+    if (formData.studyStream === 'Others' && !formData.customStudyStream.trim()) {
+      newErrors.customStudyStream = 'Please enter your stream/branch';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -90,17 +95,22 @@ const Register = () => {
         });
         if (error) throw error;
 
+        if (!user?.id) {
+          throw new Error('Unable to create user account. Please try again.');
+        }
+
         // 2. Upload Photo
         let avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80';
         if (file) {
             try {
+                const safeFile = await prepareAvatarFile(file);
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${user.id}.${fileExt}`;
                 const filePath = `avatars/${fileName}`;
                 
                 const { error: uploadError } = await supabase.storage
                     .from('avatars')
-                    .upload(filePath, file, { upsert: true });
+                    .upload(filePath, safeFile, { upsert: true, contentType: safeFile?.type || file.type });
                 
                 if (!uploadError) {
                     const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
@@ -112,18 +122,25 @@ const Register = () => {
             }
         }
 
-        // 3. Create Profile
-        const { error: profileError } = await supabase.from('profiles').insert([{
+        const resolvedStudyStream =
+          formData.studyStream === 'Others'
+            ? formData.customStudyStream.trim()
+            : formData.studyStream;
+
+        // 3. Create/Update profile from registration details so user does not need to enter again.
+        const { error: profileError } = await supabase.from('profiles').upsert([{
             id: user.id,
             full_name: formData.fullName.trim(),
             email: formData.email.trim(),
             phone: formData.phone.trim(),
             education_level: formData.educationLevel,
-            study_stream: formData.studyStream,
+            study_stream: resolvedStudyStream,
             diploma_certificate: formData.diploma || null,
             avatar_url: avatarUrl,
-            role: 'student' // Default
-        }]);
+            core_subject: resolvedStudyStream || formData.coreSubject || null,
+            role: 'student',
+            updated_at: new Date().toISOString(),
+        }], { onConflict: 'id' });
         if(profileError) throw profileError;
 
         setAlertModal({
@@ -197,7 +214,7 @@ const Register = () => {
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.educationLevel ? 'border-red-500' : ''}`}
                         value={formData.educationLevel}
                         onChange={e => {
-                          setFormData({...formData, educationLevel: e.target.value, studyStream: ''});
+                          setFormData({...formData, educationLevel: e.target.value, studyStream: '', customStudyStream: ''});
                           if (errors.educationLevel) setErrors({...errors, educationLevel: ''});
                         }}
                     >
@@ -219,8 +236,14 @@ const Register = () => {
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.studyStream ? 'border-red-500' : ''}`}
                         value={formData.studyStream}
                         onChange={e => {
-                          setFormData({...formData, studyStream: e.target.value});
+                          const nextValue = e.target.value;
+                          setFormData({
+                            ...formData,
+                            studyStream: nextValue,
+                            customStudyStream: nextValue === 'Others' ? formData.customStudyStream : '',
+                          });
                           if (errors.studyStream) setErrors({...errors, studyStream: ''});
+                          if (errors.customStudyStream) setErrors({...errors, customStudyStream: ''});
                         }}
                     >
                         <option value="">Select {formData.educationLevel === 'B.Tech' ? 'branch' : 'stream'}</option>
@@ -229,6 +252,21 @@ const Register = () => {
                         ))}
                     </select>
                     {errors.studyStream && <p className="text-red-500 text-xs mt-1">{errors.studyStream}</p>}
+                    {formData.studyStream === 'Others' && (
+                      <div className="mt-2">
+                        <input
+                          type="text"
+                          className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.customStudyStream ? 'border-red-500' : ''}`}
+                          placeholder={`Enter your ${formData.educationLevel === 'B.Tech' ? 'branch' : 'stream'}`}
+                          value={formData.customStudyStream}
+                          onChange={e => {
+                            setFormData({ ...formData, customStudyStream: e.target.value });
+                            if (errors.customStudyStream) setErrors({ ...errors, customStudyStream: '' });
+                          }}
+                        />
+                        {errors.customStudyStream && <p className="text-red-500 text-xs mt-1">{errors.customStudyStream}</p>}
+                      </div>
+                    )}
                   </div>
                 )}
 

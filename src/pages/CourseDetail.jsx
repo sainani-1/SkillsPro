@@ -34,12 +34,15 @@ const CourseDetail = () => {
             }
 
             if (profile?.id) {
-                const { data } = await supabase
+                const { data, error: enrollmentError } = await supabase
                     .from('enrollments')
                     .select('id')
                     .eq('student_id', profile.id)
                     .eq('course_id', courseId)
-                    .single();
+                    .maybeSingle();
+                if (enrollmentError) {
+                    console.error('Error checking enrollment:', enrollmentError);
+                }
                 setEnrolled(!!data);
             }
         } catch (error) {
@@ -108,7 +111,7 @@ const CourseDetail = () => {
                 return { 
                     type: 'youtube', 
                     id: videoId,
-                    src: `https://www.youtube.com/embed/${videoId}` 
+                    src: `https://www.youtube-nocookie.com/embed/${videoId}?rel=0` 
                 };
             }
         }

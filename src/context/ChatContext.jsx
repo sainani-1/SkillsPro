@@ -7,6 +7,18 @@ const ChatContext = createContext();
 export const ChatProvider = ({ children }) => {
   const { profile } = useAuth();
   const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+  const isFetchNetworkIssue = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      details.includes('failed to fetch') ||
+      details.includes('cors') ||
+      message.includes('err_failed') ||
+      message.includes('525')
+    );
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -17,37 +29,36 @@ export const ChatProvider = ({ children }) => {
       return;
     }
 
-    console.log('ChatContext: Loading unread messages for teacher:', profile.id);
-
     // Load initial unread messages count
     const loadUnreadCount = async () => {
       try {
-        const { data: memberGroups } = await supabase
+        const { data: memberGroups, error: memberError } = await supabase
           .from('chat_members')
           .select('group_id')
           .eq('user_id', profile.id);
 
-        console.log('ChatContext: Member groups:', memberGroups);
+        if (memberError) throw memberError;
 
         if (!memberGroups || memberGroups.length === 0) {
-          console.log('ChatContext: No groups found');
           setTotalUnreadCount(0);
           return;
         }
 
         const groupIds = memberGroups.map(m => m.group_id);
-        console.log('ChatContext: Group IDs:', groupIds);
 
         // Count all messages as unread initially
-        const { count: totalCount } = await supabase
+        const { count: totalCount, error: countError } = await supabase
           .from('chat_messages')
           .select('*', { count: 'exact', head: true })
           .in('group_id', groupIds);
 
-        console.log('ChatContext: Total message count:', totalCount);
+        if (countError) throw countError;
         setTotalUnreadCount(totalCount || 0);
       } catch (error) {
-        console.error('ChatContext: Error loading unread count:', error);
+        setTotalUnreadCount(0);
+        if (!isFetchNetworkIssue(error)) {
+          console.error('ChatContext: Error loading unread count:', error);
+        }
       }
     };
 
@@ -61,7 +72,6 @@ export const ChatProvider = ({ children }) => {
         schema: 'public',
         table: 'chat_messages'
       }, payload => {
-        console.log('ChatContext: New message received:', payload.new);
         setTotalUnreadCount(prev => prev + 1);
       })
       .subscribe();

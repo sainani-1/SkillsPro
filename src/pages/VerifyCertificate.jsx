@@ -26,6 +26,16 @@ const formatCertificateId = (cert) => {
   return `SkillPro-${y}-${m}-${d}-${random}`;
 };
 
+const formatFallbackCertificateId = (submission) => {
+  const issuedAt = submission?.submitted_at ? new Date(submission.submitted_at) : new Date();
+  const y = issuedAt.getFullYear();
+  const m = String(issuedAt.getMonth() + 1).padStart(2, '0');
+  const d = String(issuedAt.getDate()).padStart(2, '0');
+  const seed = `fallback-${submission?.id ?? `${y}${m}${d}`}`;
+  const random = generateDeterministicCode(seed);
+  return `SkillPro-${y}-${m}-${d}-${random}`;
+};
+
 const VerifyCertificate = () => {
   const [certId, setCertId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -82,7 +92,22 @@ const VerifyCertificate = () => {
       logoImg.crossOrigin = 'anonymous';
       await new Promise((resolve) => {
         logoImg.onload = () => {
-          ctx.drawImage(logoImg, 520, 60, 160, 120);
+          // Render logo in a circular badge for consistency with certificate design.
+          const centerX = 600;
+          const centerY = 120;
+          const radius = 60;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(logoImg, centerX - radius, centerY - radius, radius * 2, radius * 2);
+          ctx.restore();
+          ctx.strokeStyle = '#d4af37';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius + 4, 0, Math.PI * 2);
+          ctx.stroke();
           logoLoaded = true;
           resolve();
         };
@@ -196,6 +221,39 @@ const VerifyCertificate = () => {
         if (!resp.error && resp.data) {
           data = resp.data.find((cert) => formatCertificateId(cert).toUpperCase() === trimmedId.toUpperCase()) || null;
         }
+
+        if (!data && !error) {
+          const fallbackResp = await supabase
+            .from('exam_submissions')
+            .select(`
+              id,
+              submitted_at,
+              score_percent,
+              passed,
+              user:profiles!exam_submissions_user_id_fkey(full_name, email),
+              exam:exams(course_id, course:courses(title, category))
+            `)
+            .eq('passed', true)
+            .gte('submitted_at', start)
+            .lte('submitted_at', end);
+
+          if (!fallbackResp.error && fallbackResp.data) {
+            const matchedSubmission =
+              fallbackResp.data.find(
+                (sub) => formatFallbackCertificateId(sub).toUpperCase() === trimmedId.toUpperCase()
+              ) || null;
+            if (matchedSubmission) {
+              data = {
+                id: `fallback-${matchedSubmission.id}`,
+                issued_at: matchedSubmission.submitted_at,
+                revoked_at: null,
+                user: matchedSubmission.user || null,
+                course: matchedSubmission.exam?.course || null,
+                _fallback: true,
+              };
+            }
+          }
+        }
       } else {
         const resp = await supabase
           .from('certificates')
@@ -218,10 +276,12 @@ const VerifyCertificate = () => {
         setResult({ valid: false, message: 'This certificate has been revoked and is no longer valid.', data });
       } else {
         setResult({ valid: true, message: 'Certificate is valid and authentic!', data });
-        const formattedId = formatCertificateId(data);
+        const formattedId = data._fallback ? certId.trim() : formatCertificateId(data);
         const dataUrl = await buildCertificateDataUrl(data, formattedId);
         setPreviewUrl(dataUrl);
-        await supabase.from('certificate_verifications').insert({ certificate_id: data.id });
+        if (!data._fallback) {
+          await supabase.from('certificate_verifications').insert({ certificate_id: data.id });
+        }
       }
     } catch (err) {
       setResult({ valid: false, message: 'Certificate not present in our records. Not issued by SkillPro.' });

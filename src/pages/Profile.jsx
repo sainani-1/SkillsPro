@@ -8,6 +8,7 @@ import { prepareAvatarFile } from '../utils/imageUtils';
 
 const Profile = () => {
   const { profile, user, fetchProfile } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -46,6 +47,15 @@ const Profile = () => {
   };
 
   const changePassword = async () => {
+    if (!currentPassword) {
+      setAlertModal({
+        show: true,
+        title: 'Current Password Required',
+        message: 'Please enter your current password first.',
+        type: 'warning'
+      });
+      return;
+    }
     if (!newPassword || newPassword !== confirmPassword) {
       setAlertModal({
         show: true,
@@ -56,6 +66,33 @@ const Profile = () => {
       return;
     }
     setLoading(true);
+    const userEmail = profile?.email || user?.email;
+    if (!userEmail) {
+      setAlertModal({
+        show: true,
+        title: 'Error',
+        message: 'Unable to validate current password. Please login again.',
+        type: 'error'
+      });
+      setLoading(false);
+      return;
+    }
+
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: userEmail,
+      password: currentPassword
+    });
+    if (verifyError) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid Current Password',
+        message: 'Current password is incorrect.',
+        type: 'error'
+      });
+      setLoading(false);
+      return;
+    }
+
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) {
       setAlertModal({
@@ -71,6 +108,7 @@ const Profile = () => {
         message: 'Password changed successfully!',
         type: 'success'
       });
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     }
@@ -197,6 +235,9 @@ const Profile = () => {
         <InfoCard label="Email" value={profile.email || user?.email || '—'} />
         <InfoCard label="Phone" value={profile.phone || '—'} />
         <InfoCard label="Core Subject" value={profile.core_subject || 'Not set'} />
+        <InfoCard label="Education Level" value={profile.education_level || 'Not set'} />
+        <InfoCard label="Study Stream" value={profile.study_stream || 'Not set'} />
+        <InfoCard label="Diploma / Board" value={profile.diploma_certificate || 'Not provided'} />
         <InfoCard 
           label="Premium Status" 
           value={premiumActive ? `Active until ${new Date(profile.premium_until).toLocaleDateString()}` : 'Not Premium'}
@@ -304,6 +345,15 @@ const Profile = () => {
         </h2>
         <div className="space-y-3 max-w-md">
           <div>
+            <label className="block text-sm font-medium mb-2">Current Password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              className="w-full border rounded-lg p-2"
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium mb-2">New Password</label>
             <input 
               type="password"
@@ -350,3 +400,4 @@ const InfoCard = ({ label, value }) => (
 );
 
 export default Profile;
+

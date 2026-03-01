@@ -65,11 +65,29 @@ import RequestTeacher from './pages/RequestTeacher';
 import TeacherRequests from './pages/TeacherRequests';
 import AdminTeacherRequests from './pages/AdminTeacherRequests';
 import CertificateBlocks from './pages/CertificateBlocks';
+import AdminResetPassword from './pages/AdminResetPassword';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
   if (loading) return <LoadingSpinner message="Initializing your account..." />;
   if (!user) return <Navigate to="/login" />;
+
+  // Check if user is disabled
+  if (profile?.is_disabled) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-900 text-white flex-col p-6">
+        <div className="text-center space-y-4 max-w-xl">
+          <h1 className="text-3xl font-bold text-red-400">Account Disabled</h1>
+          <p>
+            Your account has been disabled by admin due to suspicious activity.
+          </p>
+          <p className="text-sm text-slate-300">
+            Please contact admin/support for reactivation.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Check if user is locked
   if (profile?.is_locked) {
@@ -113,7 +131,7 @@ const AdminRoute = ({ children }) => {
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Home />} />
@@ -177,6 +195,7 @@ function App() {
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
+          <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/send-gift" element={<AdminRoute><AdminSendGift /></AdminRoute>} />
           <Route path="admin/active-coupons" element={<AdminRoute><AdminActiveCoupons /></AdminRoute>} />
           <Route path="admin/change-course" element={<AdminRoute><AdminChangeCourse /></AdminRoute>} />

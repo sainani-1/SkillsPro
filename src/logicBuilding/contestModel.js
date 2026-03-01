@@ -71,9 +71,12 @@ export async function isContestActive() {
   const [endHour, endMin] = weeklyContest.endTime.split(':').map(Number);
   const nowHour = date.getHours();
   const nowMin = date.getMinutes();
-  console.log('[LogicBuilding] Server time:', date.toString());
-  console.log('[LogicBuilding] Server day:', day, '| Contest day:', weeklyContest.day);
-  console.log('[LogicBuilding] Server hour:min:', nowHour + ':' + nowMin, '| Contest window:', weeklyContest.startTime, '-', weeklyContest.endTime);
+  const shouldLog = import.meta.env.DEV && import.meta.env.VITE_LOGIC_BUILDING_DEBUG === 'true';
+  if (shouldLog) {
+    console.log('[LogicBuilding] Server time:', date.toString());
+    console.log('[LogicBuilding] Server day:', day, '| Contest day:', weeklyContest.day);
+    console.log('[LogicBuilding] Server hour:min:', nowHour + ':' + nowMin, '| Contest window:', weeklyContest.startTime, '-', weeklyContest.endTime);
+  }
   // Handle contest windows that may cross midnight
   const startMinutes = startHour * 60 + startMin;
   const endMinutes = endHour * 60 + endMin;
@@ -86,7 +89,9 @@ export async function isContestActive() {
     // Crosses midnight: e.g., 23:00-01:00
     inWindow = nowMinutes >= startMinutes || nowMinutes <= endMinutes;
   }
-  console.log('[LogicBuilding] In window:', inWindow);
+  if (shouldLog) {
+    console.log('[LogicBuilding] In window:', inWindow);
+  }
   if (day !== weeklyContest.day) return false;
   return inWindow;
 }

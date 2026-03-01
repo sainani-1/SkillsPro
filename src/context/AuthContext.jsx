@@ -106,17 +106,6 @@ export const AuthProvider = ({ children }) => {
       
       if (error) throw error;
       
-      // Check if account is disabled
-      if (data.is_disabled) {
-        console.warn('Account is disabled, signing out');
-        await supabase.auth.signOut();
-        setUser(null);
-        setProfile(null);
-        clearProfileCache();
-        setLoading(false);
-        return;
-      }
-
       setProfile(data);
       writeProfileCache({ userId: data.id, profile: data });
     } catch (error) {

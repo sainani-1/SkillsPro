@@ -799,80 +799,93 @@ const AdminCourses = () => {
 
             {/* Questions Tab */}
             {activeTab === 'questions' && exams[selectedCourse.id] && (
-              <div className="space-y-4">
-                <h3 className="font-semibold text-slate-900">Exam Questions ({(questions[exams[selectedCourse.id].id] || []).length})</h3>
-                
-                {(questions[exams[selectedCourse.id].id] || []).map((q, idx) => (
-                  <div key={idx} className="bg-slate-50 p-3 rounded border border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-slate-700 bg-slate-200 px-2 py-1 rounded">Q{idx + 1}</span>
-                      <button
-                        onClick={() => deleteQuestion(exams[selectedCourse.id].id, idx)}
-                        className="text-red-600 hover:text-red-700 p-1 hover:bg-red-50 rounded transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+              <div className="flex gap-6">
+                {/* Sidebar for question navigation */}
+                <div className="min-w-[80px] bg-slate-100 rounded p-3 flex flex-col items-center shadow">
+                  <h4 className="text-xs font-bold mb-2">Questions</h4>
+                  {(questions[exams[selectedCourse.id].id] || []).map((_, idx) => (
+                    <button
+                      key={idx}
+                      className="mb-2 w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 focus:bg-blue-300 focus:outline-none"
+                      onClick={() => {
+                        const el = document.getElementById(`admin-question-${idx}`);
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+                {/* Main question list */}
+                <div className="space-y-4 flex-1">
+                  <h3 className="font-semibold text-slate-900">Exam Questions ({(questions[exams[selectedCourse.id].id] || []).length})</h3>
+                  {(questions[exams[selectedCourse.id].id] || []).map((q, idx) => (
+                    <div key={idx} id={`admin-question-${idx}`} className="bg-slate-50 p-3 rounded border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-slate-700 bg-slate-200 px-2 py-1 rounded">Q{idx + 1}</span>
+                        <button
+                          onClick={() => deleteQuestion(exams[selectedCourse.id].id, idx)}
+                          className="text-red-600 hover:text-red-700 p-1 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Question Text</label>
+                        <input
+                          type="text"
+                          className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={q.question || ''}
+                          onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'question', e.target.value)}
+                          placeholder="Enter question..."
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-600 block">Options (Select correct answer)</label>
+                        {(q.options || []).map((opt, oIdx) => (
+                          <div key={oIdx} className="flex items-center gap-2 p-2 rounded border border-slate-200 hover:bg-white transition-colors"
+                            style={q.correct_index === oIdx ? { backgroundColor: '#dcfce7', borderColor: '#22c55e' } : {}}>
+                            <input
+                              type="radio"
+                              name={`correct-${idx}`}
+                              checked={q.correct_index === oIdx}
+                              onChange={() => handleQuestionChange(exams[selectedCourse.id].id, idx, 'correct_index', oIdx)}
+                              className="w-3 h-3 cursor-pointer"
+                            />
+                            <input
+                              type="text"
+                              className="flex-1 text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                              value={opt}
+                              onChange={e => handleOptionChange(exams[selectedCourse.id].id, idx, oIdx, e.target.value)}
+                              placeholder={`Option ${oIdx + 1}`}
+                            />
+                            {q.correct_index === oIdx && (
+                              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">✓ Correct</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-slate-600 block mb-1">Question Text</label>
-                      <input
-                        type="text"
-                        className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        value={q.question || ''}
-                        onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'question', e.target.value)}
-                        placeholder="Enter question..."
-                      />
+                  ))}
+                  {(questions[exams[selectedCourse.id].id] || []).length === 0 && (
+                    <div className="text-center py-8 text-slate-500">
+                      <p className="text-sm mb-3">No questions added yet</p>
                     </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-600 block">Options (Select correct answer)</label>
-                      {(q.options || []).map((opt, oIdx) => (
-                        <div key={oIdx} className="flex items-center gap-2 p-2 rounded border border-slate-200 hover:bg-white transition-colors"
-                          style={q.correct_index === oIdx ? { backgroundColor: '#dcfce7', borderColor: '#22c55e' } : {}}>
-                          <input
-                            type="radio"
-                            name={`correct-${idx}`}
-                            checked={q.correct_index === oIdx}
-                            onChange={() => handleQuestionChange(exams[selectedCourse.id].id, idx, 'correct_index', oIdx)}
-                            className="w-3 h-3 cursor-pointer"
-                          />
-                          <input
-                            type="text"
-                            className="flex-1 text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                            value={opt}
-                            onChange={e => handleOptionChange(exams[selectedCourse.id].id, idx, oIdx, e.target.value)}
-                            placeholder={`Option ${oIdx + 1}`}
-                          />
-                          {q.correct_index === oIdx && (
-                            <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">✓ Correct</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-
-                {(questions[exams[selectedCourse.id].id] || []).length === 0 && (
-                  <div className="text-center py-8 text-slate-500">
-                    <p className="text-sm mb-3">No questions added yet</p>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => addQuestion(exams[selectedCourse.id].id)}
-                  className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 transition-colors font-semibold"
-                >
-                  <Plus size={16} /> Add Question
-                </button>
-
-                <button
-                  onClick={() => handleSaveQuestions(exams[selectedCourse.id].id)}
-                  disabled={savingId === `questions-${exams[selectedCourse.id].id}`}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold disabled:opacity-60"
-                >
-                  <Save size={16} /> {savingId === `questions-${exams[selectedCourse.id].id}` ? 'Saving...' : 'Save All Questions'}
-                </button>
+                  )}
+                  <button
+                    onClick={() => addQuestion(exams[selectedCourse.id].id)}
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 transition-colors font-semibold"
+                  >
+                    <Plus size={16} /> Add Question
+                  </button>
+                  <button
+                    onClick={() => handleSaveQuestions(exams[selectedCourse.id].id)}
+                    disabled={savingId === `questions-${exams[selectedCourse.id].id}`}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold disabled:opacity-60"
+                  >
+                    <Save size={16} /> {savingId === `questions-${exams[selectedCourse.id].id}` ? 'Saving...' : 'Save All Questions'}
+                  </button>
+                </div>
               </div>
             )}
 

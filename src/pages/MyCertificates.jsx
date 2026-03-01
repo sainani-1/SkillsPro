@@ -184,7 +184,22 @@ const MyCertificates = () => {
       logoImg.crossOrigin = 'anonymous';
       await new Promise((resolve) => {
         logoImg.onload = () => {
-          ctx.drawImage(logoImg, 520, 60, 160, 120);
+          // Render logo inside a circular badge instead of a square box.
+          const centerX = 600;
+          const centerY = 120;
+          const radius = 60;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(logoImg, centerX - radius, centerY - radius, radius * 2, radius * 2);
+          ctx.restore();
+          ctx.strokeStyle = '#d4af37';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius + 4, 0, Math.PI * 2);
+          ctx.stroke();
           logoLoaded = true;
           resolve();
         };
@@ -390,18 +405,70 @@ const MyCertificates = () => {
     const fetchCerts = async () => {
       if (!profile) return;
       try {
-        const { data } = await supabase
+        const [{ data: certData, error: certError }, { data: passedData, error: passedError }] = await Promise.all([
+          supabase
           .from('certificates')
           .select(`
             id,
             issued_at,
             revoked_at,
+            exam_submission_id,
+            course_id,
             course:courses(title, category),
             exam:exam_submissions(score_percent)
           `)
-          .eq('user_id', profile.id);
-        const revoked = (data || []).filter(cert => cert.revoked_at).length;
-        const activeCerts = (data || []).filter(cert => !cert.revoked_at);
+          .eq('user_id', profile.id),
+          supabase
+            .from('exam_submissions')
+            .select(`
+              id,
+              submitted_at,
+              score_percent,
+              exam:exams(course_id, course:courses(title, category))
+            `)
+            .eq('user_id', profile.id)
+            .eq('passed', true),
+        ]);
+
+        if (certError) throw certError;
+        if (passedError) throw passedError;
+
+        const certRows = certData || [];
+        const passedRows = passedData || [];
+        const certBySubmission = new Set(
+          certRows
+            .map(cert => cert.exam_submission_id)
+            .filter(Boolean)
+            .map(String)
+        );
+        const certByCourse = new Set(
+          certRows
+            .map(cert => cert.course_id)
+            .filter(Boolean)
+            .map(String)
+        );
+
+        const fallbackCerts = passedRows
+          .filter(sub => !certBySubmission.has(String(sub.id)))
+          .filter(sub => {
+            const courseId = sub?.exam?.course_id;
+            if (!courseId) return true;
+            return !certByCourse.has(String(courseId));
+          })
+          .map(sub => ({
+            id: `fallback-${sub.id}`,
+            issued_at: sub.submitted_at || new Date().toISOString(),
+            revoked_at: null,
+            exam_submission_id: sub.id,
+            course_id: sub?.exam?.course_id ?? null,
+            course: sub?.exam?.course || { title: 'Course', category: '' },
+            exam: { score_percent: sub.score_percent },
+            _fallback: true,
+          }));
+
+        const merged = [...certRows, ...fallbackCerts];
+        const revoked = merged.filter(cert => cert.revoked_at).length;
+        const activeCerts = merged.filter(cert => !cert.revoked_at);
         setRevokedCount(revoked);
         setCertificates(activeCerts);
       } catch (err) {
