@@ -20,7 +20,7 @@ import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
  */
 
 const PremiumStatus = () => {
-  const { profile, isPremium } = useAuth();
+  const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [premiumDetails, setPremiumDetails] = useState(null);
@@ -39,12 +39,12 @@ const PremiumStatus = () => {
     try {
       setLoading(true);
       // Load premium cost
-      const { data: settingsData } = await supabase
+      const { data: settingsData, error: settingsError } = await supabase
         .from('settings')
         .select('value')
         .eq('key', 'premium_cost')
-        .single();
-      if (settingsData) {
+        .maybeSingle();
+      if (!settingsError && settingsData) {
         setPremiumCost(parseInt(settingsData.value) || 199);
       }
       // Load payment history
@@ -57,17 +57,23 @@ const PremiumStatus = () => {
         setPaymentHistory(payments || []);
       }
       // Load received offers
-      const { data: assignments } = await supabase
+      const { data: assignments, error: assignmentsError } = await supabase
         .from('offer_assignments')
         .select('*, offers(*)')
         .eq('user_id', profile.id);
+      if (assignmentsError) {
+        console.error('Error loading assigned offers:', assignmentsError);
+      }
       const assignedOffers = (assignments || []).map(a => a.offers);
 
       // Load global offers
-      const { data: globalOffers } = await supabase
+      const { data: globalOffers, error: globalOffersError } = await supabase
         .from('offers')
         .select('*')
         .eq('applies_to_all', true);
+      if (globalOffersError) {
+        console.error('Error loading global offers:', globalOffersError);
+      }
 
       // Merge and deduplicate offers
       const allOffers = [...assignedOffers, ...(globalOffers || [])];
@@ -80,7 +86,7 @@ const PremiumStatus = () => {
           isActive: true,
           expiryDate: new Date(profile.premium_until),
           daysRemaining: Math.ceil((new Date(profile.premium_until) - new Date()) / (1000 * 60 * 60 * 24)),
-          grantedBy: payments && payments.length > 0 ? 'paid' : (giftsData && giftsData.length > 0 ? 'gift' : 'admin')
+          grantedBy: payments && payments.length > 0 ? 'paid' : (uniqueOffers.length > 0 ? 'gift' : 'admin')
         });
       } else {
         setPremiumDetails({

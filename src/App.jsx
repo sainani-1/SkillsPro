@@ -74,6 +74,7 @@ import AdminPrizeCertificates from './pages/AdminPrizeCertificates';
 import AdminStudentReassignments from './pages/AdminStudentReassignments';
 import AdminMFAManagement from './pages/AdminMFAManagement';
 import CertificatePreview from './pages/CertificatePreview';
+import AdminDeletedAccounts from './pages/AdminDeletedAccounts';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -208,6 +209,7 @@ function App() {
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
+          <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />
           <Route path="admin/startup-ideas" element={<AdminRoute><AdminStartupIdeas /></AdminRoute>} />
           <Route path="admin/startup-collaborations" element={<AdminRoute><AdminStartupCollaborations /></AdminRoute>} />
           <Route path="admin/prize-certificates" element={<AdminRoute><AdminPrizeCertificates /></AdminRoute>} />

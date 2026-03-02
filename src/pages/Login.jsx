@@ -49,11 +49,33 @@ const Login = () => {
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, role, is_disabled, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
+        .select('id, role, is_disabled, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
         .eq('id', signInData.user.id)
         .single();
 
       if (profileError || !userProfile) {
+        // If this account was deleted earlier, block profile recreation and login.
+        const { data: deletedRecord } = await supabase
+          .from('deleted_accounts')
+          .select('id, reason, deleted_at')
+          .eq('user_id', signInData.user.id)
+          .order('deleted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (deletedRecord) {
+          await supabase.auth.signOut();
+          setAlertModal({
+            show: true,
+            title: 'Account Deleted',
+            message: deletedRecord.reason
+              ? `Your account was deleted. Reason: ${deletedRecord.reason}`
+              : 'Your account was deleted. Please contact support if needed.',
+            type: 'error'
+          });
+          setLoggingIn(false);
+          return;
+        }
+
         // Create profile on first verified login using auth metadata
         const meta = signInData.user.user_metadata || {};
         const { error: createProfileError } = await supabase.from('profiles').upsert({
@@ -151,8 +173,12 @@ const Login = () => {
         await supabase.auth.signOut();
         setAlertModal({
           show: true,
-          title: 'Account Disabled',
-          message: 'Your account has been disabled by an administrator. Please contact support.',
+          title: userProfile.deleted_at ? 'Account Deleted' : 'Account Disabled',
+          message: userProfile.deleted_at
+            ? (userProfile.deleted_reason
+              ? `Your account was deleted. Reason: ${userProfile.deleted_reason}`
+              : 'Your account was deleted. Please contact support.')
+            : 'Your account has been disabled by an administrator. Please contact support.',
           type: 'error'
         });
         setLoggingIn(false);

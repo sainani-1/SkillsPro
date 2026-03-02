@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 
@@ -682,6 +682,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/mfa-management" className={navItemClass} title="MFA Management">
               <ShieldCheck size={28} />
               {shouldShowText && <span>MFA Management</span>}
+            </NavLink>
+            <NavLink to="/app/admin/deleted-accounts" className={navItemClass} title="Deleted Accounts">
+              <Trash2 size={28} />
+              {shouldShowText && <span>Deleted Accounts</span>}
             </NavLink>
             <NavLink to="/app/admin/startup-ideas" className={navItemClass} title="Startup Ideas">
               <Briefcase size={28} />
