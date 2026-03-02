@@ -48,8 +48,6 @@ const StudentProgress = () => {
           const total = allAttendance.length;
           const percentage = total > 0 ? Math.round((present / total) * 100) : 0;
 
-          console.log(`Student: ${student.full_name}, Total: ${total}, Present: ${present}, %: ${percentage}`);
-
           return {
             ...student,
             attendance: { total, present, percentage }

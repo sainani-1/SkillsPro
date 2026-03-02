@@ -20,6 +20,18 @@ const CertificateBlocks = () => {
     loadUsers();
   }, []);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (error && String(error.message || '').includes('target_user_id')) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep certificate workflows resilient even if notification insert fails.
+    }
+  };
+
   const loadUsers = async () => {
     setLoading(true);
     try {
@@ -135,6 +147,9 @@ const CertificateBlocks = () => {
   const updateUserCertificates = async (user, action) => {
     setCertUpdatingUserId(user.id);
     try {
+      const {
+        data: { user: adminUser }
+      } = await supabase.auth.getUser();
       if (action === 'block') {
         const revokedAt = new Date().toISOString();
         try {
@@ -184,6 +199,18 @@ const CertificateBlocks = () => {
       } catch (insertErr) {
         console.warn('Could not materialize missing certificate rows:', insertErr);
       }
+
+      await pushNotification({
+        title: action === 'block' ? 'Certificates Blocked' : 'Certificates Unblocked',
+        content:
+          action === 'block'
+            ? 'Your certificates were blocked by admin due to policy violation.'
+            : 'Your certificates were restored by admin.',
+        type: action === 'block' ? 'warning' : 'success',
+        target_role: 'student',
+        target_user_id: user.id,
+        admin_id: adminUser?.id || null,
+      });
 
       const [{ data: certRows, error: certError }, { data: generatedRows, error: generatedError }] = await Promise.all([
         supabase
@@ -239,9 +266,24 @@ const CertificateBlocks = () => {
   const toggleSingleCertificate = async (cert) => {
     setCertActionId(cert.id);
     try {
+      const {
+        data: { user: adminUser }
+      } = await supabase.auth.getUser();
       const revokedAt = cert.revoked_at ? null : new Date().toISOString();
       const { error } = await supabase.from('certificates').update({ revoked_at: revokedAt }).eq('id', cert.id);
       if (error) throw error;
+      if (certModal.user?.id) {
+        await pushNotification({
+          title: revokedAt ? 'Certificate Blocked' : 'Certificate Unblocked',
+          content: revokedAt
+            ? `Certificate "${cert.displayTitle}" has been blocked by admin.`
+            : `Certificate "${cert.displayTitle}" has been restored by admin.`,
+          type: revokedAt ? 'warning' : 'success',
+          target_role: 'student',
+          target_user_id: certModal.user.id,
+          admin_id: adminUser?.id || null,
+        });
+      }
       await Promise.all([loadUsers(), refreshCertModalRows()]);
     } catch (err) {
       setAlertModal({
@@ -259,6 +301,9 @@ const CertificateBlocks = () => {
     if (!certModal.user) return;
     setCertActionId('all');
     try {
+      const {
+        data: { user: adminUser }
+      } = await supabase.auth.getUser();
       const revokedAt = new Date().toISOString();
       try {
         await ensureCertificateRowsForPassedExams(certModal.user.id, revokedAt);
@@ -271,6 +316,14 @@ const CertificateBlocks = () => {
         .eq('user_id', certModal.user.id)
         .is('revoked_at', null);
       if (error) throw error;
+      await pushNotification({
+        title: 'All Certificates Blocked',
+        content: 'All your active certificates were blocked by admin.',
+        type: 'warning',
+        target_role: 'student',
+        target_user_id: certModal.user.id,
+        admin_id: adminUser?.id || null,
+      });
       await Promise.all([loadUsers(), refreshCertModalRows()]);
       setAlertModal({
         show: true,

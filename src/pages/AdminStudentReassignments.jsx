@@ -15,6 +15,22 @@ const AdminStudentReassignments = () => {
   const [studentQuery, setStudentQuery] = useState('');
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
 
+  const pushNotifications = async (rows) => {
+    if (!rows?.length) return;
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(rows);
+      if (error && String(error.message || '').includes('target_user_id')) {
+        const fallbackRows = rows.map((r) => {
+          const { target_user_id, ...rest } = r;
+          return rest;
+        });
+        await supabase.from('admin_notifications').insert(fallbackRows);
+      }
+    } catch {
+      // Keep reassignment flow resilient even if notification insert fails.
+    }
+  };
+
   const loadTeachers = async () => {
     const { data, error } = await supabase
       .from('profiles')
@@ -179,6 +195,39 @@ const AdminStudentReassignments = () => {
         .in('student_id', selectedStudentIds)
         .in('status', ['pending', 'assigned', 'scheduled']);
       if (guidanceErr) throw guidanceErr;
+
+      const fromTeacher = teachers.find((t) => t.id === fromTeacherId);
+      const toTeacher = teachers.find((t) => t.id === toTeacherId);
+      const selectedStudents = students.filter((s) => selectedStudentIds.includes(s.id));
+      const adminId = user?.id || profile?.id || null;
+
+      const studentNotifications = selectedStudents.map((s) => ({
+        title: 'Teacher Reassigned',
+        content: `Your teacher has been changed to ${toTeacher?.full_name || 'a new teacher'}.`,
+        type: 'info',
+        target_role: 'student',
+        target_user_id: s.id,
+        admin_id: adminId,
+      }));
+      const teacherNotifications = [
+        {
+          title: 'Students Reassigned',
+          content: `${selectedStudentIds.length} student(s) were moved from you to ${toTeacher?.full_name || 'another teacher'}.`,
+          type: 'warning',
+          target_role: 'teacher',
+          target_user_id: fromTeacherId,
+          admin_id: adminId,
+        },
+        {
+          title: 'New Students Assigned',
+          content: `${selectedStudentIds.length} student(s) were assigned to you from ${fromTeacher?.full_name || 'another teacher'}.`,
+          type: 'success',
+          target_role: 'teacher',
+          target_user_id: toTeacherId,
+          admin_id: adminId,
+        },
+      ];
+      await pushNotifications([...studentNotifications, ...teacherNotifications]);
 
       openPopup('Reassigned', `${selectedStudentIds.length} student(s) moved successfully.`, 'success');
       setSelectedStudentIds([]);

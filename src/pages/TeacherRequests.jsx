@@ -18,6 +18,21 @@ const TeacherRequests = () => {
     fetchRequests();
   }, []);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (
+        error &&
+        String(error.message || '').includes('target_user_id')
+      ) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep request flow resilient if notification insert fails.
+    }
+  };
+
   const fetchRequests = async () => {
     try {
       const { data, error } = await supabase
@@ -72,6 +87,18 @@ const TeacherRequests = () => {
         .eq('id', requestId);
       
       if (error) throw error;
+
+      const req = requests.find((item) => item.id === requestId);
+      if (req?.student_id) {
+        await pushNotification({
+          title: 'Teacher Request Updated',
+          content: `Your request has been ${status}.`,
+          type: status === 'accepted' ? 'success' : 'warning',
+          target_role: 'student',
+          target_user_id: req.student_id,
+          admin_id: user?.id || null,
+        });
+      }
       
       setAlertModal({
         show: true,

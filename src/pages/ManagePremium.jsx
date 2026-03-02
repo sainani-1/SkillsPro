@@ -21,6 +21,18 @@ const ManagePremium = () => {
     loadUsers();
   }, []);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (error && String(error.message || '').includes('target_user_id')) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep premium workflow resilient even if notification insert fails.
+    }
+  };
+
   const loadUsers = async () => {
     const { data } = await supabase
       .from('profiles')
@@ -46,15 +58,28 @@ const ManagePremium = () => {
   const confirmGrant = async () => {
     setLoading(true);
 
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+
     await supabase.from('profiles').update({
       premium_until: validUntil
     }).eq('id', selectedUser.id);
 
     await supabase.from('premium_grants').insert({
       user_id: selectedUser.id,
-      granted_by: (await supabase.auth.getUser()).data.user.id,
+      granted_by: user?.id || null,
       valid_until: validUntil,
       reason
+    });
+
+    await pushNotification({
+      title: 'Premium Granted',
+      content: `Your premium membership is active until ${new Date(validUntil).toLocaleDateString('en-IN')}.${reason ? ` Reason: ${reason}` : ''}`,
+      type: 'success',
+      target_role: 'student',
+      target_user_id: selectedUser.id,
+      admin_id: user?.id || null,
     });
 
     // Show success alert
@@ -81,7 +106,18 @@ const ManagePremium = () => {
 
   const confirmRevoke = async () => {
     if (!userToRevoke) return;
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
     await supabase.from('profiles').update({ premium_until: null }).eq('id', userToRevoke.id);
+    await pushNotification({
+      title: 'Premium Revoked',
+      content: 'Your premium membership was revoked by admin.',
+      type: 'warning',
+      target_role: 'student',
+      target_user_id: userToRevoke.id,
+      admin_id: user?.id || null,
+    });
     setShowRevokeModal(false);
     setUserToRevoke(null);
     setAlertModal({

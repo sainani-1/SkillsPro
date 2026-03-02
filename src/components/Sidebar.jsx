@@ -18,6 +18,18 @@ const Sidebar = () => {
   const [newLeaveRequests, setNewLeaveRequests] = useState(0);
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
+  const [notificationPollingEnabled, setNotificationPollingEnabled] = useState(true);
+
+  const getLocalReadIds = (userId) => {
+    if (!userId) return new Set();
+    try {
+      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
+      const ids = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(ids) ? ids : []);
+    } catch {
+      return new Set();
+    }
+  };
 
   const isFetchNetworkIssue = (err) => {
     const message = String(err?.message || '').toLowerCase();
@@ -58,7 +70,7 @@ const Sidebar = () => {
           setNewGuidanceRequests(data?.length || 0);
         }
       } catch (err) {
-        console.error('Error fetching new guidance requests:', err);
+        setNewGuidanceRequests(0);
       }
     };
     fetchNewGuidanceRequests();
@@ -74,6 +86,7 @@ const Sidebar = () => {
   // Fetch unread notifications count
   useEffect(() => {
     if (!profile?.id) return;
+    if (!notificationPollingEnabled) return;
 
     const fetchUnreadNotifications = async () => {
       try {
@@ -92,6 +105,16 @@ const Sidebar = () => {
         }
 
         const notificationIds = notifications.map(n => n.id);
+        const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
+        const readTrackingEnabled =
+          role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+        const localReadIds = getLocalReadIds(profile.id);
+
+        if (!readTrackingEnabled) {
+          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          setUnreadNotifications(unread);
+          return;
+        }
 
         // Get read notifications
         const { data: readNotifs, error: readError } = await supabase
@@ -100,13 +123,21 @@ const Sidebar = () => {
           .eq('user_id', profile.id)
           .in('notification_id', notificationIds);
 
-        if (readError) throw readError;
+        if (readError) {
+          localStorage.setItem(readTrackingKey, 'false');
+          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          setUnreadNotifications(unread);
+          return;
+        }
 
-        const readIds = new Set(readNotifs?.map(r => r.notification_id) || []);
+        const readIds = new Set([...(readNotifs?.map(r => r.notification_id) || []), ...localReadIds]);
         const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
         setUnreadNotifications(unreadCount);
       } catch (err) {
-        console.error('Error fetching unread notifications:', err);
+        setUnreadNotifications(0);
+        if (isFetchNetworkIssue(err)) {
+          setNotificationPollingEnabled(false);
+        }
       }
     };
 
@@ -154,7 +185,7 @@ const Sidebar = () => {
           try {
             chatReadTimes = new Map(JSON.parse(stored));
           } catch (e) {
-            console.error('Error loading read times:', e);
+            chatReadTimes = new Map();
           }
         }
 
@@ -197,9 +228,6 @@ const Sidebar = () => {
         setUnreadChats(totalUnread);
       } catch (err) {
         setUnreadChats(0);
-        if (!isFetchNetworkIssue(err)) {
-          console.error('Error fetching unread chats:', err);
-        }
       }
     };
 
@@ -216,7 +244,7 @@ const Sidebar = () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [profile?.id, role, location.pathname]);
+  }, [profile?.id, role, location.pathname, notificationPollingEnabled]);
 
   // Fetch new user registrations count (Admin only)
   useEffect(() => {
@@ -246,7 +274,7 @@ const Sidebar = () => {
           setNewUserRegistrations(newCount);
         }
       } catch (err) {
-        console.error('Error fetching new users:', err);
+        setNewUserRegistrations(0);
       }
     };
 
@@ -292,7 +320,7 @@ const Sidebar = () => {
           setNewTeacherRequests(data?.length || 0);
         }
       } catch (err) {
-        console.error('Error fetching new teacher requests:', err);
+        setNewTeacherRequests(0);
       }
     };
 
@@ -332,7 +360,7 @@ const Sidebar = () => {
           setNewLeaveRequests(data?.length || 0);
         }
       } catch (err) {
-        console.error('Error fetching new leave requests:', err);
+        setNewLeaveRequests(0);
       }
     };
 
@@ -372,7 +400,7 @@ const Sidebar = () => {
           setNewStartupIdeas(data?.length || 0);
         }
       } catch (err) {
-        console.error('Error fetching new startup ideas:', err);
+        setNewStartupIdeas(0);
       }
     };
 

@@ -15,6 +15,18 @@ const AdminChangeCourse = () => {
   const [enrolling, setEnrolling] = useState(false);
   const [message, setMessage] = useState(null);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (error && String(error.message || '').includes('target_user_id')) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep enrollment flow resilient even if notification insert fails.
+    }
+  };
+
   // Search users by email or name
   useEffect(() => {
     if (userSearch.length < 2) {
@@ -89,6 +101,17 @@ const AdminChangeCourse = () => {
     if (error) {
       setMessage({ type: 'error', text: error.message });
     } else {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      await pushNotification({
+        title: 'New Course Added',
+        content: `You have been enrolled in "${selectedCourse.title}" by admin.`,
+        type: 'success',
+        target_role: 'student',
+        target_user_id: selectedUser.id,
+        admin_id: user?.id || null,
+      });
       setMessage({ type: 'success', text: 'User enrolled in course for free!' });
       // Refresh enrollments
       supabase

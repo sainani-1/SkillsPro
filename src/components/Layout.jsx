@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { Bell, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import AvatarImage from './AvatarImage';
+import Toast from './Toast';
 
 const Layout = () => {
   const { profile } = useAuth();
@@ -14,6 +15,34 @@ const Layout = () => {
   const [showPanelSearch, setShowPanelSearch] = useState(false);
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [notificationPollingEnabled, setNotificationPollingEnabled] = useState(true);
+  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+  const seenRealtimeNotificationIdsRef = useRef(new Set());
+  const seenActivityEventKeysRef = useRef(new Set());
+
+  const getLocalReadIds = (userId) => {
+    if (!userId) return new Set();
+    try {
+      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
+      const ids = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(ids) ? ids : []);
+    } catch {
+      return new Set();
+    }
+  };
+
+  const isFetchNetworkIssue = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      details.includes('failed to fetch') ||
+      details.includes('cors') ||
+      message.includes('err_failed') ||
+      message.includes('access to fetch')
+    );
+  };
 
   // Listen to sidebar width changes
   useEffect(() => {
@@ -35,43 +64,76 @@ const Layout = () => {
   const getPanelTargets = (role) => {
     const common = [
       { label: 'Dashboard', path: '/app' },
+      { label: 'Logic Building', path: '/app/logic-building-contest' },
       { label: 'Courses', path: '/app/courses' },
+      { label: 'Verify Certificate', path: '/app/verify' },
       { label: 'Profile', path: '/app/profile' },
-      { label: 'Settings', path: '/app/settings' },
+      { label: 'Mentorship Sessions', path: '/app/guidance-sessions' },
       { label: 'Notifications', path: '/app/notifications' },
-      { label: 'Verify Certificate', path: '/app/verify' }
+      { label: 'Settings', path: '/app/settings' },
     ];
-    if (role === 'admin') {
-      return [
-        ...common,
-        { label: 'User Management', path: '/app/admin/user-management' },
-        { label: 'Teacher Assignment', path: '/app/admin/teacher-assignment' },
-        { label: 'Student Reassignments', path: '/app/admin/student-reassignments' },
-        { label: 'MFA Management', path: '/app/admin/mfa-management' },
-        { label: 'Prize Certificates', path: '/app/admin/prize-certificates' },
-        { label: 'Certificate Blocks', path: '/app/admin/certificate-blocks' },
-        { label: 'Exam Settings', path: '/app/admin/exam-settings' },
-        { label: 'Manage Premium', path: '/app/admin/manage-premium' }
-      ];
-    }
-    if (role === 'teacher') {
-      return [
-        ...common,
-        { label: 'Clear Doubts', path: '/app/clear-doubts' },
-        { label: 'My Students', path: '/app/my-students' },
-        { label: 'Class Schedule', path: '/app/class-schedule' },
-        { label: 'Leaves', path: '/app/leaves' },
-        { label: 'Teacher Requests', path: '/app/teacher-requests' }
-      ];
-    }
-    return [
+
+    const studentTargets = [
       ...common,
       { label: 'My Certificates', path: '/app/my-certificates' },
-      { label: 'Class Schedule', path: '/app/class-schedule' },
+      { label: 'Live Classes', path: '/app/class-schedule' },
+      { label: 'Premium Membership', path: '/app/premium-status' },
+      { label: 'Discounts & Offers', path: '/app/offers' },
       { label: 'Attendance', path: '/app/attendance' },
+      { label: 'Ask a Doubt', path: '/app/chat' },
       { label: 'Request Teacher', path: '/app/request-teacher' },
-      { label: 'Premium Status', path: '/app/premium-status' }
+      { label: 'Startup Ideas', path: '/app/startup-ideas' },
+      { label: 'Startup Collaborations', path: '/app/startup-collaborations' },
     ];
+
+    const teacherTargets = [
+      ...common,
+      { label: 'Clear Doubts', path: '/app/clear-doubts' },
+      { label: 'Attendance', path: '/app/attendance' },
+      { label: 'My Students', path: '/app/my-students' },
+      { label: 'Assigned Classes', path: '/app/assigned-classes' },
+      { label: 'Schedule Sessions', path: '/app/class-schedule' },
+      { label: 'Apply Leave', path: '/app/leaves' },
+      { label: 'Session Reassignments', path: '/app/session-reassignments' },
+      { label: 'Student Requests', path: '/app/teacher-requests' },
+    ];
+
+    const adminTargets = [
+      ...common,
+      { label: 'Admin Scoreboard', path: '/app/admin/logic-building-admin-scoreboard' },
+      { label: 'Logic Building Setup', path: '/app/admin/logic-building-setup' },
+      { label: 'Change Course', path: '/app/admin/change-course' },
+      { label: 'Send Gift', path: '/app/admin/send-gift' },
+      { label: 'Active Coupons', path: '/app/admin/active-coupons' },
+      { label: 'User Management', path: '/app/admin/user-management' },
+      { label: 'Certificate Blocks', path: '/app/admin/certificate-blocks' },
+      { label: 'Prizes & Certificates', path: '/app/admin/prize-certificates' },
+      { label: 'User IDs', path: '/app/admin/user-ids' },
+      { label: 'Teacher Progress', path: '/app/admin/teacher-progress' },
+      { label: 'Student Progress', path: '/app/admin/student-progress' },
+      { label: 'Schedule Live Classes', path: '/app/class-schedule' },
+      { label: 'Attendance', path: '/app/attendance' },
+      { label: 'Manage Premium', path: '/app/admin/manage-premium' },
+      { label: 'Assign Teachers', path: '/app/admin/teacher-assignment' },
+      { label: 'Student Reassignments', path: '/app/admin/student-reassignments' },
+      { label: 'Teacher Requests', path: '/app/admin/teacher-requests' },
+      { label: 'Account Management', path: '/app/admin/accounts' },
+      { label: 'Post Notifications', path: '/app/admin/notifications' },
+      { label: 'Leave Requests', path: '/app/leaves' },
+      { label: 'Admin Courses', path: '/app/admin/courses' },
+      { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
+      { label: 'Manage Exam Retakes', path: '/app/admin/exam-retakes' },
+      { label: 'Exam Settings', path: '/app/admin/exam-settings' },
+      { label: 'Platform Settings', path: '/app/admin/settings' },
+      { label: 'Reset Password', path: '/app/admin/reset-password' },
+      { label: 'MFA Management', path: '/app/admin/mfa-management' },
+      { label: 'Deleted Accounts', path: '/app/admin/deleted-accounts' },
+      { label: 'Startup Ideas', path: '/app/admin/startup-ideas' },
+      { label: 'Startup Collaborations', path: '/app/admin/startup-collaborations' },
+    ];
+
+    const targets = role === 'admin' ? adminTargets : role === 'teacher' ? teacherTargets : studentTargets;
+    return targets.filter((item, index, arr) => arr.findIndex((x) => x.path === item.path) === index);
   };
 
   const panelTargets = getPanelTargets(profile?.role);
@@ -86,6 +148,7 @@ const Layout = () => {
       setUnreadNotifications(0);
       return;
     }
+    if (!notificationPollingEnabled) return;
 
     const fetchUnreadNotifications = async () => {
       try {
@@ -101,20 +164,38 @@ const Layout = () => {
           return;
         }
         const notificationIds = notifications.map((n) => n.id);
+        const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
+        const readTrackingEnabled =
+          profile.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+        const localReadIds = getLocalReadIds(profile.id);
+
+        if (!readTrackingEnabled) {
+          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          setUnreadNotifications(unread);
+          return;
+        }
+
         const { data: reads, error: readError } = await supabase
           .from('notification_reads')
           .select('notification_id')
           .eq('user_id', profile.id)
           .in('notification_id', notificationIds);
 
-        if (readError) throw readError;
+        if (readError) {
+          localStorage.setItem(readTrackingKey, 'false');
+          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          setUnreadNotifications(unread);
+          return;
+        }
 
-        const readIds = new Set((reads || []).map((r) => r.notification_id));
+        const readIds = new Set([...(reads || []).map((r) => r.notification_id), ...localReadIds]);
         const unread = notifications.filter((n) => !readIds.has(n.id)).length;
         setUnreadNotifications(unread);
       } catch (error) {
-        console.error('Layout: Error fetching unread notifications:', error);
         setUnreadNotifications(0);
+        if (isFetchNetworkIssue(error)) {
+          setNotificationPollingEnabled(false);
+        }
       }
     };
 
@@ -126,6 +207,224 @@ const Layout = () => {
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
+    };
+  }, [profile?.id, profile?.role, notificationPollingEnabled]);
+
+  useEffect(() => {
+    if (!profile?.id || !profile?.role) return;
+
+    const pushActivityToast = (message) => {
+      if (!message) return;
+      setToast({ show: true, message, type: 'info' });
+    };
+    const markSeen = (key) => {
+      if (!key) return false;
+      if (seenActivityEventKeysRef.current.has(key)) return true;
+      seenActivityEventKeysRef.current.add(key);
+      return false;
+    };
+
+    const channel = supabase
+      .channel(`layout-admin-notifications-${profile.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'admin_notifications' },
+        (payload) => {
+          const notif = payload?.new || {};
+          const notifId = notif.id;
+          if (!notifId || seenRealtimeNotificationIdsRef.current.has(notifId)) return;
+
+          const targetRole = notif.target_role;
+          const targetUserId = notif.target_user_id;
+          const roleMatch = targetRole === 'all' || targetRole === profile.role;
+          const userMatch = !targetUserId || targetUserId === profile.id;
+          if (!roleMatch || !userMatch) return;
+
+          seenRealtimeNotificationIdsRef.current.add(notifId);
+          setUnreadNotifications((prev) => prev + 1);
+          setToast({
+            show: true,
+            message: notif.title ? `New: ${notif.title}` : 'You have a new notification',
+            type: 'info',
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'class_session_participants',
+          filter: `student_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          const row = payload?.new || {};
+          const eventKey = `class_session_participants:insert:${row.id || row.session_id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          pushActivityToast('New class session added for you.');
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'class_sessions',
+          filter: `teacher_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          if (profile.role !== 'teacher') return;
+          const row = payload?.new || {};
+          const eventKey = `class_sessions:insert:${row.id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          pushActivityToast(`New class scheduled: ${row.title || 'Session'}`);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'teacher_assignment_requests' },
+        (payload) => {
+          const row = payload?.new || {};
+          const eventKey = `teacher_assignment_requests:insert:${row.id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (profile.role === 'admin') pushActivityToast('New teacher assignment request received.');
+          if (profile.role === 'teacher' && row.teacher_id === profile.id) {
+            pushActivityToast('New student request assigned to you.');
+          }
+          if (profile.role === 'student' && row.student_id === profile.id) {
+            pushActivityToast('Your teacher request was submitted.');
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'teacher_assignment_requests' },
+        (payload) => {
+          const row = payload?.new || {};
+          const eventKey = `teacher_assignment_requests:update:${row.id}:${row.updated_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (profile.role === 'student' && row.student_id === profile.id && row.status) {
+            pushActivityToast(`Teacher request updated: ${String(row.status)}`);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'leave_requests' },
+        (payload) => {
+          if (profile.role !== 'admin') return;
+          const row = payload?.new || {};
+          const eventKey = `leave_requests:insert:${row.id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          pushActivityToast('New leave request submitted.');
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'leave_requests' },
+        (payload) => {
+          if (profile.role !== 'teacher') return;
+          const row = payload?.new || {};
+          if (row.teacher_id !== profile.id) return;
+          const eventKey = `leave_requests:update:${row.id}:${row.updated_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (row.status) pushActivityToast(`Leave status: ${String(row.status)}`);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'guidance_requests' },
+        (payload) => {
+          const row = payload?.new || {};
+          const eventKey = `guidance_requests:insert:${row.id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (profile.role === 'admin') pushActivityToast('New mentorship request received.');
+          if (profile.role === 'student' && row.student_id === profile.id) {
+            pushActivityToast('Your mentorship request was submitted.');
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'guidance_requests' },
+        (payload) => {
+          if (profile.role !== 'student') return;
+          const row = payload?.new || {};
+          if (row.student_id !== profile.id) return;
+          const eventKey = `guidance_requests:update:${row.id}:${row.updated_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (row.status) pushActivityToast(`Mentorship request updated: ${String(row.status)}`);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'startup_ideas' },
+        (payload) => {
+          const row = payload?.new || {};
+          const eventKey = `startup_ideas:insert:${row.id}:${row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (profile.role === 'admin') pushActivityToast('New startup idea submitted.');
+          if (profile.role === 'student' && row.user_id === profile.id) {
+            pushActivityToast('Your startup idea was submitted.');
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'startup_ideas' },
+        (payload) => {
+          if (profile.role !== 'student') return;
+          const row = payload?.new || {};
+          if (row.user_id !== profile.id) return;
+          const eventKey = `startup_ideas:update:${row.id}:${row.reviewed_at || row.updated_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (row.status && row.status !== 'pending') {
+            pushActivityToast(`Startup idea status: ${String(row.status)}`);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'certificates', filter: `user_id=eq.${profile.id}` },
+        (payload) => {
+          if (profile.role !== 'student') return;
+          const row = payload?.new || {};
+          const eventKey = `certificates:insert:${row.id}:${row.issued_at || row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          pushActivityToast('New certificate generated for you.');
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'certificates', filter: `user_id=eq.${profile.id}` },
+        (payload) => {
+          if (profile.role !== 'student') return;
+          const row = payload?.new || {};
+          const oldRow = payload?.old || {};
+          const eventKey = `certificates:update:${row.id}:${row.revoked_at || row.updated_at || ''}`;
+          if (markSeen(eventKey)) return;
+          if (!oldRow.revoked_at && row.revoked_at) {
+            pushActivityToast('A certificate was blocked.');
+          } else if (oldRow.revoked_at && !row.revoked_at) {
+            pushActivityToast('A certificate was unblocked.');
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'generated_certificates', filter: `user_id=eq.${profile.id}` },
+        (payload) => {
+          if (profile.role !== 'student') return;
+          const row = payload?.new || {};
+          const eventKey = `generated_certificates:insert:${row.id}:${row.issued_at || row.created_at || ''}`;
+          if (markSeen(eventKey)) return;
+          pushActivityToast('New prize certificate added.');
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, [profile?.id, profile?.role]);
 
@@ -153,6 +452,12 @@ const Layout = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen">
+      <Toast
+        show={toast.show}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast((prev) => ({ ...prev, show: false }))}
+      />
       <Sidebar />
       <div
         className="flex flex-col transition-all duration-300"

@@ -31,6 +31,21 @@ const TeacherLeaves = () => {
     }
   }, [profile?.id]);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (
+        error &&
+        String(error.message || '').includes('target_user_id')
+      ) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep leave flows resilient even if notification insert fails.
+    }
+  };
+
   const loadLeaves = async () => {
     try {
       setError('');
@@ -85,6 +100,14 @@ const TeacherLeaves = () => {
 
       if (insertError) throw insertError;
 
+      await pushNotification({
+        title: 'New Leave Request',
+        content: `${profile?.full_name || 'Teacher'} submitted a leave request from ${new Date(startDate).toLocaleDateString('en-IN')} to ${new Date(endDate).toLocaleDateString('en-IN')}.`,
+        type: 'info',
+        target_role: 'admin',
+        admin_id: profile?.id || null,
+      });
+
       setStartDate('');
       setEndDate('');
       setReason('');
@@ -102,6 +125,7 @@ const TeacherLeaves = () => {
   const handleLeave = async (leaveId, status, comments = '') => {
     try {
       setError('');
+      const leave = leaves.find((item) => item.id === leaveId);
       const { error: updateError } = await supabase
         .from('teacher_leaves')
         .update({
@@ -113,6 +137,17 @@ const TeacherLeaves = () => {
         .eq('id', leaveId);
 
       if (updateError) throw updateError;
+
+      if (leave?.teacher_id) {
+        await pushNotification({
+          title: 'Leave Request Updated',
+          content: `Your leave request is now ${status}${comments ? `: ${comments}` : '.'}`,
+          type: status === 'approved' ? 'success' : status === 'rejected' ? 'warning' : 'info',
+          target_role: 'teacher',
+          target_user_id: leave.teacher_id,
+          admin_id: profile?.id || null,
+        });
+      }
       openPopup('Updated', `Leave request ${status}.`, 'success');
       await loadLeaves();
     } catch (err) {
@@ -125,6 +160,7 @@ const TeacherLeaves = () => {
   const revokeLeave = async (leaveId) => {
     try {
       setError('');
+      const leave = leaves.find((item) => item.id === leaveId);
       const { error: updateError } = await supabase
         .from('teacher_leaves')
         .update({
@@ -135,6 +171,16 @@ const TeacherLeaves = () => {
         .eq('id', leaveId);
 
       if (updateError) throw updateError;
+      if (leave?.teacher_id) {
+        await pushNotification({
+          title: 'Leave Revoked',
+          content: 'Your approved leave was revoked by admin.',
+          type: 'warning',
+          target_role: 'teacher',
+          target_user_id: leave.teacher_id,
+          admin_id: profile?.id || null,
+        });
+      }
       openPopup('Updated', 'Leave revoked successfully.', 'success');
       await loadLeaves();
     } catch (err) {

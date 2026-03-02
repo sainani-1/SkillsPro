@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Bell, CheckCircle } from 'lucide-react';
+import { Bell, CheckCircle, X } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function Notifications() {
@@ -8,6 +8,37 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [user, setUser] = useState(null);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const [networkBlocked, setNetworkBlocked] = useState(false);
+
+  const isFetchNetworkIssue = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      details.includes('failed to fetch') ||
+      details.includes('cors') ||
+      message.includes('err_failed') ||
+      message.includes('access to fetch')
+    );
+  };
+
+  const getLocalReadIds = (userId) => {
+    if (!userId) return new Set();
+    try {
+      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
+      const ids = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(ids) ? ids : []);
+    } catch {
+      return new Set();
+    }
+  };
+
+  const saveLocalReadIds = (userId, idsSet) => {
+    if (!userId) return;
+    localStorage.setItem(`localNotificationReads_${userId}`, JSON.stringify(Array.from(idsSet)));
+  };
 
   useEffect(() => {
     fetchUser();
@@ -32,7 +63,7 @@ export default function Notifications() {
         setUser(profileData);
       }
     } catch (err) {
-      console.error('Error fetching user:', err);
+      setUser(null);
     }
   };
 
@@ -40,6 +71,10 @@ export default function Notifications() {
     try {
       setLoading(true);
       setError('');
+      if (networkBlocked) {
+        setNotifications([]);
+        return;
+      }
 
       if (!user?.id) {
         setError('Not authenticated');
@@ -55,30 +90,57 @@ export default function Notifications() {
 
       if (fetchError) throw fetchError;
       const notificationIds = (data || []).map((n) => n.id);
+      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
+      let readTrackingEnabled =
+        user.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+      const localReadIds = getLocalReadIds(user.id);
 
-      // Fetch read receipts for this user only
-      let readIds = new Set();
-      if (notificationIds.length > 0) {
-        const { data: reads, error: readError } = await supabase
-          .from('notification_reads')
-          .select('notification_id')
-          .eq('user_id', user.id)
-          .in('notification_id', notificationIds);
+      // Fetch read receipts for this user only (best-effort)
+      let readIds = new Set(localReadIds);
+      if (readTrackingEnabled && notificationIds.length > 0) {
+        try {
+          const { data: reads, error: readError } = await supabase
+            .from('notification_reads')
+            .select('notification_id')
+            .eq('user_id', user.id)
+            .in('notification_id', notificationIds);
 
-        if (readError) throw readError;
-        readIds = new Set(reads?.map((r) => r.notification_id) || []);
+          if (!readError) {
+            const dbReadIds = reads?.map((r) => r.notification_id) || [];
+            readIds = new Set([...readIds, ...dbReadIds]);
+            saveLocalReadIds(user.id, readIds);
+          } else {
+            readTrackingEnabled = false;
+            localStorage.setItem(readTrackingKey, 'false');
+          }
+        } catch (readErr) {
+          // Keep notifications usable even when read-receipt table is blocked.
+          readTrackingEnabled = false;
+          localStorage.setItem(readTrackingKey, 'false');
+        }
       }
 
       const unreadIds = notificationIds.filter((id) => !readIds.has(id));
 
-      // Auto-mark all as read when the page is opened
-      if (unreadIds.length > 0) {
-        const rows = unreadIds.map((id) => ({ notification_id: id, user_id: user.id }));
-        const { error: upsertError } = await supabase
-          .from('notification_reads')
-          .upsert(rows, { onConflict: 'notification_id,user_id' });
-        if (upsertError) throw upsertError;
-        unreadIds.forEach((id) => readIds.add(id));
+      // Auto-mark all as read when the page is opened (best-effort)
+      if (readTrackingEnabled && unreadIds.length > 0) {
+        try {
+          const rows = unreadIds.map((id) => ({ notification_id: id, user_id: user.id }));
+          const { error: upsertError } = await supabase
+            .from('notification_reads')
+            .upsert(rows, { onConflict: 'notification_id,user_id' });
+          if (!upsertError) {
+            unreadIds.forEach((id) => readIds.add(id));
+            saveLocalReadIds(user.id, readIds);
+          } else {
+            readTrackingEnabled = false;
+            localStorage.setItem(readTrackingKey, 'false');
+          }
+        } catch (upsertErr) {
+          // Ignore write failures; list should still load.
+          readTrackingEnabled = false;
+          localStorage.setItem(readTrackingKey, 'false');
+        }
       }
 
       const formattedData = (data || []).map((notif) => ({
@@ -88,8 +150,13 @@ export default function Notifications() {
 
       setNotifications(formattedData);
     } catch (err) {
-      console.error('Error fetching notifications:', err);
-      setError('Failed to load notifications');
+      if (isFetchNetworkIssue(err)) {
+        setNetworkBlocked(true);
+        setNotifications([]);
+        setError('');
+      } else {
+        setError('Failed to load notifications');
+      }
     } finally {
       setLoading(false);
     }
@@ -99,7 +166,19 @@ export default function Notifications() {
     try {
       if (!user?.id) return;
 
-      // Check if already marked as read
+      const localReadIds = getLocalReadIds(user.id);
+      localReadIds.add(notificationId);
+      saveLocalReadIds(user.id, localReadIds);
+      setNotifications((prev) =>
+        prev.map((notif) =>
+          notif.id === notificationId ? { ...notif, isRead: true } : notif
+        )
+      );
+
+      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
+      if (localStorage.getItem(readTrackingKey) === 'false') return;
+
+      // Check if already marked as read (best-effort)
       const { data: existingRead } = await supabase
         .from('notification_reads')
         .select('id')
@@ -115,17 +194,22 @@ export default function Notifications() {
             user_id: user.id,
           });
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          localStorage.setItem(readTrackingKey, 'false');
+          return;
+        }
       }
 
-      // Update local state
-      setNotifications((prev) =>
-        prev.map((notif) =>
-          notif.id === notificationId ? { ...notif, isRead: true } : notif
-        )
-      );
     } catch (err) {
-      console.error('Error marking as read:', err);
+      // Keep silent here; notification content should remain usable even if read-write is blocked.
+    }
+  };
+
+  const openNotification = async (notif) => {
+    setSelectedNotification(notif);
+    if (!notif.isRead) {
+      await markAsRead(notif.id);
+      setSelectedNotification((prev) => (prev?.id === notif.id ? { ...prev, isRead: true } : prev));
     }
   };
 
@@ -200,7 +284,7 @@ export default function Notifications() {
             {notifications.map((notif) => (
               <div
                 key={notif.id}
-                onClick={() => !notif.isRead && markAsRead(notif.id)}
+                onClick={() => openNotification(notif)}
                 className={`border rounded-lg p-6 cursor-pointer transition-all ${getTypeColor(notif.type)} ${
                   !notif.isRead ? 'shadow-md' : 'shadow'
                 }`}
@@ -235,6 +319,53 @@ export default function Notifications() {
           </div>
         )}
       </div>
+
+      {selectedNotification && (
+        <div
+          className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setSelectedNotification(null)}
+        >
+          <div
+            className={`w-full max-w-2xl border rounded-2xl shadow-2xl ${getTypeColor(selectedNotification.type)} bg-white`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between p-5 border-b border-slate-200">
+              <div className="pr-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className={`px-3 py-1 text-xs font-medium rounded-full ${getTypeBadgeColor(
+                      selectedNotification.type
+                    )}`}
+                  >
+                    {selectedNotification.type.toUpperCase()}
+                  </span>
+                  {!selectedNotification.isRead && (
+                    <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                  )}
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900">{selectedNotification.title}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNotification(null)}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+                aria-label="Close notification"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6 max-h-[60vh] overflow-y-auto">
+              <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">
+                {selectedNotification.content}
+              </p>
+              <p className="text-xs text-slate-500 mt-6">
+                {new Date(selectedNotification.created_at).toLocaleDateString()} at{' '}
+                {new Date(selectedNotification.created_at).toLocaleTimeString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

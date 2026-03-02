@@ -13,6 +13,21 @@ const AdminStartupIdeas = () => {
   const [filter, setFilter] = useState('pending');
   const [messageById, setMessageById] = useState({});
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (
+        error &&
+        String(error.message || '').includes('target_user_id')
+      ) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep review flow resilient even if notification insert fails.
+    }
+  };
+
   const loadIdeas = async () => {
     setLoading(true);
     try {
@@ -37,6 +52,7 @@ const AdminStartupIdeas = () => {
   const updateIdeaStatus = async (ideaId, status) => {
     try {
       const adminMessage = (messageById[ideaId] || '').trim();
+      const idea = ideas.find((item) => item.id === ideaId);
       const { error } = await supabase
         .from('startup_ideas')
         .update({
@@ -48,6 +64,17 @@ const AdminStartupIdeas = () => {
         })
         .eq('id', ideaId);
       if (error) throw error;
+
+      if (idea?.user_id) {
+        await pushNotification({
+          title: 'Startup Idea Reviewed',
+          content: `Your startup idea "${idea?.title || 'Idea'}" was ${status}.${adminMessage ? ` ${adminMessage}` : ''}`,
+          type: status === 'approved' ? 'success' : 'warning',
+          target_role: 'student',
+          target_user_id: idea.user_id,
+          admin_id: profile?.id || null,
+        });
+      }
       openPopup('Updated', `Idea ${status} successfully.`, 'success');
       await loadIdeas();
     } catch (error) {

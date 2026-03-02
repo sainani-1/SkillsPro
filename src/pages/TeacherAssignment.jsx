@@ -18,6 +18,18 @@ const TeacherAssignment = () => {
     loadData();
   }, []);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (error && String(error.message || '').includes('target_user_id')) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Keep assignment flow resilient even if notification insert fails.
+    }
+  };
+
   const loadData = async () => {
     try {
       const { data: studs, error: studError } = await supabase
@@ -63,6 +75,9 @@ const TeacherAssignment = () => {
       return;
     }
     setLoading(true);
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
 
     await supabase.from('profiles').update({
       assigned_teacher_id: selectedTeacher
@@ -71,6 +86,24 @@ const TeacherAssignment = () => {
     await supabase.from('teacher_assignments').insert({
       student_id: selectedStudent.id,
       teacher_id: selectedTeacher
+    });
+
+    const teacher = teachers.find((t) => t.id === selectedTeacher);
+    await pushNotification({
+      title: 'Teacher Assigned',
+      content: `You have been assigned to ${teacher?.full_name || 'a teacher'}.`,
+      type: 'success',
+      target_role: 'student',
+      target_user_id: selectedStudent.id,
+      admin_id: user?.id || null,
+    });
+    await pushNotification({
+      title: 'New Student Assigned',
+      content: `${selectedStudent.full_name} has been assigned to you.`,
+      type: 'info',
+      target_role: 'teacher',
+      target_user_id: selectedTeacher,
+      admin_id: user?.id || null,
     });
 
     setAlertModal({

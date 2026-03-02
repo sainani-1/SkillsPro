@@ -15,7 +15,6 @@ export const AuthProvider = ({ children }) => {
       const stored = localStorage.getItem(PROFILE_CACHE_KEY);
       return stored ? JSON.parse(stored) : null;
     } catch (error) {
-      console.error('Error reading profile cache:', error);
       return null;
     }
   };
@@ -24,7 +23,7 @@ export const AuthProvider = ({ children }) => {
     try {
       localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
     } catch (error) {
-      console.error('Error writing profile cache:', error);
+      // Ignore cache write failures; app state remains source of truth.
     }
   };
 
@@ -32,7 +31,7 @@ export const AuthProvider = ({ children }) => {
     try {
       localStorage.removeItem(PROFILE_CACHE_KEY);
     } catch (error) {
-      console.error('Error clearing profile cache:', error);
+      // Ignore cache clear failures.
     }
   };
 
@@ -109,7 +108,7 @@ export const AuthProvider = ({ children }) => {
       setProfile(data);
       writeProfileCache({ userId: data.id, profile: data });
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      setProfile(null);
     } finally {
       if (!background) setLoading(false);
     }

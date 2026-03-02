@@ -16,6 +16,19 @@ export default function AdminNotifications() {
   const [editId, setEditId] = useState(null);
   const [error, setError] = useState('');
 
+  const isFetchNetworkIssue = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      details.includes('failed to fetch') ||
+      details.includes('cors') ||
+      message.includes('err_failed') ||
+      message.includes('access to fetch')
+    );
+  };
+
   useEffect(() => {
     fetchNotifications();
   }, []);
@@ -31,8 +44,7 @@ export default function AdminNotifications() {
       if (fetchError) throw fetchError;
       setNotifications(data || []);
     } catch (err) {
-      console.error('Error fetching notifications:', err);
-      setError('Failed to fetch notifications');
+      setError(isFetchNetworkIssue(err) ? 'Failed to fetch notifications (network/CORS issue). Please check browser extensions or network.' : 'Failed to fetch notifications');
     } finally {
       setFetchingNotifications(false);
     }
@@ -91,8 +103,7 @@ export default function AdminNotifications() {
       setTargetRole('all');
       await fetchNotifications();
     } catch (err) {
-      console.error('Error saving notification:', err);
-      setError(err.message || 'Failed to save notification');
+      setError(isFetchNetworkIssue(err) ? 'Failed to post notification (network/CORS issue). Please check browser extensions or network.' : (err.message || 'Failed to save notification'));
     } finally {
       setLoading(false);
     }
@@ -110,8 +121,7 @@ export default function AdminNotifications() {
       if (deleteError) throw deleteError;
       await fetchNotifications();
     } catch (err) {
-      console.error('Error deleting notification:', err);
-      setError('Failed to delete notification');
+      setError(isFetchNetworkIssue(err) ? 'Failed to delete notification (network/CORS issue).' : 'Failed to delete notification');
     }
   };
 

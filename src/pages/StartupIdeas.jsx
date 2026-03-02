@@ -14,6 +14,21 @@ const StartupIdeas = () => {
   const [submitting, setSubmitting] = useState(false);
   const [ideas, setIdeas] = useState([]);
 
+  const pushNotification = async (payload) => {
+    try {
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (
+        error &&
+        String(error.message || '').includes('target_user_id')
+      ) {
+        const { target_user_id, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert(fallback);
+      }
+    } catch {
+      // Ignore notification insert errors for idea submission.
+    }
+  };
+
   const loadMyIdeas = async () => {
     if (!profile?.id) return;
     setLoading(true);
@@ -54,6 +69,13 @@ const StartupIdeas = () => {
         status: 'pending'
       });
       if (error) throw error;
+      await pushNotification({
+        title: 'New Startup Idea',
+        content: `${profile?.full_name || 'Student'} submitted startup idea "${title.trim()}".`,
+        type: 'info',
+        target_role: 'admin',
+        admin_id: profile?.id || null,
+      });
       setTitle('');
       setIdea('');
       openPopup('Submitted', 'Your startup idea was submitted to admin.', 'success');
