@@ -7,28 +7,43 @@ import LoadingSpinner from '../components/LoadingSpinner';
 const AdminExamOverrides = () => {
   const { profile } = useAuth();
   const [courses, setCourses] = useState([]);
+  const [students, setStudents] = useState([]);
   const [overrides, setOverrides] = useState([]);
   const [usersMap, setUsersMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ userId: '', courseId: '', days: 60, allowDate: '' });
+  const [studentQuery, setStudentQuery] = useState('');
   const [activeTab, setActiveTab] = useState('overrides');
   const [defaultDays, setDefaultDays] = useState(60);
   const [error, setError] = useState('');
 
   const courseOptions = useMemo(() => courses.map(c => ({ value: c.id, label: c.title || `Course ${c.id}` })), [courses]);
+  const matchedStudents = useMemo(() => {
+    const q = studentQuery.trim().toLowerCase();
+    if (!q) return [];
+    return students
+      .filter(
+        (s) =>
+          (s.full_name || '').toLowerCase().includes(q) ||
+          (s.email || '').toLowerCase().includes(q)
+      )
+      .slice(0, 10);
+  }, [students, studentQuery]);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
-        const [{ data: courseData }, { data: overrideData }, { data: settings }] = await Promise.all([
+        const [{ data: courseData }, { data: overrideData }, { data: settings }, { data: studentData }] = await Promise.all([
           supabase.from('courses').select('id, title').order('title'),
           supabase.from('exam_retake_overrides').select('id, user_id, course_id, allow_retake_at, created_at').order('created_at', { ascending: false }),
-          supabase.from('exam_settings').select('default_lock_days').eq('id', 1).maybeSingle()
+          supabase.from('exam_settings').select('default_lock_days').eq('id', 1).maybeSingle(),
+          supabase.from('profiles').select('id, full_name, email').eq('role', 'student').order('full_name')
         ]);
 
         if (courseData) setCourses(courseData);
+        if (studentData) setStudents(studentData);
         if (overrideData) {
           setOverrides(overrideData);
           const userIds = [...new Set(overrideData.map(o => o.user_id).filter(Boolean))];
@@ -91,6 +106,7 @@ const AdminExamOverrides = () => {
       if (insertError) throw insertError;
 
       setForm(prev => ({ ...prev, days: 60, allowDate: '' }));
+      setStudentQuery('');
       const { data: refresh } = await supabase
         .from('exam_retake_overrides')
         .select('id, user_id, course_id, allow_retake_at, created_at')
@@ -172,13 +188,39 @@ const AdminExamOverrides = () => {
         {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="space-y-2">
-            <label className="text-sm text-slate-600">Student User ID</label>
+            <label className="text-sm text-slate-600">Search Student</label>
             <input
-              value={form.userId}
-              onChange={e => setForm({ ...form, userId: e.target.value.trim() })}
+              value={studentQuery}
+              onChange={(e) => {
+                setStudentQuery(e.target.value);
+                setForm({ ...form, userId: '' });
+              }}
               className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              placeholder="uuid"
+              placeholder="Type name or email..."
             />
+            {matchedStudents.length > 0 && !form.userId && (
+              <div className="border rounded-lg max-h-44 overflow-auto">
+                {matchedStudents.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    onClick={() => {
+                      setForm({ ...form, userId: s.id });
+                      setStudentQuery(`${s.full_name} (${s.email})`);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-b-0"
+                  >
+                    <p className="text-sm font-medium text-slate-800">{s.full_name}</p>
+                    <p className="text-xs text-slate-500">{s.email}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+            {form.userId && (
+              <p className="text-xs text-emerald-700">
+                Selected: {students.find((s) => s.id === form.userId)?.full_name || form.userId}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <label className="text-sm text-slate-600">Course</label>
@@ -225,7 +267,10 @@ const AdminExamOverrides = () => {
             {saving ? 'Saving...' : 'Save Override'}
           </button>
           <button
-            onClick={() => setForm({ userId: '', courseId: '', days: 60, allowDate: '' })}
+            onClick={() => {
+              setForm({ userId: '', courseId: '', days: 60, allowDate: '' });
+              setStudentQuery('');
+            }}
             className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50"
             type="button"
           >

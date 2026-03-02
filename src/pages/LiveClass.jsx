@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { Video, Users, Mic, MicOff, VideoOff, PhoneOff, Settings, Monitor } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import useDialog from '../hooks/useDialog.jsx';
 
 const LiveClass = () => {
   const { sessionId } = useParams();
@@ -13,6 +14,7 @@ const LiveClass = () => {
   const jitsiContainerRef = useRef(null);
   const jitsiApiRef = useRef(null);
   const { openPopup, popupNode } = usePopup();
+  const { confirm, dialogNode } = useDialog();
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [meetingStarted, setMeetingStarted] = useState(false);
@@ -169,7 +171,8 @@ const LiveClass = () => {
   };
 
   const endSession = async () => {
-    if (!window.confirm('Are you sure you want to end this session for all participants?')) {
+    const ok = await confirm('Are you sure you want to end this session for all participants?', 'End Session');
+    if (!ok) {
       return;
     }
 
@@ -249,6 +252,7 @@ const LiveClass = () => {
   return (
     <div className="fixed inset-0 bg-slate-900 flex flex-col">
       {popupNode}
+      {dialogNode}
       {/* Header */}
       <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import AlertModal from '../components/AlertModal';
+import Toast from '../components/Toast';
 
 const usePopup = () => {
   const [popup, setPopup] = useState({ open: false, title: '', message: '', type: 'info' });
@@ -14,11 +14,11 @@ const usePopup = () => {
 
   const popupNode = useMemo(
     () => (
-      <AlertModal
+      <Toast
         show={popup.open}
-        title={popup.title}
-        message={popup.message}
+        message={`${popup.title ? `${popup.title}: ` : ''}${popup.message}`}
         type={popup.type}
+        duration={3000}
         onClose={closePopup}
       />
     ),

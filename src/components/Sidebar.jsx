@@ -17,6 +17,7 @@ const Sidebar = () => {
   const [newTeacherRequests, setNewTeacherRequests] = useState(0);
   const [newLeaveRequests, setNewLeaveRequests] = useState(0);
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
+  const [newStartupIdeas, setNewStartupIdeas] = useState(0);
 
   const isFetchNetworkIssue = (err) => {
     const message = String(err?.message || '').toLowerCase();
@@ -340,6 +341,46 @@ const Sidebar = () => {
     return () => clearInterval(interval);
   }, [profile?.id, role, location.pathname]);
 
+  // Fetch new startup ideas count (Admin only)
+  useEffect(() => {
+    if (!profile?.id || role !== 'admin') return;
+
+    const fetchNewStartupIdeas = async () => {
+      try {
+        const lastSeenKey = `lastSeenStartupIdeas_${profile.id}`;
+        const lastSeen = localStorage.getItem(lastSeenKey);
+
+        // If admin is on startup ideas page, mark all as seen
+        if (location.pathname === '/app/admin/startup-ideas') {
+          localStorage.setItem(lastSeenKey, new Date().toISOString());
+          setNewStartupIdeas(0);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('startup_ideas')
+          .select('id, created_at, status')
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (lastSeen && data) {
+          const newCount = data.filter((item) => new Date(item.created_at) > new Date(lastSeen)).length;
+          setNewStartupIdeas(newCount);
+        } else {
+          setNewStartupIdeas(data?.length || 0);
+        }
+      } catch (err) {
+        console.error('Error fetching new startup ideas:', err);
+      }
+    };
+
+    fetchNewStartupIdeas();
+    const interval = setInterval(fetchNewStartupIdeas, 30000);
+    return () => clearInterval(interval);
+  }, [profile?.id, role, location.pathname]);
+
   return (
     <aside
       className={`${isCollapsed && !isHovered ? 'w-20' : 'w-64'} bg-nani-dark text-white h-screen flex flex-col fixed left-0 top-0 transition-all duration-600 z-30`}
@@ -457,6 +498,14 @@ const Sidebar = () => {
               <UserPlus size={28} />
               {shouldShowText && <span>Request Teacher</span>}
             </NavLink>
+            <NavLink to="/app/startup-ideas" className={navItemClass} title="Startup Ideas">
+              <Briefcase size={28} />
+              {shouldShowText && <span>Startup Ideas</span>}
+            </NavLink>
+            <NavLink to="/app/startup-collaborations" className={navItemClass} title="Startup Collaborations">
+              <Users size={28} />
+              {shouldShowText && <span>Collaborations</span>}
+            </NavLink>
           </>
         )}
 
@@ -544,6 +593,10 @@ const Sidebar = () => {
               <Award size={28} />
               {shouldShowText && <span>Certificate Blocks</span>}
             </NavLink>
+            <NavLink to="/app/admin/prize-certificates" className={navItemClass} title="Prizes & Certificates">
+              <FileBadge size={28} />
+              {shouldShowText && <span>Prizes & Certificates</span>}
+            </NavLink>
             <NavLink to="/app/admin/user-ids" className={navItemClass} title="User IDs">
               <User size={28} />
               {shouldShowText && <span>User IDs</span>}
@@ -571,6 +624,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/teacher-assignment" className={navItemClass} title="Assign Teachers">
               <UserPlus size={28} />
               {shouldShowText && <span>Assign Teachers</span>}
+            </NavLink>
+            <NavLink to="/app/admin/student-reassignments" className={navItemClass} title="Student Reassignments">
+              <Users size={28} />
+              {shouldShowText && <span>Student Reassign</span>}
             </NavLink>
             <NavLink to="/app/admin/teacher-requests" className={navItemClass} title="Teacher Requests">
               <Users size={28} />
@@ -621,6 +678,23 @@ const Sidebar = () => {
             <NavLink to="/app/admin/reset-password" className={navItemClass} title="Reset Password">
               <Lock size={28} />
               {shouldShowText && <span>Reset Password</span>}
+            </NavLink>
+            <NavLink to="/app/admin/mfa-management" className={navItemClass} title="MFA Management">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span>MFA Management</span>}
+            </NavLink>
+            <NavLink to="/app/admin/startup-ideas" className={navItemClass} title="Startup Ideas">
+              <Briefcase size={28} />
+              {shouldShowText && <span>Startup Ideas</span>}
+              {newStartupIdeas > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {newStartupIdeas > 9 ? '9+' : newStartupIdeas}
+                </span>
+              )}
+            </NavLink>
+            <NavLink to="/app/admin/startup-collaborations" className={navItemClass} title="Startup Collaborations">
+              <Users size={28} />
+              {shouldShowText && <span>Startup Collabs</span>}
             </NavLink>
             {/* Send Gift - Admin only (single entry) */}
           </>

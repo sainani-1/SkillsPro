@@ -15,26 +15,35 @@ const TeacherDashboard = () => {
   }, [profile]);
 
   const loadData = async () => {
-    // Load assigned students from teacher_assignments (mentors)
+    if (!profile?.id) return;
+    // Load assigned students from mentor assignments
     const { data: mentorStuds } = await supabase
       .from('teacher_assignments')
-      .select('*, profiles(*)')
+      .select('student_id')
       .eq('teacher_id', profile.id)
       .eq('active', true);
     
-    // Load assigned students from guidance_requests
+    // Load assigned students from guidance requests
     const { data: guidanceStuds } = await supabase
       .from('guidance_requests')
       .select('student_id')
       .eq('assigned_to_teacher_id', profile.id);
     
-    // Combine and get unique students
+    // Combine and deduplicate students from both sources.
     const allStudentIds = new Set([
       ...(mentorStuds || []).map(s => s.student_id),
       ...(guidanceStuds || []).map(s => s.student_id)
     ]);
-    
-    setStudents(mentorStuds || []);
+    const studentIds = Array.from(allStudentIds).filter(Boolean);
+    if (studentIds.length) {
+      const { data: studentProfiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, avatar_url, premium_until')
+        .in('id', studentIds);
+      setStudents(studentProfiles || []);
+    } else {
+      setStudents([]);
+    }
 
     // Load upcoming class sessions
     const { data: classSessions } = await supabase
@@ -102,7 +111,7 @@ const TeacherDashboard = () => {
         <StatCard 
           icon={<Award className="text-purple-600" size={24} />}
           label="Premium Students"
-          value={students.filter(s => s.profiles?.premium_until && new Date(s.profiles.premium_until) > new Date()).length}
+          value={students.filter(s => s.premium_until && new Date(s.premium_until) > new Date()).length}
           bgColor="bg-purple-50"
         />
       </div>
@@ -212,13 +221,13 @@ const TeacherDashboard = () => {
           {students.slice(0, 6).map(student => (
             <div key={student.id} className="flex items-center gap-3 p-3 border rounded-lg">
               <img 
-                src={student.profiles?.avatar_url || 'https://via.placeholder.com/40'} 
-                alt={student.profiles?.full_name}
+                src={student.avatar_url || 'https://via.placeholder.com/40'} 
+                alt={student.full_name}
                 className="w-10 h-10 rounded-full object-cover"
               />
               <div className="flex-1">
-                <p className="font-semibold text-sm">{student.profiles?.full_name}</p>
-                <p className="text-xs text-slate-500">{student.profiles?.email}</p>
+                <p className="font-semibold text-sm">{student.full_name}</p>
+                <p className="text-xs text-slate-500">{student.email}</p>
               </div>
             </div>
           ))}

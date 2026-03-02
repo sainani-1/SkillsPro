@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Users, Search, UserPlus } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
@@ -8,6 +8,7 @@ const TeacherAssignment = () => {
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [search, setSearch] = useState('');
+  const [studentQuery, setStudentQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [loading, setLoading] = useState(false);
@@ -79,6 +80,7 @@ const TeacherAssignment = () => {
       type: 'success'
     });
     setSelectedStudent(null);
+    setStudentQuery('');
     setSelectedTeacher('');
     loadData();
     setLoading(false);
@@ -88,6 +90,17 @@ const TeacherAssignment = () => {
     s.full_name.toLowerCase().includes(search.toLowerCase()) ||
     s.email.toLowerCase().includes(search.toLowerCase())
   );
+  const matchedStudents = useMemo(() => {
+    const q = studentQuery.trim().toLowerCase();
+    if (!q) return [];
+    return students
+      .filter(
+        (s) =>
+          (s.full_name || '').toLowerCase().includes(q) ||
+          (s.email || '').toLowerCase().includes(q)
+      )
+      .slice(0, 10);
+  }, [students, studentQuery]);
 
   return (
     <div className="space-y-6">
@@ -100,19 +113,40 @@ const TeacherAssignment = () => {
         <h2 className="text-lg font-bold mb-4">Assign Teacher</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Select Student</label>
-            <select 
+            <label className="block text-sm font-medium mb-2">Search Student</label>
+            <input
+              type="text"
+              value={studentQuery}
+              onChange={(e) => {
+                setStudentQuery(e.target.value);
+                setSelectedStudent(null);
+              }}
+              placeholder="Type name or email..."
               className="w-full border rounded-lg p-2"
-              onChange={e => setSelectedStudent(students.find(s => s.id === e.target.value))}
-              value={selectedStudent?.id || ''}
-            >
-              <option value="">Choose student...</option>
-              {students.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name} ({s.email})
-                </option>
-              ))}
-            </select>
+            />
+            {matchedStudents.length > 0 && !selectedStudent && (
+              <div className="mt-2 border rounded-lg max-h-44 overflow-auto">
+                {matchedStudents.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedStudent(s);
+                      setStudentQuery(`${s.full_name} (${s.email})`);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-b-0"
+                  >
+                    <p className="text-sm font-medium text-slate-800">{s.full_name}</p>
+                    <p className="text-xs text-slate-500">{s.email}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedStudent && (
+              <p className="mt-2 text-xs text-emerald-700">
+                Selected: {selectedStudent.full_name} ({selectedStudent.email})
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium mb-2">Select Teacher</label>

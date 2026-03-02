@@ -4,8 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import AlertModal from '../components/AlertModal';
 import { Calendar, MessageSquare, Plus, AlertCircle, CheckCircle, Clock, Link as LinkIcon, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import useDialog from '../hooks/useDialog.jsx';
 
 const GuidanceSessions = () => {
+  const { confirm, dialogNode } = useDialog();
   const { profile } = useAuth();
   const [requests, setRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -20,6 +22,7 @@ const GuidanceSessions = () => {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showMentorModal, setShowMentorModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [mentorStudentQuery, setMentorStudentQuery] = useState('');
   const [selectedMentor, setSelectedMentor] = useState(null);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDateTime, setSessionDateTime] = useState('');
@@ -103,7 +106,7 @@ const GuidanceSessions = () => {
         if (profile.role === 'admin') {
           const { data: tchs, error: tchError } = await supabase
             .from('profiles')
-            .select('id, full_name')
+            .select('id, full_name, email')
             .eq('role', 'teacher');
           
           if (tchError) console.error('Error fetching teachers:', tchError);
@@ -112,7 +115,7 @@ const GuidanceSessions = () => {
           // Fetch all students
           const { data: stds, error: stdError } = await supabase
             .from('profiles')
-            .select('id, full_name')
+            .select('id, full_name, email')
             .eq('role', 'student');
           
           if (stdError) console.error('Error fetching students:', stdError);
@@ -255,7 +258,8 @@ const GuidanceSessions = () => {
   };
 
   const deleteSession = async (sessionId) => {
-    if (!confirm('Are you sure you want to delete this scheduled session? This action cannot be undone.')) {
+    const ok = await confirm('Are you sure you want to delete this scheduled session? This action cannot be undone.', 'Delete Session');
+    if (!ok) {
       return;
     }
 
@@ -342,6 +346,7 @@ const GuidanceSessions = () => {
       
       setShowMentorModal(false);
       setSelectedStudent(null);
+      setMentorStudentQuery('');
       setSelectedMentor(null);
       await loadData();
       setAlertModal({
@@ -363,6 +368,7 @@ const GuidanceSessions = () => {
 
   return (
     <div className="space-y-6">
+      {dialogNode}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Career Mentorship Sessions</h1>
         <p className="text-slate-500">Request and schedule one-on-one mentorship</p>
@@ -854,16 +860,46 @@ const GuidanceSessions = () => {
                 <h3 className="text-lg font-bold mb-4">Assign Mentor to Student</h3>
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-2">Select Student</label>
-                  <select 
-                    value={selectedStudent || ''}
-                    onChange={e => setSelectedStudent(e.target.value)}
+                  <input
+                    type="text"
+                    value={mentorStudentQuery}
+                    onChange={(e) => {
+                      setMentorStudentQuery(e.target.value);
+                      setSelectedStudent(null);
+                    }}
+                    placeholder="Search student by name..."
                     className="w-full border border-slate-200 rounded-lg p-2"
-                  >
-                    <option value="">-- Choose a student --</option>
-                    {students.map(s => (
-                      <option key={s.id} value={s.id}>{s.full_name}</option>
-                    ))}
-                  </select>
+                  />
+                  {mentorStudentQuery.trim().length > 0 && !selectedStudent && (
+                    <div className="mt-2 border rounded-lg max-h-44 overflow-auto">
+                      {students
+                        .filter(
+                          (s) =>
+                            (s.full_name || '').toLowerCase().includes(mentorStudentQuery.trim().toLowerCase()) ||
+                            (s.email || '').toLowerCase().includes(mentorStudentQuery.trim().toLowerCase())
+                        )
+                        .slice(0, 10)
+                        .map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedStudent(s.id);
+                              setMentorStudentQuery(`${s.full_name}${s.email ? ` (${s.email})` : ''}`);
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-b-0"
+                          >
+                            <p className="text-sm font-medium text-slate-800">{s.full_name}</p>
+                            {s.email && <p className="text-xs text-slate-500">{s.email}</p>}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                  {selectedStudent && (
+                    <p className="mt-2 text-xs text-emerald-700">
+                      Selected: {students.find((s) => s.id === selectedStudent)?.full_name || selectedStudent}
+                    </p>
+                  )}
                 </div>
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-2">Select Mentor (Teacher)</label>
@@ -889,6 +925,7 @@ const GuidanceSessions = () => {
                     onClick={() => {
                       setShowMentorModal(false);
                       setSelectedStudent(null);
+                      setMentorStudentQuery('');
                       setSelectedMentor(null);
                     }}
                     className="flex-1 bg-slate-200 text-slate-700 py-2 rounded-lg hover:bg-slate-300 transition-colors"

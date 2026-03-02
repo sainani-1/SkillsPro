@@ -4,6 +4,9 @@ import { supabase } from '../supabaseClient';
 import AlertModal from '../components/AlertModal';
 import { Users, Calendar, Video, FileText, Plus, Award, TrendingUp, UserPlus, Check, X, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import AvatarImage from '../components/AvatarImage';
+import usePopup from '../hooks/usePopup.jsx';
+import useDialog from '../hooks/useDialog.jsx';
 
 const AdminDashboard = ({ initialTab = 'overview' }) => {
     const [activeTab, setActiveTab] = useState(initialTab);
@@ -112,6 +115,8 @@ const StatCard = ({ icon, label, value, bgColor }) => (
 );
 
 const UserManagement = () => {
+    const { openPopup, popupNode } = usePopup();
+    const { confirm, dialogNode } = useDialog();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [certUpdatingUserId, setCertUpdatingUserId] = useState(null);
@@ -122,45 +127,129 @@ const UserManagement = () => {
 
     const loadUsers = async () => {
         setLoading(true);
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
-          .order('full_name');
+        try {
+          const [{ data: profileData, error: profileError }, { data: certData, error: certError }, { data: passedData, error: passedError }] = await Promise.all([
+            supabase
+              .from('profiles')
+              .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
+              .order('full_name'),
+            supabase
+              .from('certificates')
+              .select('user_id, revoked_at, exam_submission_id, course_id'),
+            supabase
+              .from('exam_submissions')
+              .select('id, user_id, exam:exams(course_id)')
+              .eq('passed', true),
+          ]);
 
-        const { data: certData } = await supabase
+          if (profileError) throw profileError;
+          if (certError) throw certError;
+          if (passedError) throw passedError;
+
+          const certMap = {};
+          const certBySubmission = {};
+          const certByCourse = {};
+          (certData || []).forEach(cert => {
+            if (!certMap[cert.user_id]) {
+              certMap[cert.user_id] = { total: 0, active: 0 };
+            }
+            certMap[cert.user_id].total += 1;
+            if (!cert.revoked_at) certMap[cert.user_id].active += 1;
+
+            if (!certBySubmission[cert.user_id]) certBySubmission[cert.user_id] = new Set();
+            if (!certByCourse[cert.user_id]) certByCourse[cert.user_id] = new Set();
+            if (cert.exam_submission_id) certBySubmission[cert.user_id].add(String(cert.exam_submission_id));
+            if (cert.course_id) certByCourse[cert.user_id].add(String(cert.course_id));
+          });
+
+          (passedData || []).forEach(sub => {
+            if (!certMap[sub.user_id]) {
+              certMap[sub.user_id] = { total: 0, active: 0 };
+            }
+            const subId = sub?.id ? String(sub.id) : null;
+            const courseId = sub?.exam?.course_id ? String(sub.exam.course_id) : null;
+            const seenBySub = subId && certBySubmission[sub.user_id]?.has(subId);
+            const seenByCourse = courseId && certByCourse[sub.user_id]?.has(courseId);
+            if (!seenBySub && !seenByCourse) {
+              certMap[sub.user_id].total += 1;
+              certMap[sub.user_id].active += 1;
+            }
+          });
+
+          const merged = (profileData || []).map(u => ({
+            ...u,
+            certs: certMap[u.id] || { total: 0, active: 0 }
+          }));
+
+          setUsers(merged);
+        } catch (err) {
+          console.error('Load users failed:', err);
+          openPopup('Error', err.message || 'Failed to load users', 'error');
+        } finally {
+          setLoading(false);
+        }
+    };
+
+    const ensureCertificateRowsForPassedExams = async (userId, revokedAt = null) => {
+      const [{ data: certRows, error: certErr }, { data: passedRows, error: passedErr }] = await Promise.all([
+        supabase
           .from('certificates')
-          .select('user_id, revoked_at');
+          .select('exam_submission_id, course_id')
+          .eq('user_id', userId),
+        supabase
+          .from('exam_submissions')
+          .select('id, submitted_at, exam:exams(course_id)')
+          .eq('user_id', userId)
+          .eq('passed', true),
+      ]);
 
-        const certMap = {};
-        (certData || []).forEach(cert => {
-          if (!certMap[cert.user_id]) {
-            certMap[cert.user_id] = { total: 0, active: 0 };
-          }
-          certMap[cert.user_id].total += 1;
-          if (!cert.revoked_at) certMap[cert.user_id].active += 1;
-        });
+      if (certErr) throw certErr;
+      if (passedErr) throw passedErr;
 
-        const merged = (profileData || []).map(u => ({
-          ...u,
-          certs: certMap[u.id] || { total: 0, active: 0 }
+      const certBySubmission = new Set((certRows || []).map(c => c.exam_submission_id).filter(Boolean).map(String));
+      const certByCourse = new Set((certRows || []).map(c => c.course_id).filter(Boolean).map(String));
+
+      const rowsToInsert = (passedRows || [])
+        .filter(sub => !certBySubmission.has(String(sub.id)))
+        .filter(sub => {
+          const courseId = sub?.exam?.course_id;
+          if (!courseId) return true;
+          return !certByCourse.has(String(courseId));
+        })
+        .map(sub => ({
+          user_id: userId,
+          exam_submission_id: sub.id,
+          course_id: sub?.exam?.course_id || null,
+          issued_at: sub.submitted_at || new Date().toISOString(),
+          revoked_at: revokedAt
         }));
 
-        setUsers(merged);
-        setLoading(false);
+      if (!rowsToInsert.length) return;
+      const { error: insertError } = await supabase.from('certificates').insert(rowsToInsert);
+      if (insertError && insertError.code !== '23505') {
+        throw insertError;
+      }
     };
 
     const updateUserCertificates = async (user, action) => {
       const confirmText = action === 'block'
         ? 'Block all active certificates for this user?'
         : 'Unblock all certificates for this user?';
-      if (!window.confirm(confirmText)) return;
+      const ok = await confirm(confirmText, 'Update Certificates');
+      if (!ok) return;
 
       setCertUpdatingUserId(user.id);
       try {
         if (action === 'block') {
+          const revokedAt = new Date().toISOString();
+          try {
+            await ensureCertificateRowsForPassedExams(user.id, revokedAt);
+          } catch (insertErr) {
+            console.warn('Could not materialize fallback certificates before blocking:', insertErr);
+          }
           const { error } = await supabase
             .from('certificates')
-            .update({ revoked_at: new Date().toISOString() })
+            .update({ revoked_at: revokedAt })
             .eq('user_id', user.id)
             .is('revoked_at', null);
           if (error) throw error;
@@ -175,7 +264,7 @@ const UserManagement = () => {
         await loadUsers();
       } catch (err) {
         console.error('Certificate update error:', err);
-        alert(err.message || 'Failed to update certificates');
+        openPopup('Error', err.message || 'Failed to update certificates', 'error');
       } finally {
         setCertUpdatingUserId(null);
       }
@@ -190,6 +279,8 @@ const UserManagement = () => {
 
     return (
       <div className="bg-white p-6 rounded-xl shadow-sm space-y-4">
+        {popupNode}
+        {dialogNode}
         <div className="flex flex-col gap-4">
           <div>
             <h3 className="font-bold">User Management</h3>
@@ -277,11 +368,12 @@ const UserManagement = () => {
                   return (
                     <tr key={u.id} className="border-t">
                       <td className="px-4 py-3 flex items-center gap-2">
-                        <img
-                          src={u.avatar_url || 'https://via.placeholder.com/32'}
+                        <AvatarImage
+                          userId={u.id}
+                          avatarUrl={u.avatar_url}
                           alt={u.full_name}
+                          fallbackName={u.full_name || 'User'}
                           className="w-8 h-8 rounded-full object-cover"
-                          onError={e => { e.currentTarget.src = 'https://via.placeholder.com/32'; }}
                         />
                         <span className="font-semibold text-slate-800">{u.full_name}</span>
                       </td>
@@ -421,6 +513,7 @@ const AddTeacherForm = () => {
 };
 
 const LeaveRequests = () => {
+  const { prompt, dialogNode } = useDialog();
   const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -769,8 +862,12 @@ const LeaveRequests = () => {
                     <Check size={16} /> Approve (+ Reassign)
                   </button>
                   <button
-                    onClick={() => {
-                      const comments = window.prompt('Reason for rejection:');
+                    onClick={async () => {
+                      const comments = await prompt('Reason for rejection:', {
+                        title: 'Reject Leave',
+                        required: true,
+                        placeholder: 'Enter reason'
+                      });
                       if (comments) {
                         handleLeave(leave.id, 'rejected', comments);
                       }
@@ -804,6 +901,7 @@ const LeaveRequests = () => {
         type={alertModal.type}
         onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
       />
+      {dialogNode}
 
       {confirmModal.show && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

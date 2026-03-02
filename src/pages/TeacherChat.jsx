@@ -16,6 +16,9 @@ const TeacherChat = () => {
   const [loading, setLoading] = useState(true);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastSeenGroupId, setLastSeenGroupId] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusError, setStatusError] = useState('');
   const messagesEndRef = useRef(null);
 
   // Clear global unread count when opening chat
@@ -57,8 +60,31 @@ const TeacherChat = () => {
     setMessages([]);
     setGroupMembers([]);
     setUnreadCounts({});
+    setDeleteConfirm(false);
+    setStatusMessage('');
+    setStatusError('');
     setLoading(true);
   }, [profile?.id]);
+
+  const getChatClearedAt = (gid) => {
+    if (!profile?.id || !gid) return null;
+    const key = `chatClearedAt_teacher_${profile.id}_${gid}`;
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const setChatClearedAt = (gid, isoTime) => {
+    if (!profile?.id || !gid) return;
+    const key = `chatClearedAt_teacher_${profile.id}_${gid}`;
+    try {
+      localStorage.setItem(key, isoTime || new Date().toISOString());
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   useEffect(() => {
     if (selectedGroup) {
@@ -78,7 +104,11 @@ const TeacherChat = () => {
           table: 'chat_messages',
           filter: `group_id=eq.${selectedGroup}`
         }, payload => {
-          setMessages(prev => [...prev, payload.new]);
+          if (payload.new.sender_id === profile?.id) return;
+          const clearedAt = getChatClearedAt(selectedGroup);
+          if (!clearedAt || new Date(payload.new.created_at) > new Date(clearedAt)) {
+            setMessages(prev => [...prev, payload.new]);
+          }
         })
         .subscribe();
 
@@ -149,7 +179,12 @@ const TeacherChat = () => {
         .select('*, profiles(full_name, avatar_url)')
         .eq('group_id', selectedGroup)
         .order('created_at', { ascending: true });
-      setMessages(data || []);
+      const clearedAt = getChatClearedAt(selectedGroup);
+      const filtered = (data || []).filter((msg) => {
+        if (!clearedAt) return true;
+        return new Date(msg.created_at) > new Date(clearedAt);
+      });
+      setMessages(filtered);
     } catch (error) {
       console.error('Error loading messages:', error);
     }
@@ -171,16 +206,77 @@ const TeacherChat = () => {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedGroup) return;
+    const content = newMessage.trim();
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      group_id: selectedGroup,
+      sender_id: profile.id,
+      content,
+      created_at: new Date().toISOString(),
+      profiles: {
+        full_name: profile.full_name,
+        avatar_url: profile.avatar_url
+      }
+    };
+
+    setMessages(prev => [...prev, optimisticMsg]);
+    setNewMessage('');
+    setStatusError('');
 
     try {
-      await supabase.from('chat_messages').insert({
+      const { error } = await supabase.from('chat_messages').insert({
         group_id: selectedGroup,
         sender_id: profile.id,
-        content: newMessage
+        content
       });
-      setNewMessage('');
+      if (error) throw error;
     } catch (error) {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setNewMessage(content);
       console.error('Error sending message:', error);
+      setStatusError('Failed to send message. Please try again.');
+    }
+  };
+
+  const clearCurrentChat = async () => {
+    if (!selectedGroup) return;
+    const currentGroupId = selectedGroup;
+    const nextGroupId = chatGroups.find((g) => g.id !== currentGroupId)?.id || null;
+    try {
+      const latestVisibleMsgTime = messages.reduce((max, msg) => {
+        const ts = new Date(msg.created_at).getTime();
+        return Number.isFinite(ts) ? Math.max(max, ts) : max;
+      }, 0);
+      const cutoffMs = Math.max(Date.now(), latestVisibleMsgTime) + 1000;
+      setChatClearedAt(currentGroupId, new Date(cutoffMs).toISOString());
+
+      const { error } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('group_id', currentGroupId);
+
+      if (error) {
+        console.warn('Teacher chat server delete blocked/failed; applied local clear only:', error.message);
+      }
+
+      setMessages([]);
+      setGroupMembers([]);
+      setChatGroups((prev) => prev.filter((g) => g.id !== currentGroupId));
+      setUnreadCounts((prev) => {
+        const next = { ...prev };
+        delete next[currentGroupId];
+        return next;
+      });
+      setSelectedGroup(nextGroupId);
+      setDeleteConfirm(false);
+      setStatusError('');
+      setStatusMessage('Chat deleted successfully.');
+      setTimeout(() => setStatusMessage(''), 2500);
+    } catch (error) {
+      console.error('Error clearing chat:', error);
+      setStatusError('Failed to clear chat. Please try again.');
+      setDeleteConfirm(false);
     }
   };
 
@@ -237,10 +333,43 @@ const TeacherChat = () => {
         <div className="lg:col-span-3 bg-white rounded-xl border flex flex-col">
           {/* Header */}
           <div className="p-4 border-b">
-            <h2 className="text-lg font-bold">Student Chat</h2>
-            <p className="text-xs text-slate-500">
-              {groupMembers.length} member{groupMembers.length !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Student Chat</h2>
+                <p className="text-xs text-slate-500">
+                  {groupMembers.length} member{groupMembers.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              {!deleteConfirm ? (
+                <button
+                  onClick={() => setDeleteConfirm(true)}
+                  className="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-lg hover:bg-red-200"
+                >
+                  Delete Chat
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setDeleteConfirm(false)}
+                    className="px-3 py-1 bg-slate-100 text-slate-700 text-xs rounded-lg hover:bg-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={clearCurrentChat}
+                    className="px-3 py-1 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700"
+                  >
+                    Confirm Delete
+                  </button>
+                </div>
+              )}
+            </div>
+            {statusMessage ? (
+              <p className="mt-2 text-xs text-emerald-600 font-medium">{statusMessage}</p>
+            ) : null}
+            {statusError ? (
+              <p className="mt-2 text-xs text-red-600 font-medium">{statusError}</p>
+            ) : null}
           </div>
 
           {/* Messages */}

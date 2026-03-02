@@ -49,7 +49,7 @@ const Login = () => {
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, role, is_disabled')
+        .select('id, role, is_disabled, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
         .eq('id', signInData.user.id)
         .single();
 
@@ -100,6 +100,50 @@ const Login = () => {
           setLoggingIn(false);
           return;
         }
+      } else {
+        // Backfill missing profile fields from signup metadata so users don't re-enter details manually.
+        const meta = signInData.user.user_metadata || {};
+        const profilePatch = { updated_at: new Date().toISOString() };
+
+        if (!userProfile.email && (signInData.user.email || email.trim())) {
+          profilePatch.email = signInData.user.email || email.trim();
+        }
+        if (!userProfile.full_name && meta.full_name) {
+          profilePatch.full_name = meta.full_name;
+        }
+        if (!userProfile.phone && meta.phone) {
+          profilePatch.phone = meta.phone;
+        }
+        if (!userProfile.education_level && meta.education_level) {
+          profilePatch.education_level = meta.education_level;
+        }
+        if (!userProfile.study_stream && meta.study_stream) {
+          profilePatch.study_stream = meta.study_stream;
+        }
+        if (!userProfile.diploma_certificate && meta.diploma_certificate) {
+          profilePatch.diploma_certificate = meta.diploma_certificate;
+        }
+        if (!userProfile.core_subject && meta.core_subject) {
+          profilePatch.core_subject = meta.core_subject;
+        }
+
+        if (Object.keys(profilePatch).length > 1) {
+          const { error: backfillError } = await supabase
+            .from('profiles')
+            .update(profilePatch)
+            .eq('id', signInData.user.id);
+
+          if (backfillError) {
+            setAlertModal({
+              show: true,
+              title: 'Profile Sync Error',
+              message: backfillError.message || 'Could not sync registration details to profile.',
+              type: 'error'
+            });
+            setLoggingIn(false);
+            return;
+          }
+        }
       }
 
       // Check if account is disabled
@@ -117,6 +161,8 @@ const Login = () => {
 
       // Check for admin role and MFA
       if (userProfile.role === 'admin') {
+        sessionStorage.removeItem('admin_mfa_verified');
+        sessionStorage.removeItem('admin_face_verified');
         // Check if MFA is enabled for admin
         const { data: factors, error: mfaError } = await supabase.auth.mfa.listFactors();
         if (mfaError) {
@@ -243,17 +289,16 @@ const Login = () => {
         <p className="text-center mt-2 text-sm">
           Forgot password? <Link to="/reset-password" className="text-gold-600 font-bold">Reset here</Link>
         </p>
-        <p className="text-center mt-2 text-sm text-slate-600">
-          Email not verified?{' '}
+        <div className="mt-3">
           <button
             type="button"
             onClick={handleResendVerification}
             disabled={resendingVerification}
-            className="text-blue-600 font-bold hover:underline disabled:opacity-60"
+            className="w-full border border-blue-200 bg-blue-50 text-blue-700 rounded px-3 py-2 text-sm font-semibold hover:bg-blue-100 disabled:opacity-60"
           >
-            {resendingVerification ? 'Sending...' : 'Resend verification email'}
+            {resendingVerification ? 'Sending verification...' : 'Resend verification email'}
           </button>
-        </p>
+        </div>
       </div>
     </div>
   );

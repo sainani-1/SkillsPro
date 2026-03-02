@@ -3,11 +3,13 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { Settings as SettingsIcon, User, Bell, Lock, Eye, EyeOff, Mail, Phone, MapPin, Briefcase, Calendar, Globe, Shield, Trash2 } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
+import useDialog from '../hooks/useDialog.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Settings = () => {
   const { profile, signOut } = useAuth();
   const { popupNode, openPopup } = usePopup();
+  const { confirm, prompt, dialogNode } = useDialog();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
 
@@ -108,11 +110,16 @@ const Settings = () => {
   };
 
   const handleDeleteAccount = async () => {
-    if (!window.confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
+    const ok = await confirm('Are you sure you want to delete your account? This action cannot be undone.', 'Delete Account');
+    if (!ok) {
       return;
     }
 
-    const confirmText = prompt('Type "DELETE" to confirm account deletion:');
+    const confirmText = await prompt('Type "DELETE" to confirm account deletion:', {
+      title: 'Final Confirmation',
+      required: true,
+      placeholder: 'Type DELETE'
+    });
     if (confirmText !== 'DELETE') {
       openPopup('Cancelled', 'Account deletion cancelled', 'info');
       return;
@@ -152,6 +159,7 @@ const Settings = () => {
   return (
     <div className="space-y-6">
       {popupNode}
+      {dialogNode}
       
       <div className="flex items-center justify-between">
         <div>

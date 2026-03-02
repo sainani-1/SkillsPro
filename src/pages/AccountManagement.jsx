@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Lock, Unlock, Award, Trash2, Search, Filter, AlertTriangle } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import AvatarImage from '../components/AvatarImage';
 
 const AccountManagement = () => {
   const [users, setUsers] = useState([]);
@@ -218,11 +219,12 @@ const AccountManagement = () => {
                 <tr key={user.id} className="border-b hover:bg-slate-50">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={user.avatar_url || 'https://via.placeholder.com/40'}
+                      <AvatarImage
+                        userId={user.id}
+                        avatarUrl={user.avatar_url}
                         alt={user.full_name}
+                        fallbackName={user.full_name || 'User'}
                         className="w-10 h-10 rounded-full object-cover"
-                        onError={e => e.currentTarget.src = 'https://via.placeholder.com/40'}
                       />
                       <span className="font-medium">{user.full_name}</span>
                     </div>

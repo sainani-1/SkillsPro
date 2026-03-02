@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Download, Eye } from 'lucide-react';
+import { Award, Download, Eye, Linkedin, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
@@ -77,6 +77,9 @@ const formatCertificateId = (cert) => {
   const random = generateDeterministicCode(String(cert?.id ?? `${y}${m}${d}`));
   return `SkillPro-${y}-${m}-${d}-${random}`;
 };
+
+const resolveCertificateCourseTitle = (cert) =>
+  cert?.generated_course_name || cert?.generated_name || cert?.course?.title || 'General Achievement';
 
 /**
  * MyCertificates Component
@@ -264,7 +267,7 @@ const MyCertificates = () => {
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 32px Georgia, serif';
     ctx.textAlign = 'center';
-    ctx.fillText(cert.course?.title || '_______________________________', 600, 560);
+    ctx.fillText(resolveCertificateCourseTitle(cert), 600, 560);
 
     // ===== LOGO & BRANDING SECTION =====
     // Use the actual logo; fall back to text only if logo fails to load.
@@ -385,6 +388,18 @@ const MyCertificates = () => {
     }
   };
 
+  const shareOnLinkedIn = (cert) => {
+    try {
+      const certId = formatCertificateId(cert);
+      const verifyUrl = `${window.location.origin}/verify/${encodeURIComponent(certId)}`;
+      const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(verifyUrl)}`;
+      window.open(linkedinUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      console.error('LinkedIn share error:', err);
+      openPopup('Share failed', 'Unable to open LinkedIn share.', 'error');
+    }
+  };
+
   /**
    * useEffect Hook - Fetch User Certificates
    * ==========================================
@@ -405,7 +420,11 @@ const MyCertificates = () => {
     const fetchCerts = async () => {
       if (!profile) return;
       try {
-        const [{ data: certData, error: certError }, { data: passedData, error: passedError }] = await Promise.all([
+        const [
+          { data: certData, error: certError },
+          { data: passedData, error: passedError },
+          { data: generatedData, error: generatedError }
+        ] = await Promise.all([
           supabase
           .from('certificates')
           .select(`
@@ -428,13 +447,32 @@ const MyCertificates = () => {
             `)
             .eq('user_id', profile.id)
             .eq('passed', true),
+          supabase
+            .from('generated_certificates')
+            .select(`
+              id,
+              award_type,
+              award_name,
+              reason,
+              course_name,
+              issued_at,
+              certificate:certificates(id, issued_at, revoked_at)
+            `)
+            .eq('user_id', profile.id),
         ]);
 
         if (certError) throw certError;
         if (passedError) throw passedError;
+        if (generatedError) throw generatedError;
 
         const certRows = certData || [];
         const passedRows = passedData || [];
+        const generatedRows = generatedData || [];
+        const generatedByCertId = new Map(
+          generatedRows
+            .filter((g) => g?.certificate?.id)
+            .map((g) => [String(g.certificate.id), g])
+        );
         const certBySubmission = new Set(
           certRows
             .map(cert => cert.exam_submission_id)
@@ -466,11 +504,42 @@ const MyCertificates = () => {
             _fallback: true,
           }));
 
-        const merged = [...certRows, ...fallbackCerts];
+        const enrichedCerts = certRows.map((cert) => {
+          const g = generatedByCertId.get(String(cert.id));
+          if (!g) return cert;
+          return {
+            ...cert,
+            _generated: true,
+            generated_id: g.id,
+            generated_type: g.award_type,
+            generated_name: g.award_name,
+            generated_reason: g.reason,
+            generated_course_name: g.course_name,
+          };
+        });
+
+        const generatedWithoutCert = generatedRows
+          .filter((g) => !g?.certificate?.id)
+          .map((g) => ({
+            id: `generated-${g.id}`,
+            issued_at: g.issued_at,
+            revoked_at: g?.certificate?.revoked_at || null,
+            course: { title: g.course_name || g.award_name || 'Generated Certificate', category: '' },
+            exam: null,
+            _generated: true,
+            generated_id: g.id,
+            generated_type: g.award_type,
+            generated_name: g.award_name,
+            generated_reason: g.reason,
+            generated_course_name: g.course_name,
+          }));
+
+        const merged = [...enrichedCerts, ...fallbackCerts, ...generatedWithoutCert].sort(
+          (a, b) => new Date(b.issued_at).getTime() - new Date(a.issued_at).getTime()
+        );
         const revoked = merged.filter(cert => cert.revoked_at).length;
-        const activeCerts = merged.filter(cert => !cert.revoked_at);
         setRevokedCount(revoked);
-        setCertificates(activeCerts);
+        setCertificates(merged);
       } catch (err) {
         console.error(err);
       } finally {
@@ -515,7 +584,7 @@ const MyCertificates = () => {
 
       {revokedCount > 0 && (
         <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
-          You are caught by copying, so we banned your certificate.
+          One or more certificates are blocked due to cheating/malpractice.
         </div>
       )}
 
@@ -526,32 +595,73 @@ const MyCertificates = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {certificates.map(cert => (
-            <div key={cert.id} className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm flex flex-col space-y-3">
+            <div
+              key={cert.id}
+              className={`bg-white border rounded-xl p-4 shadow-sm flex flex-col space-y-3 ${
+                cert.revoked_at ? 'border-red-200 bg-red-50/30' : 'border-slate-100'
+              }`}
+            >
               <div className="flex items-center space-x-3">
-                <Award className="text-gold-400" size={24} />
+                {cert.revoked_at ? (
+                  <XCircle className="text-red-600" size={24} />
+                ) : (
+                  <Award className="text-gold-400" size={24} />
+                )}
                 <div className="flex-1">
-                  <p className="font-semibold text-slate-900">{cert.course?.title}</p>
+                  <p className="font-semibold text-slate-900">
+                    {cert.generated_name || cert.generated_course_name || cert.course?.title || 'Certificate'}
+                  </p>
                   <p className="text-xs text-slate-500">Issued on {new Date(cert.issued_at).toLocaleDateString()}</p>
                   <p className="text-xs text-slate-500">Awarded to {profile?.full_name}</p>
                   <p className="text-xs font-mono text-blue-600 mt-1">ID: {formatCertificateId(cert)}</p>
+                  {cert.generated_type && (
+                    <p className="text-xs text-indigo-700 mt-1">
+                      Type: {cert.generated_type === 'course_completion'
+                        ? 'Completion Of Certificate'
+                        : cert.generated_type === 'weekly_contest_winner'
+                        ? 'Winner Of The Weekly Contest'
+                        : 'Custom'}
+                    </p>
+                  )}
+                  {cert.generated_reason && (
+                    <p className="text-xs text-slate-700 mt-1">Reason: {cert.generated_reason}</p>
+                  )}
+                  {cert.revoked_at && (
+                    <p className="text-xs text-red-700 mt-1">
+                      Blocked due to cheating/malpractice.
+                    </p>
+                  )}
                 </div>
               </div>
-              <div className="text-sm text-slate-600">Score: {cert.exam?.score_percent?.toFixed(1)}%</div>
-              <div className="grid grid-cols-2 gap-2">
+              {typeof cert.exam?.score_percent === 'number' ? (
+                <div className="text-sm text-slate-600">Score: {cert.exam.score_percent.toFixed(1)}%</div>
+              ) : (
+                <div className="text-sm text-slate-500">Admin Generated Certificate</div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <button
                   onClick={() => viewCertificate(cert)}
-                  className="flex items-center justify-center gap-2 border border-slate-200 text-slate-700 py-2 rounded-lg hover:border-nani-accent hover:text-nani-accent transition-colors"
+                  disabled={!!cert.revoked_at}
+                  className="flex items-center justify-center gap-2 border border-slate-200 text-slate-700 py-2 rounded-lg hover:border-nani-accent hover:text-nani-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Eye size={16} />
                   View
                 </button>
                 <button
                   onClick={() => downloadCertificate(cert)}
-                  disabled={downloading === cert.id}
-                  className="flex items-center justify-center gap-2 bg-nani-dark text-white py-2 rounded-lg hover:bg-nani-accent transition-colors disabled:opacity-60"
+                  disabled={downloading === cert.id || !!cert.revoked_at}
+                  className="flex items-center justify-center gap-2 bg-nani-dark text-white py-2 rounded-lg hover:bg-nani-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <Download size={16} />
                   {downloading === cert.id ? 'Downloading...' : 'Download PDF'}
+                </button>
+                <button
+                  onClick={() => shareOnLinkedIn(cert)}
+                  disabled={!!cert.revoked_at}
+                  className="flex items-center justify-center gap-2 bg-blue-700 text-white py-2 rounded-lg hover:bg-blue-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Linkedin size={16} />
+                  LinkedIn
                 </button>
               </div>
             </div>

@@ -4,9 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AlertModal from '../components/AlertModal';
 import { X } from 'lucide-react';
+import useDialog from '../hooks/useDialog.jsx';
 
 const TeacherRequests = () => {
   const { user } = useAuth();
+  const { confirm, dialogNode } = useDialog();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -92,7 +94,8 @@ const TeacherRequests = () => {
   };
 
   const handleClearHistory = async () => {
-    if (!confirm('Are you sure you want to clear all processed requests? This cannot be undone.')) {
+    const ok = await confirm('Are you sure you want to clear all processed requests? This cannot be undone.', 'Clear Request History');
+    if (!ok) {
       return;
     }
     
@@ -137,6 +140,7 @@ const TeacherRequests = () => {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {dialogNode}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Student Assignment Requests</h1>
         <p className="text-slate-600">

@@ -3,8 +3,10 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { MessageCircle, Clock, User, CheckCircle, AlertCircle, Send } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import usePopup from '../hooks/usePopup.jsx';
 
 const ClearDoubts = () => {
+  const { openPopup, popupNode } = usePopup();
   const { profile } = useAuth();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -245,7 +247,7 @@ const ClearDoubts = () => {
       fetchStudentChats(false);
     } catch (err) {
       console.error('Error deleting chat:', err);
-      alert('Failed to delete chat');
+      openPopup('Error', 'Failed to delete chat', 'error');
       setDeleteConfirm(false);
       setDeleteConfirmFinal(false);
     }
@@ -289,7 +291,7 @@ const ClearDoubts = () => {
       loadChatMessages(selectedChat.id);
     } catch (err) {
       console.error('Error sending reply:', err);
-      alert('Failed to send message');
+      openPopup('Error', 'Failed to send message', 'error');
     } finally {
       setSending(false);
     }
@@ -317,6 +319,7 @@ const ClearDoubts = () => {
 
   return (
     <div className="space-y-6">
+      {popupNode}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Student Chats</h1>
         <p className="text-slate-500">View all messages from your students</p>

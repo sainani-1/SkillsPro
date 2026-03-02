@@ -65,9 +65,6 @@ const Register = () => {
     } else if (formData.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
-    if (!file) {
-      newErrors.file = 'Profile photo is required';
-    }
     if (!formData.educationLevel) {
       newErrors.educationLevel = 'Education level is required';
     }
@@ -161,13 +158,13 @@ const Register = () => {
         }
 
         // 2. Upload Photo
-        let avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80';
+        let avatarUrl = null;
         if (file) {
             try {
                 const safeFile = await prepareAvatarFile(file);
-                const fileExt = file.name.split('.').pop();
+                const fileExt = safeFile?.name?.split('.').pop() || file.name.split('.').pop();
                 const fileName = `${user.id}.${fileExt}`;
-                const filePath = `avatars/${fileName}`;
+                const filePath = fileName;
                 
                 const { error: uploadError } = await supabase.storage
                     .from('avatars')
@@ -370,7 +367,7 @@ const Register = () => {
                 </div>
 
                 <div>
-                    <label className={`block text-sm text-slate-600 mb-2 font-medium ${errors.file ? 'text-red-500' : ''}`}>Profile Photo</label>
+                    <label className="block text-sm text-slate-600 mb-2 font-medium">Profile Photo (Optional)</label>
                     <input 
                         type="file" 
                         accept="image/*"
@@ -378,10 +375,9 @@ const Register = () => {
                           setFile(e.target.files?.[0] || null);
                           if (errors.file) setErrors({...errors, file: ''});
                         }} 
-                        className={`w-full text-sm border rounded-lg p-2 ${errors.file ? 'border-red-500' : ''}`}
+                        className="w-full text-sm border rounded-lg p-2"
                     />
                     {file && <p className="text-green-600 text-xs mt-1">✓ {file.name}</p>}
-                    {errors.file && <p className="text-red-500 text-xs mt-1">{errors.file}</p>}
                 </div>
 
                 <button disabled={loading} className="w-full btn-primary py-3 font-bold mt-6">

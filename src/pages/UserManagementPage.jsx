@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { Plus, Users, X } from 'lucide-react';
+import AvatarImage from '../components/AvatarImage';
+import usePopup from '../hooks/usePopup.jsx';
 
 const UserManagementPage = () => {
+    const { openPopup, popupNode } = usePopup();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -45,7 +48,7 @@ const UserManagementPage = () => {
         // Refresh users list
         loadUsers();
       } catch (error) {
-        alert('Error changing role: ' + error.message);
+        openPopup('Error', 'Error changing role: ' + error.message, 'error');
       } finally {
         setChangingRole(null);
       }
@@ -53,6 +56,7 @@ const UserManagementPage = () => {
 
     return (
       <div className="space-y-6">
+        {popupNode}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 rounded-xl text-white">
           <h1 className="text-2xl font-bold mb-1">User Management</h1>
           <p className="text-blue-100">Students, teachers, and admins with status, premium, and lock info.</p>
@@ -158,11 +162,12 @@ const UserManagementPage = () => {
                   return (
                     <tr key={u.id} className="border-t">
                       <td className="px-4 py-3 flex items-center gap-2">
-                        <img
-                          src={u.avatar_url || 'https://via.placeholder.com/32'}
+                        <AvatarImage
+                          userId={u.id}
+                          avatarUrl={u.avatar_url}
                           alt={u.full_name}
+                          fallbackName={u.full_name || 'User'}
                           className="w-8 h-8 rounded-full object-cover"
-                          onError={e => { e.currentTarget.src = 'https://via.placeholder.com/32'; }}
                         />
                         <span className="font-semibold text-slate-800">{u.full_name}</span>
                       </td>
@@ -257,7 +262,7 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                     phone: form.phone.trim(),
                     role: form.role,
                     core_subject: form.role === 'teacher' ? form.coreSubject : null,
-                    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80'
+                    avatar_url: null
                 }]);
 
             if (error) throw error;

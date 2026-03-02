@@ -2,6 +2,7 @@
 // Contest participation UI for students/teachers
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../supabaseClient';
 import { db } from './firebase';
 import { collection, doc, getDoc, setDoc, getDocs, updateDoc, increment } from 'firebase/firestore';
 import { isContestActive, getContestQuestions } from './contestModel';
@@ -42,6 +43,8 @@ export default function LogicBuildingContest() {
   const [contestActive, setContestActive] = useState(false);
   const [scoreMsg, setScoreMsg] = useState('');
   const [scoreboard, setScoreboard] = useState([]);
+  const [prizeTitle, setPrizeTitle] = useState('');
+  const [prizeDescription, setPrizeDescription] = useState('');
 
   // Check if already solved when question changes
   useEffect(() => {
@@ -110,7 +113,14 @@ export default function LogicBuildingContest() {
         solved = userSnap.data().solved || {};
       }
       solved[selectedQuestion.title] = true;
-      await setDoc(userRef, { name: username, score: prevScore + points, solved, code }, { merge: true });
+      await setDoc(userRef, {
+        name: username,
+        email: profile?.email || '',
+        user_id: profile?.id || '',
+        score: prevScore + points,
+        solved,
+        code
+      }, { merge: true });
       setDone(true);
       fetchScoreboard();
 
@@ -157,6 +167,24 @@ export default function LogicBuildingContest() {
 
   useEffect(() => {
     fetchScoreboard();
+  }, []);
+
+  useEffect(() => {
+    const loadPrizeConfig = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('key, value')
+          .in('key', ['logic_weekly_prize_title', 'logic_weekly_prize_description']);
+        if (error) throw error;
+        const map = Object.fromEntries((data || []).map((x) => [x.key, x.value || '']));
+        setPrizeTitle(map.logic_weekly_prize_title || '');
+        setPrizeDescription(map.logic_weekly_prize_description || '');
+      } catch (err) {
+        console.warn('Unable to load weekly prize config:', err.message);
+      }
+    };
+    loadPrizeConfig();
   }, []);
 
   // Show loading while auth/profile is loading
@@ -222,20 +250,22 @@ export default function LogicBuildingContest() {
       border: '2px solid #6366f1',
     }}>
       <h2 style={{ fontSize: '2.2rem', fontWeight: 'bold', color: '#6366f1', marginBottom: '2rem', textAlign: 'center', letterSpacing: '1px' }}>Logic Building Weekly Contest</h2>
-      <div style={{
-        margin: '0 auto 2rem auto',
-        background: 'linear-gradient(90deg, #fef9c3 0%, #fde68a 100%)',
-        border: '2px solid #f59e42',
-        borderRadius: '1.2rem',
-        padding: '1.2rem 2rem',
-        fontSize: '1.25rem',
-        color: '#b45309',
-        fontWeight: 'bold',
-        textAlign: 'center',
-        boxShadow: '0 2px 8px rgba(245,158,66,0.10)'
-      }}>
-        <span role="img" aria-label="star">⭐</span> Gain <span style={{color:'#ea580c'}}>1900 Rating</span> To Get <span style={{color:'#0ea5e9'}}>2 Months Extra Premium</span>!
-      </div>
+      {(prizeTitle || prizeDescription) && (
+        <div style={{
+          margin: '0 auto 2rem auto',
+          background: 'linear-gradient(90deg, #dbeafe 0%, #e0e7ff 100%)',
+          border: '2px solid #3b82f6',
+          borderRadius: '1.2rem',
+          padding: '1.2rem 2rem',
+          fontSize: '1.05rem',
+          color: '#1e3a8a',
+          textAlign: 'center',
+          boxShadow: '0 2px 8px rgba(59,130,246,0.12)'
+        }}>
+          {prizeTitle && <p style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>{prizeTitle}</p>}
+          {prizeDescription && <p style={{ marginTop: prizeTitle ? '0.35rem' : 0 }}>{prizeDescription}</p>}
+        </div>
+      )}
       <div style={{ marginBottom: '2rem', display: 'flex', gap: '1.5rem', alignItems: 'center', justifyContent: 'center' }}>
         <label style={{ fontWeight: 'bold', color: '#334155', fontSize: '1.1rem' }}>Select Question:</label>
         <select onChange={e => setSelectedQuestion(questions[e.target.value])} style={{ fontSize: '1.1rem', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1', minWidth: '220px' }}>
@@ -365,3 +395,4 @@ export default function LogicBuildingContest() {
     </div>
   );
 }
+

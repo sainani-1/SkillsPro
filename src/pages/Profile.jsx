@@ -5,6 +5,8 @@ import AlertModal from '../components/AlertModal';
 import { Lock, TrendingUp, Award, Upload } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { prepareAvatarFile } from '../utils/imageUtils';
+import { buildAvatarPublicUrl } from '../utils/avatarUtils';
+import AvatarImage from '../components/AvatarImage';
 
 const Profile = () => {
   const { profile, user, fetchProfile } = useAuth();
@@ -121,9 +123,9 @@ const Profile = () => {
     setUploading(true);
     try {
       const safeFile = await prepareAvatarFile(file);
-      const fileExt = file.name.split('.').pop();
+      const fileExt = safeFile?.name?.split('.').pop() || file.name.split('.').pop();
       const fileName = `${profile.id}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      const filePath = fileName;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
@@ -131,7 +133,7 @@ const Profile = () => {
       if (uploadError) throw uploadError;
 
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      const publicUrl = data?.publicUrl ? `${data.publicUrl}?t=${Date.now()}` : null;
+      const publicUrl = data?.publicUrl ? `${data.publicUrl}?t=${Date.now()}` : buildAvatarPublicUrl(filePath);
       if (!publicUrl) throw new Error('Unable to get avatar URL');
 
       const { error: updateError } = await supabase
@@ -199,17 +201,17 @@ const Profile = () => {
 
   if (!profile) return <div className="p-6">Loading profile...</div>;
 
-  const avatar = profile.avatar_url || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80';
   const premiumActive = profile.premium_until && new Date(profile.premium_until) > new Date();
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center space-x-6">
         <div className="relative">
-          <img 
-            src={avatar}
-            onError={(e) => { e.currentTarget.src = 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=200&q=80'; }}
+          <AvatarImage
+            userId={profile.id}
+            avatarUrl={profile.avatar_url}
             alt="Avatar"
+            fallbackName={profile.full_name || 'User'}
             className="w-20 h-20 rounded-full object-cover border-2 border-gold-400"
           />
           <label className="absolute -right-2 -bottom-2 bg-white border border-slate-200 rounded-full p-2 cursor-pointer shadow hover:bg-slate-50" title="Change photo">

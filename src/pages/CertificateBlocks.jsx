@@ -3,6 +3,7 @@ import { Award } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AlertModal from '../components/AlertModal';
+import AvatarImage from '../components/AvatarImage';
 
 const CertificateBlocks = () => {
   const [users, setUsers] = useState([]);
@@ -10,6 +11,8 @@ const CertificateBlocks = () => {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('student');
   const [certUpdatingUserId, setCertUpdatingUserId] = useState(null);
+  const [certModal, setCertModal] = useState({ open: false, user: null, loading: false, rows: [] });
+  const [certActionId, setCertActionId] = useState(null);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: null });
 
@@ -19,40 +22,129 @@ const CertificateBlocks = () => {
 
   const loadUsers = async () => {
     setLoading(true);
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, role, avatar_url')
-      .order('full_name');
+    try {
+      const [{ data: profileData, error: profileError }, { data: certData, error: certError }, { data: passedData, error: passedError }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, full_name, email, role, avatar_url')
+          .order('full_name'),
+        supabase
+          .from('certificates')
+          .select('user_id, revoked_at, exam_submission_id, course_id'),
+        supabase
+          .from('exam_submissions')
+          .select('id, user_id, exam:exams(course_id)')
+          .eq('passed', true),
+      ]);
 
-    const { data: certData } = await supabase
-      .from('certificates')
-      .select('user_id, revoked_at');
+      if (profileError) throw profileError;
+      if (certError) throw certError;
+      if (passedError) throw passedError;
 
-    const certMap = {};
-    (certData || []).forEach(cert => {
-      if (!certMap[cert.user_id]) {
-        certMap[cert.user_id] = { total: 0, active: 0 };
-      }
-      certMap[cert.user_id].total += 1;
-      if (!cert.revoked_at) certMap[cert.user_id].active += 1;
-    });
+      const certMap = {};
+      const certBySubmission = {};
+      const certByCourse = {};
+      (certData || []).forEach(cert => {
+        if (!certMap[cert.user_id]) {
+          certMap[cert.user_id] = { total: 0, active: 0 };
+        }
+        certMap[cert.user_id].total += 1;
+        if (!cert.revoked_at) certMap[cert.user_id].active += 1;
 
-    const merged = (profileData || []).map(u => ({
-      ...u,
-      certs: certMap[u.id] || { total: 0, active: 0 }
-    }));
+        if (!certBySubmission[cert.user_id]) certBySubmission[cert.user_id] = new Set();
+        if (!certByCourse[cert.user_id]) certByCourse[cert.user_id] = new Set();
+        if (cert.exam_submission_id) certBySubmission[cert.user_id].add(String(cert.exam_submission_id));
+        if (cert.course_id) certByCourse[cert.user_id].add(String(cert.course_id));
+      });
 
-    setUsers(merged);
-    setLoading(false);
+      // Include passed exams that are shown as fallback certificates in student view.
+      (passedData || []).forEach(sub => {
+        if (!certMap[sub.user_id]) {
+          certMap[sub.user_id] = { total: 0, active: 0 };
+        }
+        const subId = sub?.id ? String(sub.id) : null;
+        const courseId = sub?.exam?.course_id ? String(sub.exam.course_id) : null;
+        const seenBySub = subId && certBySubmission[sub.user_id]?.has(subId);
+        const seenByCourse = courseId && certByCourse[sub.user_id]?.has(courseId);
+        if (!seenBySub && !seenByCourse) {
+          certMap[sub.user_id].total += 1;
+          certMap[sub.user_id].active += 1;
+        }
+      });
+
+      const merged = (profileData || []).map(u => ({
+        ...u,
+        certs: certMap[u.id] || { total: 0, active: 0 }
+      }));
+
+      setUsers(merged);
+    } catch (err) {
+      console.error('Failed to load certificate block data:', err);
+      setAlertModal({
+        show: true,
+        title: 'Load Error',
+        message: err.message || 'Failed to load certificate data',
+        type: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const ensureCertificateRowsForPassedExams = async (userId, revokedAt = null) => {
+    const [{ data: certRows, error: certErr }, { data: passedRows, error: passedErr }] = await Promise.all([
+      supabase
+        .from('certificates')
+        .select('exam_submission_id, course_id')
+        .eq('user_id', userId),
+      supabase
+        .from('exam_submissions')
+        .select('id, submitted_at, exam:exams(course_id)')
+        .eq('user_id', userId)
+        .eq('passed', true),
+    ]);
+
+    if (certErr) throw certErr;
+    if (passedErr) throw passedErr;
+
+    const certBySubmission = new Set((certRows || []).map(c => c.exam_submission_id).filter(Boolean).map(String));
+    const certByCourse = new Set((certRows || []).map(c => c.course_id).filter(Boolean).map(String));
+
+    const rowsToInsert = (passedRows || [])
+      .filter(sub => !certBySubmission.has(String(sub.id)))
+      .filter(sub => {
+        const courseId = sub?.exam?.course_id;
+        if (!courseId) return true;
+        return !certByCourse.has(String(courseId));
+      })
+      .map(sub => ({
+        user_id: userId,
+        exam_submission_id: sub.id,
+        course_id: sub?.exam?.course_id || null,
+        issued_at: sub.submitted_at || new Date().toISOString(),
+        revoked_at: revokedAt
+      }));
+
+    if (!rowsToInsert.length) return;
+    const { error: insertError } = await supabase.from('certificates').insert(rowsToInsert);
+    if (insertError && insertError.code !== '23505') {
+      throw insertError;
+    }
   };
 
   const updateUserCertificates = async (user, action) => {
     setCertUpdatingUserId(user.id);
     try {
       if (action === 'block') {
+        const revokedAt = new Date().toISOString();
+        try {
+          await ensureCertificateRowsForPassedExams(user.id, revokedAt);
+        } catch (insertErr) {
+          console.warn('Could not materialize fallback certificates before blocking:', insertErr);
+        }
         const { error } = await supabase
           .from('certificates')
-          .update({ revoked_at: new Date().toISOString() })
+          .update({ revoked_at: revokedAt })
           .eq('user_id', user.id)
           .is('revoked_at', null);
         if (error) throw error;
@@ -81,6 +173,120 @@ const CertificateBlocks = () => {
       });
     } finally {
       setCertUpdatingUserId(null);
+    }
+  };
+
+  const openUserCertificateManager = async (user) => {
+    setCertModal({ open: true, user, loading: true, rows: [] });
+    try {
+      try {
+        await ensureCertificateRowsForPassedExams(user.id, null);
+      } catch (insertErr) {
+        console.warn('Could not materialize missing certificate rows:', insertErr);
+      }
+
+      const [{ data: certRows, error: certError }, { data: generatedRows, error: generatedError }] = await Promise.all([
+        supabase
+          .from('certificates')
+          .select('id, user_id, issued_at, revoked_at, exam_submission_id, course_id, course:courses(title, category)')
+          .eq('user_id', user.id)
+          .order('issued_at', { ascending: false }),
+        supabase
+          .from('generated_certificates')
+          .select('id, certificate_id, award_type, award_name, reason, course_name')
+          .eq('user_id', user.id)
+      ]);
+      if (certError) throw certError;
+      if (generatedError) throw generatedError;
+
+      const generatedByCert = new Map(
+        (generatedRows || [])
+          .filter((g) => g.certificate_id)
+          .map((g) => [String(g.certificate_id), g])
+      );
+
+      const rows = (certRows || []).map((c) => {
+        const g = generatedByCert.get(String(c.id));
+        return {
+          ...c,
+          generated: g || null,
+          displayTitle:
+            g?.course_name ||
+            g?.award_name ||
+            c?.course?.title ||
+            'Certificate',
+          reason: g?.reason || null
+        };
+      });
+
+      setCertModal({ open: true, user, loading: false, rows });
+    } catch (err) {
+      setCertModal({ open: true, user, loading: false, rows: [] });
+      setAlertModal({
+        show: true,
+        title: 'Load Error',
+        message: err.message || 'Failed to load certificates for this user.',
+        type: 'error'
+      });
+    }
+  };
+
+  const refreshCertModalRows = async () => {
+    if (!certModal.user?.id) return;
+    await openUserCertificateManager(certModal.user);
+  };
+
+  const toggleSingleCertificate = async (cert) => {
+    setCertActionId(cert.id);
+    try {
+      const revokedAt = cert.revoked_at ? null : new Date().toISOString();
+      const { error } = await supabase.from('certificates').update({ revoked_at: revokedAt }).eq('id', cert.id);
+      if (error) throw error;
+      await Promise.all([loadUsers(), refreshCertModalRows()]);
+    } catch (err) {
+      setAlertModal({
+        show: true,
+        title: 'Update Error',
+        message: err.message || 'Failed to update certificate status.',
+        type: 'error'
+      });
+    } finally {
+      setCertActionId(null);
+    }
+  };
+
+  const blockAllInModal = async () => {
+    if (!certModal.user) return;
+    setCertActionId('all');
+    try {
+      const revokedAt = new Date().toISOString();
+      try {
+        await ensureCertificateRowsForPassedExams(certModal.user.id, revokedAt);
+      } catch (insertErr) {
+        console.warn('Could not materialize missing certificates before block all:', insertErr);
+      }
+      const { error } = await supabase
+        .from('certificates')
+        .update({ revoked_at: revokedAt })
+        .eq('user_id', certModal.user.id)
+        .is('revoked_at', null);
+      if (error) throw error;
+      await Promise.all([loadUsers(), refreshCertModalRows()]);
+      setAlertModal({
+        show: true,
+        title: 'Success',
+        message: 'All active certificates blocked for this user.',
+        type: 'success'
+      });
+    } catch (err) {
+      setAlertModal({
+        show: true,
+        title: 'Block All Error',
+        message: err.message || 'Failed to block all certificates.',
+        type: 'error'
+      });
+    } finally {
+      setCertActionId(null);
     }
   };
 
@@ -174,11 +380,12 @@ const CertificateBlocks = () => {
                   return (
                     <tr key={u.id} className="border-t">
                       <td className="px-4 py-3 flex items-center gap-2">
-                        <img
-                          src={u.avatar_url || 'https://via.placeholder.com/32'}
+                        <AvatarImage
+                          userId={u.id}
+                          avatarUrl={u.avatar_url}
                           alt={u.full_name}
+                          fallbackName={u.full_name || 'User'}
                           className="w-8 h-8 rounded-full object-cover"
-                          onError={e => { e.currentTarget.src = 'https://via.placeholder.com/32'; }}
                         />
                         <span className="font-semibold text-slate-800">{u.full_name}</span>
                       </td>
@@ -199,20 +406,20 @@ const CertificateBlocks = () => {
                               Active {u.certs.active} / Total {u.certs.total}
                             </span>
                             <button
-                              onClick={() => requestUpdate(u, hasActiveCertificates ? 'block' : 'unblock')}
-                              disabled={certUpdatingUserId === u.id}
-                              className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
-                                hasActiveCertificates
-                                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                                  : 'bg-green-100 text-green-700 hover:bg-green-200'
-                              } disabled:opacity-60`}
+                              onClick={() => openUserCertificateManager(u)}
+                              className="px-3 py-1 rounded text-xs font-semibold transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
                             >
-                              {certUpdatingUserId === u.id
-                                ? 'Updating...'
-                                : hasActiveCertificates
-                                ? 'Block Certificates'
-                                : 'Unblock Certificates'}
+                              Manage Certificates
                             </button>
+                            {hasActiveCertificates && (
+                              <button
+                                onClick={() => requestUpdate(u, 'block')}
+                                disabled={certUpdatingUserId === u.id}
+                                className="px-3 py-1 rounded text-xs font-semibold transition-colors bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-60"
+                              >
+                                {certUpdatingUserId === u.id ? 'Blocking...' : 'Block All'}
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <span className="text-xs text-slate-500">None</span>
@@ -250,6 +457,95 @@ const CertificateBlocks = () => {
                 Confirm
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {certModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Manage Certificates</h3>
+                <p className="text-sm text-slate-600">
+                  {certModal.user?.full_name} ({certModal.user?.email})
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={blockAllInModal}
+                  disabled={certActionId === 'all' || certModal.loading || certModal.rows.length === 0}
+                  className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {certActionId === 'all' ? 'Blocking...' : 'Block All Certificates'}
+                </button>
+                <button
+                  onClick={() => setCertModal({ open: false, user: null, loading: false, rows: [] })}
+                  className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {certModal.loading ? (
+              <LoadingSpinner fullPage={false} message="Loading certificates..." />
+            ) : certModal.rows.length === 0 ? (
+              <p className="text-slate-500 text-sm">No certificates found for this user.</p>
+            ) : (
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Certificate</th>
+                      <th className="px-3 py-2 text-left">Issued</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {certModal.rows.map((c) => (
+                      <tr key={c.id} className="border-t">
+                        <td className="px-3 py-2">
+                          <p className="font-semibold text-slate-900">{c.displayTitle}</p>
+                          <p className="text-xs text-slate-500">ID: {c.id}</p>
+                          {c.reason && <p className="text-xs text-slate-500">Reason: {c.reason}</p>}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{new Date(c.issued_at).toLocaleString()}</td>
+                        <td className="px-3 py-2">
+                          {c.revoked_at ? (
+                            <span className="text-xs font-semibold px-2 py-1 rounded bg-red-100 text-red-700">Blocked</span>
+                          ) : (
+                            <span className="text-xs font-semibold px-2 py-1 rounded bg-green-100 text-green-700">Active</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => window.open(`/verify/${encodeURIComponent(c.id)}`, '_blank', 'noopener,noreferrer')}
+                              className="px-3 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200"
+                            >
+                              View
+                            </button>
+                            <button
+                              onClick={() => toggleSingleCertificate(c)}
+                              disabled={certActionId === c.id}
+                              className={`px-3 py-1 rounded text-xs font-semibold ${
+                                c.revoked_at
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-red-100 text-red-700 hover:bg-red-200'
+                              } disabled:opacity-60`}
+                            >
+                              {certActionId === c.id ? 'Updating...' : c.revoked_at ? 'Unblock' : 'Block'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

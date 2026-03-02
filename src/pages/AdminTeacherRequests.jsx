@@ -3,8 +3,10 @@ import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AlertModal from '../components/AlertModal';
 import { UserPlus, X, Trash2 } from 'lucide-react';
+import useDialog from '../hooks/useDialog.jsx';
 
 const AdminTeacherRequests = () => {
+  const { confirm, dialogNode } = useDialog();
   const [requests, setRequests] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +156,8 @@ const AdminTeacherRequests = () => {
   };
 
   const handleClearHistory = async () => {
-    if (!confirm('Are you sure you want to clear all processed requests? This cannot be undone.')) {
+    const ok = await confirm('Are you sure you want to clear all processed requests? This cannot be undone.', 'Clear Request History');
+    if (!ok) {
       return;
     }
     
@@ -198,6 +201,7 @@ const AdminTeacherRequests = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {dialogNode}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Teacher Assignment Requests</h1>
         <p className="text-slate-600">

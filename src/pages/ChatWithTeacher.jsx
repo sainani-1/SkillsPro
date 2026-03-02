@@ -37,6 +37,26 @@ const ChatWithTeacher = () => {
     localStorage.setItem(key, JSON.stringify(Array.from(map.entries())));
   };
 
+  const getChatClearedAt = (gid) => {
+    if (!profile?.id || !gid) return null;
+    const key = `chatClearedAt_${profile.id}_${gid}`;
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const setChatClearedAt = (gid, isoTime) => {
+    if (!profile?.id || !gid) return;
+    const key = `chatClearedAt_${profile.id}_${gid}`;
+    try {
+      localStorage.setItem(key, isoTime || new Date().toISOString());
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const scrollToBottom = (smooth = false) => {
     const el = messagesContainerRef.current;
     if (el) {
@@ -54,10 +74,7 @@ const ChatWithTeacher = () => {
   }, [messages, initialLoad]);
 
   useEffect(() => {
-    initChat();
-  }, [profile]);
-
-  useEffect(() => {
+    // Re-initialize chat only when relevant profile keys change.
     setMessages([]);
     setGroupId(null);
     setTeacher(null);
@@ -67,7 +84,8 @@ const ChatWithTeacher = () => {
     setSuccessMessage('');
     setError(null);
     setInitialLoad(true);
-  }, [profile?.id]);
+    initChat();
+  }, [profile?.id, profile?.assigned_teacher_id]);
 
   useEffect(() => {
     if (groupId) {
@@ -80,7 +98,14 @@ const ChatWithTeacher = () => {
           table: 'chat_messages',
           filter: `group_id=eq.${groupId}`
         }, payload => {
-          setMessages(prev => [...prev, payload.new]);
+          if (payload.new.sender_id === profile?.id) {
+            // Own message is added optimistically in sendMessage().
+            return;
+          }
+          const clearedAt = getChatClearedAt(groupId);
+          if (!clearedAt || new Date(payload.new.created_at) > new Date(clearedAt)) {
+            setMessages(prev => [...prev, payload.new]);
+          }
           // Mark chat as read when viewing the page and receiving new messages
           setChatReadTime(groupId);
         })
@@ -218,7 +243,12 @@ const ChatWithTeacher = () => {
         .select('id, content, sender_id, created_at, sender:profiles(full_name, avatar_url)')
         .eq('group_id', groupId)
         .order('created_at', { ascending: true });
-      setMessages(data || []);
+      const clearedAt = getChatClearedAt(groupId);
+      const filteredMessages = (data || []).filter((msg) => {
+        if (!clearedAt) return true;
+        return new Date(msg.created_at) > new Date(clearedAt);
+      });
+      setMessages(filteredMessages);
       // Mark chat as read on load so sidebar badge clears
       setChatReadTime(groupId);
       if (initialLoad) {
@@ -235,21 +265,27 @@ const ChatWithTeacher = () => {
     if (!groupId) return;
 
     try {
+      // Always clear locally for current student view, even if DB delete is blocked by RLS.
+      const clearedAt = new Date().toISOString();
+      setChatClearedAt(groupId, clearedAt);
+
       const { error } = await supabase
         .from('chat_messages')
         .delete()
         .eq('group_id', groupId);
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Server delete blocked/failed; applied local clear only:', error.message);
+      }
 
       setMessages([]);
       setDeleteConfirm(false);
       setDeleteConfirmFinal(false);
-      setSuccessMessage('Chat deleted successfully!');
+      setSuccessMessage('Chat cleared successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error deleting chat:', err);
-      setError('Failed to delete chat. Please try again.');
+      setError('Failed to clear chat. Please try again.');
       setDeleteConfirm(false);
       setDeleteConfirmFinal(false);
     }
@@ -272,20 +308,37 @@ const ChatWithTeacher = () => {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !groupId) return;
+    const content = newMessage.trim();
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      group_id: groupId,
+      sender_id: profile.id,
+      content,
+      created_at: new Date().toISOString(),
+      sender: {
+        full_name: profile.full_name,
+        avatar_url: profile.avatar_url
+      }
+    };
+
+    setMessages(prev => [...prev, optimisticMsg]);
+    setNewMessage('');
+    setError(null);
 
     const { error: sendError } = await supabase.from('chat_messages').insert({
       group_id: groupId,
       sender_id: profile.id,
-      content: newMessage
+      content
     });
 
     if (sendError) {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setNewMessage(content);
       console.error('Error sending message:', sendError);
       setError('Failed to send message. Please try again.');
       return;
     }
-
-    setNewMessage('');
   };
 
   if (!profile) {
@@ -321,8 +374,24 @@ const ChatWithTeacher = () => {
     );
   }
 
-  if (!teacher || loading) {
+  if (loading) {
     return <LoadingSpinner message="Loading chat..." />;
+  }
+
+  if (!teacher) {
+    return (
+      <div className="bg-white rounded-xl p-8 text-center">
+        <MessageCircle className="mx-auto mb-4 text-slate-400" size={48} />
+        <h2 className="text-xl font-bold mb-2">Unable to load chat</h2>
+        <p className="text-slate-600 mb-4">Please refresh or try again in a moment.</p>
+        <button
+          onClick={() => initChat()}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   return (

@@ -66,6 +66,13 @@ import TeacherRequests from './pages/TeacherRequests';
 import AdminTeacherRequests from './pages/AdminTeacherRequests';
 import CertificateBlocks from './pages/CertificateBlocks';
 import AdminResetPassword from './pages/AdminResetPassword';
+import StartupIdeas from './pages/StartupIdeas';
+import AdminStartupIdeas from './pages/AdminStartupIdeas';
+import StartupCollaborations from './pages/StartupCollaborations';
+import AdminStartupCollaborations from './pages/AdminStartupCollaborations';
+import AdminPrizeCertificates from './pages/AdminPrizeCertificates';
+import AdminStudentReassignments from './pages/AdminStudentReassignments';
+import AdminMFAManagement from './pages/AdminMFAManagement';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -119,8 +126,7 @@ const AdminRoute = ({ children }) => {
     return <Navigate to="/app" />;
 
   // ✅ MFA SESSION CHECK
-  const mfaVerified =
-    sessionStorage.getItem("admin_mfa_verified");
+  const mfaVerified = sessionStorage.getItem("admin_mfa_verified");
 
   if (!mfaVerified) {
     return <Navigate to="/admin-mfa-verify" />;
@@ -172,6 +178,8 @@ function App() {
           <Route path="premium-status" element={<PremiumStatus />} />
           <Route path="offers" element={<Offers />} />
           <Route path="request-teacher" element={<RequestTeacher />} />
+          <Route path="startup-ideas" element={<StartupIdeas />} />
+          <Route path="startup-collaborations" element={<StartupCollaborations />} />
           <Route path="teacher-requests" element={<TeacherRequests />} />
           <Route path="mycertificates" element={<Navigate to="/app/my-certificates" replace />} />
           <Route path="leaves" element={<TeacherLeaves />} />
@@ -188,6 +196,7 @@ function App() {
           <Route path="admin/student/:studentId" element={<AdminRoute><StudentDetail /></AdminRoute>} />
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />
           <Route path="admin/teacher-assignment" element={<AdminRoute><TeacherAssignment /></AdminRoute>} />
+          <Route path="admin/student-reassignments" element={<AdminRoute><AdminStudentReassignments /></AdminRoute>} />
           <Route path="admin/teacher-requests" element={<AdminRoute><AdminTeacherRequests /></AdminRoute>} />
           <Route path="admin/certificate-blocks" element={<AdminRoute><CertificateBlocks /></AdminRoute>} />
           <Route path="admin/accounts" element={<AdminRoute><AccountManagement /></AdminRoute>} />
@@ -196,6 +205,10 @@ function App() {
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
+          <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
+          <Route path="admin/startup-ideas" element={<AdminRoute><AdminStartupIdeas /></AdminRoute>} />
+          <Route path="admin/startup-collaborations" element={<AdminRoute><AdminStartupCollaborations /></AdminRoute>} />
+          <Route path="admin/prize-certificates" element={<AdminRoute><AdminPrizeCertificates /></AdminRoute>} />
           <Route path="admin/send-gift" element={<AdminRoute><AdminSendGift /></AdminRoute>} />
           <Route path="admin/active-coupons" element={<AdminRoute><AdminActiveCoupons /></AdminRoute>} />
           <Route path="admin/change-course" element={<AdminRoute><AdminChangeCourse /></AdminRoute>} />

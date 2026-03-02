@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { ShieldCheck, Search, CheckCircle, XCircle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -36,7 +38,11 @@ const formatFallbackCertificateId = (submission) => {
   return `SkillPro-${y}-${m}-${d}-${random}`;
 };
 
+const resolveCourseTitle = (cert) =>
+  cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
+
 const VerifyCertificate = () => {
+  const { id: routeCertId } = useParams();
   const [certId, setCertId] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -166,7 +172,7 @@ const VerifyCertificate = () => {
     ctx.font = '18px Arial';
     ctx.fillText('In recognition of successfully completing the requirements of the course:', 600, 520);
     ctx.font = 'bold 32px Georgia, serif';
-    ctx.fillText(cert.course?.title || '_______________________________', 600, 560);
+    ctx.fillText(resolveCourseTitle(cert), 600, 560);
 
     const completionDate = new Date(cert.issued_at).toLocaleDateString();
     ctx.font = '14px Arial';
@@ -189,13 +195,14 @@ const VerifyCertificate = () => {
     return canvas.toDataURL('image/png');
   };
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
+  const runVerify = async (rawCertId) => {
+    const trimmedSource = rawCertId || certId;
+    if (!trimmedSource?.trim()) return;
     setLoading(true);
     setResult(null);
     setPreviewUrl('');
     try {
-      const trimmedId = certId.trim();
+      const trimmedId = trimmedSource.trim();
       const formattedMatch = trimmedId.match(/^SkillPro-(\d{4})-(\d{2})-(\d{2})-([A-Za-z0-9]{12})$/);
 
       let data = null;
@@ -273,8 +280,28 @@ const VerifyCertificate = () => {
       if (error || !data) {
         setResult({ valid: false, message: 'Certificate ID not found. This certificate was not issued by SkillPro.' });
       } else if (data.revoked_at) {
-        setResult({ valid: false, message: 'This certificate has been revoked and is no longer valid.', data });
+        const { data: generatedMeta } = await supabase
+          .from('generated_certificates')
+          .select('award_type, award_name, reason, course_name')
+          .eq('certificate_id', data.id)
+          .maybeSingle();
+        if (generatedMeta) {
+          data.generated = generatedMeta;
+        }
+        setResult({
+          valid: false,
+          message: 'Certificate blocked: caught due to cheating/malpractice.',
+          data
+        });
       } else {
+        const { data: generatedMeta } = await supabase
+          .from('generated_certificates')
+          .select('award_type, award_name, reason, course_name')
+          .eq('certificate_id', data.id)
+          .maybeSingle();
+        if (generatedMeta) {
+          data.generated = generatedMeta;
+        }
         setResult({ valid: true, message: 'Certificate is valid and authentic!', data });
         const formattedId = data._fallback ? certId.trim() : formatCertificateId(data);
         const dataUrl = await buildCertificateDataUrl(data, formattedId);
@@ -289,6 +316,18 @@ const VerifyCertificate = () => {
       setLoading(false);
     }
   };
+
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    await runVerify(certId);
+  };
+
+  useEffect(() => {
+    if (!routeCertId) return;
+    const decoded = decodeURIComponent(routeCertId);
+    setCertId(decoded);
+    runVerify(decoded);
+  }, [routeCertId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
@@ -342,6 +381,19 @@ const VerifyCertificate = () => {
                 <p><strong>Course:</strong> {result.data.course?.title}</p>
                 <p><strong>Category:</strong> {result.data.course?.category}</p>
                 <p><strong>Issued:</strong> {new Date(result.data.issued_at).toLocaleDateString()}</p>
+                {result.data.generated?.award_name && <p><strong>Award:</strong> {result.data.generated.award_name}</p>}
+                {result.data.generated?.award_type && <p><strong>Type:</strong> {result.data.generated.award_type}</p>}
+                {result.data.generated?.reason && <p><strong>Reason:</strong> {result.data.generated.reason}</p>}
+              </div>
+            )}
+            {result.data && !result.valid && result.data.revoked_at && (
+              <div className="text-sm space-y-1 text-red-800">
+                <p><strong>Student:</strong> {result.data.user?.full_name}</p>
+                <p><strong>Course:</strong> {result.data.course?.title}</p>
+                <p><strong>Issued:</strong> {new Date(result.data.issued_at).toLocaleDateString()}</p>
+                <p><strong>Blocked On:</strong> {new Date(result.data.revoked_at).toLocaleString()}</p>
+                <p><strong>Reason:</strong> Caught due to cheating/malpractice.</p>
+                {result.data.generated?.award_name && <p><strong>Award:</strong> {result.data.generated.award_name}</p>}
               </div>
             )}
           </div>

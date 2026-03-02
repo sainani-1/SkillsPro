@@ -9,13 +9,25 @@ export default function AdminScoreboard() {
     async function fetchScores() {
       const snap = await getDocs(collection(db, 'logicBuildingScores'));
       const arr = [];
-      snap.forEach(doc => arr.push(doc.data()));
+      snap.forEach(docSnap => arr.push({ id: docSnap.id, ...docSnap.data() }));
       // Group by email+name, sum scores
       const userMap = {};
       arr.forEach(s => {
-        const key = (s.email || '') + '|' + (s.name || '');
-        if (!userMap[key]) userMap[key] = { email: s.email || '', name: s.name || '', score: 0 };
-        userMap[key].score += s.score || 0;
+        const recordEmail =
+          s.email ||
+          s.userEmail ||
+          (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.id || '') ? s.id : '');
+        const recordName =
+          s.name ||
+          s.full_name ||
+          s.username ||
+          (recordEmail ? recordEmail.split('@')[0] : (s.id || 'Unknown'));
+
+        const key = `${recordEmail}|${recordName}`;
+        if (!userMap[key]) {
+          userMap[key] = { email: recordEmail || '—', name: recordName || '—', score: 0 };
+        }
+        userMap[key].score += Number(s.score) || 0;
       });
       const users = Object.values(userMap);
       users.sort((a, b) => b.score - a.score);

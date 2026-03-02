@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Bell, Send, Trash2, Edit2 } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import useDialog from '../hooks/useDialog.jsx';
 
 export default function AdminNotifications() {
+  const { confirm, dialogNode } = useDialog();
   const [notifications, setNotifications] = useState([]);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -97,19 +99,19 @@ export default function AdminNotifications() {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this notification?')) {
-      try {
-        const { error: deleteError } = await supabase
-          .from('admin_notifications')
-          .delete()
-          .eq('id', id);
+    const ok = await confirm('Are you sure you want to delete this notification?', 'Delete Notification');
+    if (!ok) return;
+    try {
+      const { error: deleteError } = await supabase
+        .from('admin_notifications')
+        .delete()
+        .eq('id', id);
 
-        if (deleteError) throw deleteError;
-        await fetchNotifications();
-      } catch (err) {
-        console.error('Error deleting notification:', err);
-        setError('Failed to delete notification');
-      }
+      if (deleteError) throw deleteError;
+      await fetchNotifications();
+    } catch (err) {
+      console.error('Error deleting notification:', err);
+      setError('Failed to delete notification');
     }
   };
 
@@ -143,6 +145,7 @@ export default function AdminNotifications() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
+      {dialogNode}
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
