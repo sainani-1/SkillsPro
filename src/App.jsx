@@ -73,6 +73,7 @@ import AdminStartupCollaborations from './pages/AdminStartupCollaborations';
 import AdminPrizeCertificates from './pages/AdminPrizeCertificates';
 import AdminStudentReassignments from './pages/AdminStudentReassignments';
 import AdminMFAManagement from './pages/AdminMFAManagement';
+import CertificatePreview from './pages/CertificatePreview';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -149,6 +150,7 @@ function App() {
         <Route path="/register-teacher" element={<RegisterTeacher />} />
         <Route path="/verify/:id" element={<VerifyCertificate />} />
         <Route path="/verify" element={<VerifyCertificate />} />
+        <Route path="/certificate-preview/:id" element={<CertificatePreview />} />
         <Route path="*" element={<NotFound />} />
 
         {/* Protected Routes */}

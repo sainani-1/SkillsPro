@@ -23,13 +23,13 @@ import LoadingSpinner from '../components/LoadingSpinner';
 let jsPdfLoader;
 
 /**
- * Dynamically loads jsPDF library from CDN
+ * Dynamically loads jsPDF library from local dependency
  * Caches the loader promise to prevent multiple imports
  * Used for PDF generation from canvas
  */
 const loadJsPDF = async () => {
   if (!jsPdfLoader) {
-    jsPdfLoader = import('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.es.min.js');
+    jsPdfLoader = import('jspdf');
   }
   return jsPdfLoader;
 };
@@ -369,25 +369,6 @@ const MyCertificates = () => {
     }
   };
 
-  /**
-   * viewCertificate()
-   * =================
-   * Opens certificate in new browser window/tab
-   * Displays as full-size image without PDF conversion
-   * User can screenshot, print, or save from browser
-   */
-  const viewCertificate = async (cert) => {
-    try {
-      const formattedId = formatCertificateId(cert);
-      const dataUrl = await buildCertificateDataUrl(cert, formattedId);
-      const win = window.open();
-      win.document.write(`<img src="${dataUrl}" style="max-width:100%;height:auto;" />`);
-    } catch (err) {
-      console.error('View error:', err);
-      openPopup('Preview failed', 'Failed to open certificate preview.', 'error');
-    }
-  };
-
   const shareOnLinkedIn = (cert) => {
     try {
       const certId = formatCertificateId(cert);
@@ -639,14 +620,17 @@ const MyCertificates = () => {
                 <div className="text-sm text-slate-500">Admin Generated Certificate</div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  onClick={() => viewCertificate(cert)}
-                  disabled={!!cert.revoked_at}
-                  className="flex items-center justify-center gap-2 border border-slate-200 text-slate-700 py-2 rounded-lg hover:border-nani-accent hover:text-nani-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                <a
+                  href={`/certificate-preview/${encodeURIComponent(formatCertificateId(cert))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-center gap-2 border border-slate-200 text-slate-700 py-2 rounded-lg hover:border-nani-accent hover:text-nani-accent transition-colors ${
+                    cert.revoked_at ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''
+                  }`}
                 >
                   <Eye size={16} />
                   View
-                </button>
+                </a>
                 <button
                   onClick={() => downloadCertificate(cert)}
                   disabled={downloading === cert.id || !!cert.revoked_at}
