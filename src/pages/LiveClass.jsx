@@ -20,6 +20,12 @@ const LiveClass = () => {
   const [meetingStarted, setMeetingStarted] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
 
+  const getSessionEndTime = (sessionRow) => {
+    if (sessionRow?.ends_at) return new Date(sessionRow.ends_at);
+    const start = new Date(sessionRow.scheduled_for);
+    return new Date(start.getTime() + 60 * 60 * 1000);
+  };
+
   useEffect(() => {
     console.log('LiveClass component mounted');
     console.log('Session ID from params:', sessionId);
@@ -62,6 +68,33 @@ const LiveClass = () => {
         return;
       }
 
+      // Students can join only at or after scheduled time.
+      const isStudent = profile.role === 'student';
+      const scheduledAt = new Date(data.scheduled_for);
+      const endsAt = getSessionEndTime(data);
+      if (isStudent && new Date() < scheduledAt) {
+        openPopup(
+          'Too Early',
+          `You can join only at scheduled time: ${scheduledAt.toLocaleString('en-IN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Kolkata'
+          })}`,
+          'warning'
+        );
+        navigate('/app/class-schedule');
+        return;
+      }
+      if (new Date() >= endsAt) {
+        openPopup('Session Completed', 'This class session is over.', 'info');
+        navigate('/app/class-schedule');
+        return;
+      }
+
       setSession(data);
       setLoading(false);
     } catch (error) {
@@ -78,6 +111,15 @@ const LiveClass = () => {
     
     if (!session || !jitsiContainerRef.current) {
       console.error('Missing session or container ref');
+      return;
+    }
+
+    if (profile?.role === 'student' && new Date() < new Date(session.scheduled_for)) {
+      openPopup('Too Early', 'You can join this class only at scheduled time.', 'warning');
+      return;
+    }
+    if (new Date() >= getSessionEndTime(session)) {
+      openPopup('Session Completed', 'This class session is over.', 'info');
       return;
     }
 
@@ -165,6 +207,14 @@ const LiveClass = () => {
   };
 
   const handleExternalLink = () => {
+    if (profile?.role === 'student' && new Date() < new Date(session?.scheduled_for)) {
+      openPopup('Too Early', 'You can open this link only at scheduled time.', 'warning');
+      return;
+    }
+    if (new Date() >= getSessionEndTime(session)) {
+      openPopup('Session Completed', 'This class session is over.', 'info');
+      return;
+    }
     if (session?.meeting_link) {
       window.open(session.meeting_link, '_blank');
     }

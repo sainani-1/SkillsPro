@@ -17,6 +17,7 @@ const Attendance = () => {
   const [pendingChanges, setPendingChanges] = useState({});
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [postedSessionKeys, setPostedSessionKeys] = useState({});
   const [canAccessSession, setCanAccessSession] = useState(false);
   const [attendanceLocked, setAttendanceLocked] = useState(false);
   const [attendanceOverride, setAttendanceOverride] = useState(false);
@@ -74,6 +75,30 @@ const Attendance = () => {
       ].sort((a, b) => new Date(b.scheduled_for) - new Date(a.scheduled_for));
 
       setSessions(allSessions);
+
+      // Mark sessions that already have attendance posted.
+      const classSessionIds = allSessions.filter((s) => s.type === 'class').map((s) => s.id);
+      const guidanceSessionIds = allSessions.filter((s) => s.type === 'guidance').map((s) => s.id);
+      let classPosted = [];
+      let guidancePosted = [];
+      if (classSessionIds.length > 0) {
+        const { data } = await supabase
+          .from('class_attendance')
+          .select('session_id')
+          .in('session_id', classSessionIds);
+        classPosted = data || [];
+      }
+      if (guidanceSessionIds.length > 0) {
+        const { data } = await supabase
+          .from('guidance_attendance')
+          .select('session_id')
+          .in('session_id', guidanceSessionIds);
+        guidancePosted = data || [];
+      }
+      const postedMap = {};
+      classPosted.forEach((r) => { postedMap[`class-${r.session_id}`] = true; });
+      guidancePosted.forEach((r) => { postedMap[`guidance-${r.session_id}`] = true; });
+      setPostedSessionKeys(postedMap);
 
       // Load all assigned students
       let studentQuery = supabase
@@ -152,7 +177,48 @@ const Attendance = () => {
     };
   }, [profile, isTeacher, isAdmin]);
 
+  const loadStudentsForSession = async (session) => {
+    if (!session) return [];
+
+    if (session.type === 'class') {
+      const { data: participants, error: participantError } = await supabase
+        .from('class_session_participants')
+        .select('student_id, profiles!class_session_participants_student_id_fkey(id, full_name, avatar_url, email)')
+        .eq('session_id', session.id);
+
+      if (participantError) {
+        console.error('Error loading class participants:', participantError);
+      }
+
+      const mapped = (participants || [])
+        .map((row) => row.profiles)
+        .filter(Boolean);
+
+      if (mapped.length > 0) return mapped;
+
+      const { data: allStudents } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, email')
+        .eq('role', 'student')
+        .order('full_name');
+      return allStudents || [];
+    }
+
+    const guidanceStudentId = session?.guidance_requests?.student_id;
+    if (guidanceStudentId) {
+      const { data: student } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, email')
+        .eq('id', guidanceStudentId)
+        .maybeSingle();
+      return student ? [student] : [];
+    }
+
+    return studentsRef.current || [];
+  };
+
   const loadSessionAttendance = async (session) => {
+    const sessionStudents = await loadStudentsForSession(session);
     const tableName = session.type === 'class' ? 'class_attendance' : 'guidance_attendance';
     const { data } = await supabase
       .from(tableName)
@@ -178,6 +244,10 @@ const Attendance = () => {
 
     if (data && data.length > 0) {
       setAttendanceLocked(!(isAdmin && overrideActive));
+      setPostedSessionKeys((prev) => ({
+        ...prev,
+        [`${session.type}-${session.id}`]: true
+      }));
     } else {
       setAttendanceLocked(false);
     }
@@ -187,7 +257,7 @@ const Attendance = () => {
       attendanceMap[record.student_id] = record.attended;
     });
 
-    const currentStudents = studentsRef.current || [];
+    const currentStudents = sessionStudents.length > 0 ? sessionStudents : (studentsRef.current || []);
     const studentsWithAttendance = currentStudents.map(s => ({
       ...s,
       attended: attendanceMap[s.id],
@@ -325,19 +395,30 @@ const Attendance = () => {
     try {
       for (const [studentId, attended] of Object.entries(pendingChanges)) {
         const student = students.find(s => s.id === studentId);
-        
-        const { error } = await supabase
-          .from(tableName)
-          .upsert({
-            id: student?.recordId,
-            session_id: selectedSession.id,
-            student_id: studentId,
-            teacher_id: teacherId,
-            attended: attended,
-            marked_at: new Date().toISOString(),
-          }, {
-            onConflict: 'session_id,student_id'
-          });
+        let error = null;
+
+        if (student?.recordId) {
+          const { error: updateError } = await supabase
+            .from(tableName)
+            .update({
+              teacher_id: teacherId,
+              attended: attended,
+              marked_at: new Date().toISOString()
+            })
+            .eq('id', student.recordId);
+          error = updateError;
+        } else {
+          const { error: insertError } = await supabase
+            .from(tableName)
+            .insert({
+              session_id: selectedSession.id,
+              student_id: studentId,
+              teacher_id: teacherId,
+              attended: attended,
+              marked_at: new Date().toISOString()
+            });
+          error = insertError;
+        }
 
         if (error) {
           console.error('Error saving attendance:', error);
@@ -355,6 +436,11 @@ const Attendance = () => {
       setPendingChanges({});
       setHasPendingChanges(false);
       if (!attendanceOverride) setAttendanceLocked(true);
+      setPostedSessionKeys((prev) => ({
+        ...prev,
+        [`${selectedSession.type}-${selectedSession.id}`]: true
+      }));
+      await loadSessionAttendance(selectedSession);
       setAlertModal({
         show: true,
         title: 'Success',
@@ -503,18 +589,32 @@ const Attendance = () => {
                       </span>
                     </div>
                   </div>
+                  {(() => {
+                    const sessionKey = `${session.type}-${session.id}`;
+                    const alreadyPosted = !!postedSessionKeys[sessionKey];
+                    const canMarkToday = checkSessionDate(session) || isAdmin;
+                    const canOpen = canMarkToday && !(alreadyPosted && !isAdmin);
+                    const buttonText = alreadyPosted && !isAdmin
+                      ? 'Already Posted'
+                      : (canMarkToday ? 'Mark Attendance' : 'Not Today');
+                    const buttonTitle = alreadyPosted && !isAdmin
+                      ? 'Attendance already saved for this session'
+                      : (canMarkToday ? 'Mark attendance' : 'Attendance can only be marked on session day');
+                    return (
                   <button
                     onClick={() => selectSessionForAttendance(session)}
-                    disabled={!checkSessionDate(session) && !isAdmin}
-                    title={checkSessionDate(session) || isAdmin ? 'Mark attendance' : 'Attendance can only be marked on session day'}
+                    disabled={!canOpen}
+                    title={buttonTitle}
                     className={`px-4 py-2 rounded-lg transition-colors font-semibold ${
-                      checkSessionDate(session) || isAdmin
+                      canOpen
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-slate-300 text-slate-600 cursor-not-allowed'
                     }`}
                   >
-                    {checkSessionDate(session) || isAdmin ? 'Mark Attendance' : 'Not Today'}
+                    {buttonText}
                   </button>
+                    );
+                  })()}
                 </div>
               </div>
             ))

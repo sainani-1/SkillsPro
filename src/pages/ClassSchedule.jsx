@@ -12,6 +12,7 @@ const ClassSchedule = () => {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [endsAt, setEndsAt] = useState('');
   const [joinLink, setJoinLink] = useState('');
   const [meetingType, setMeetingType] = useState('jitsi');
   const [students, setStudents] = useState([]);
@@ -20,6 +21,22 @@ const ClassSchedule = () => {
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [deleteModal, setDeleteModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
+
+  // Convert datetime-local value to UTC ISO assuming input is IST clock time.
+  // This keeps 18:14 entered by teacher displayed as 18:14 for all users in IST.
+  const istLocalToUtcIso = (dateTimeLocal) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(dateTimeLocal || '');
+    if (!match) return null;
+    const [, y, m, d, hh, mm] = match;
+    const utcMs = Date.UTC(
+      Number(y),
+      Number(m) - 1,
+      Number(d),
+      Number(hh),
+      Number(mm)
+    ) - (5.5 * 60 * 60 * 1000); // IST offset
+    return new Date(utcMs).toISOString();
+  };
 
   useEffect(() => {
     loadSessions();
@@ -55,6 +72,14 @@ const ClassSchedule = () => {
     const { data } = await query.order('scheduled_for', { ascending: false });
     setSessions(data || []);
   };
+
+  const getSessionEndTime = (session) => {
+    if (session?.ends_at) return new Date(session.ends_at);
+    const start = new Date(session.scheduled_for);
+    return new Date(start.getTime() + 60 * 60 * 1000);
+  };
+
+  const isSessionCompleted = (session) => new Date() >= getSessionEndTime(session);
 
   const deleteSession = async () => {
     const sessionId = deleteModal.sessionId;
@@ -95,11 +120,11 @@ const ClassSchedule = () => {
   };
 
   const createSession = async () => {
-    if (!title || !scheduledAt) {
+    if (!title || !scheduledAt || !endsAt) {
       setAlertModal({
         show: true,
         title: 'Missing Information',
-        message: 'Please fill in all required fields',
+        message: 'Please fill session title, start time and session upto time',
         type: 'warning'
       });
       return;
@@ -127,9 +152,35 @@ const ClassSchedule = () => {
     
     const link = meetingType === 'external' ? joinLink : null;
     
-    // datetime-local gives us "YYYY-MM-DDTHH:mm" - treat this as IST
-    // Just store the value directly as the database will handle it
-    const isoDateString = scheduledAt;
+    const isoDateString = istLocalToUtcIso(scheduledAt);
+    if (!isoDateString) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid Date',
+        message: 'Please select a valid date and time',
+        type: 'warning'
+      });
+      return;
+    }
+    const endsAtIso = istLocalToUtcIso(endsAt);
+    if (!endsAtIso) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid End Time',
+        message: 'Please select a valid session upto time',
+        type: 'warning'
+      });
+      return;
+    }
+    if (new Date(endsAtIso) <= new Date(isoDateString)) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid Duration',
+        message: 'Session upto time must be after start time',
+        type: 'warning'
+      });
+      return;
+    }
     
     const teacherId = profile.role === 'admin' ? selectedTeacher : profile.id;
 
@@ -137,6 +188,7 @@ const ClassSchedule = () => {
       teacher_id: teacherId,
       title,
       scheduled_for: isoDateString,
+      ends_at: endsAtIso,
       meeting_link: link,
       meeting_type: meetingType
     }).select().single();
@@ -151,22 +203,106 @@ const ClassSchedule = () => {
       return;
     }
 
-    // Add selected students as participants
-    if (selectedStudents.length > 0) {
-      const participants = selectedStudents.map(studentId => ({
+    // Add participants:
+    // - selected students, or
+    // - all students when none selected.
+    const recipientStudentIds = selectedStudents.length > 0
+      ? selectedStudents
+      : (students || []).map((s) => s.id);
+
+    if (recipientStudentIds.length > 0) {
+      const participants = recipientStudentIds.map(studentId => ({
         session_id: sessionData.id,
         student_id: studentId
       }));
-      await supabase.from('class_session_participants').insert(participants);
+      const { error: participantError } = await supabase
+        .from('class_session_participants')
+        .insert(participants);
+
+      if (participantError) {
+        setAlertModal({
+          show: true,
+          title: 'Error',
+          message: 'Session created, but failed to assign students',
+          type: 'warning'
+        });
+      }
+    }
+
+    // Create class notifications for scheduled students so they see it in dashboard/notifications.
+    try {
+      const schedulerName = profile?.full_name || 'Teacher';
+      const sessionTime = new Date(sessionData.scheduled_for).toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata'
+      });
+      const basePayload = {
+        title: `Class Scheduled: ${title}`,
+        content: `${schedulerName} scheduled "${title}" for ${sessionTime} (upto ${new Date(sessionData.ends_at || new Date(new Date(sessionData.scheduled_for).getTime() + 60 * 60 * 1000)).toLocaleString('en-IN', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'Asia/Kolkata'
+        })}).`,
+        type: 'info',
+        target_role: 'student'
+      };
+
+      if (recipientStudentIds.length > 0) {
+        const notificationRows = recipientStudentIds.map((studentId) => ({
+          ...basePayload,
+          target_user_id: studentId,
+          class_session_id: sessionData.id,
+          admin_id: profile?.id || null
+        }));
+        const { error: notifError } = await supabase.from('admin_notifications').insert(notificationRows);
+        if (notifError && (String(notifError.message || '').includes('target_user_id') || String(notifError.message || '').includes('class_session_id'))) {
+          // Backward compatibility when new columns are not present yet.
+          const fallbackRows = recipientStudentIds.map(() => ({
+            ...basePayload,
+            admin_id: profile?.id || null
+          }));
+          await supabase.from('admin_notifications').insert(fallbackRows);
+        }
+      } else {
+        const { error: notifError } = await supabase.from('admin_notifications').insert({
+          ...basePayload,
+          class_session_id: sessionData.id,
+          admin_id: profile?.id || null
+        });
+        if (notifError && String(notifError.message || '').includes('class_session_id')) {
+          await supabase.from('admin_notifications').insert({
+            ...basePayload,
+            admin_id: profile?.id || null
+          });
+        }
+      }
+    } catch (notificationError) {
+      console.error('Failed to create class notifications:', notificationError);
     }
     
     setTitle('');
     setScheduledAt('');
+    setEndsAt('');
     setJoinLink('');
     setMeetingType('jitsi');
     setSelectedStudents([]);
     setSelectedTeacher('');
     setShowForm(false);
+    setAlertModal({
+      show: true,
+      title: 'Success',
+      message: 'Session scheduled and student notifications sent.',
+      type: 'success'
+    });
     loadSessions();
   };
 
@@ -230,6 +366,15 @@ const ClassSchedule = () => {
               <p className="text-xs text-slate-500 mt-1">
                 Recommended slots: 9:00-10:00 AM or 5:00-6:00 PM
               </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Session Upto</label>
+              <input
+                type="datetime-local"
+                value={endsAt}
+                onChange={e => setEndsAt(e.target.value)}
+                className="w-full border rounded-lg p-2"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Meeting Platform</label>
@@ -339,7 +484,14 @@ const ClassSchedule = () => {
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-bold mb-4">Upcoming Sessions</h2>
         <div className="space-y-3">
-          {sessions.filter(s => new Date(s.scheduled_for) > new Date()).map(session => (
+          {sessions.filter((s) => !isSessionCompleted(s)).map(session => (
+            (() => {
+              const isStudent = profile.role === 'student';
+              const start = new Date(session.scheduled_for);
+              const end = getSessionEndTime(session);
+              const now = new Date();
+              const canStudentJoinNow = !isStudent || (now >= start && now < end);
+              return (
             <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg hover:shadow-md transition">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${session.meeting_type === 'jitsi' ? 'bg-blue-100' : 'bg-purple-100'}`}>
@@ -362,6 +514,17 @@ const ClassSchedule = () => {
                       timeZone: 'Asia/Kolkata'
                     })}
                   </p>
+                  <p className="text-xs text-slate-500">
+                    Upto: {getSessionEndTime(session).toLocaleString('en-IN', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                      timeZone: 'Asia/Kolkata'
+                    })}
+                  </p>
                   <p className="text-xs text-slate-400 mt-1">
                     {session.meeting_type === 'jitsi' ? '🟢 Jitsi Meet' : '🔗 External Platform'}
                   </p>
@@ -371,24 +534,37 @@ const ClassSchedule = () => {
                 {session.meeting_type === 'jitsi' ? (
                   <button
                     onClick={() => {
+                      if (!canStudentJoinNow) return;
                       console.log('Join Class button clicked, session:', session);
                       console.log('Navigating to:', `/live-class/${session.id}`);
                       navigate(`/live-class/${session.id}`);
                     }}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2 transition"
+                    disabled={!canStudentJoinNow}
+                    className={`px-6 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
+                      canStudentJoinNow
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-slate-300 text-slate-600 cursor-not-allowed'
+                    }`}
                   >
                     <Video size={18} />
-                    Join Class
+                    {canStudentJoinNow ? 'Join Class' : 'Available at Scheduled Time'}
                   </button>
                 ) : (
                   <a 
                     href={session.meeting_link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-purple-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2 transition"
+                    onClick={(e) => {
+                      if (!canStudentJoinNow) e.preventDefault();
+                    }}
+                    className={`px-6 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
+                      canStudentJoinNow
+                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                        : 'bg-slate-300 text-slate-600 pointer-events-none'
+                    }`}
                   >
                     <ExternalLink size={18} />
-                    Open Link
+                    {canStudentJoinNow ? 'Open Link' : 'Available at Scheduled Time'}
                   </a>
                 )}
                 {(profile.role === 'teacher' || profile.role === 'admin') && (
@@ -402,8 +578,10 @@ const ClassSchedule = () => {
                 )}
               </div>
             </div>
+              );
+            })()
           ))}
-          {sessions.filter(s => new Date(s.scheduled_for) > new Date()).length === 0 && (
+          {sessions.filter((s) => !isSessionCompleted(s)).length === 0 && (
             <p className="text-center text-slate-400 py-8">No upcoming sessions</p>
           )}
         </div>
@@ -412,12 +590,23 @@ const ClassSchedule = () => {
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-bold mb-4">Past Sessions</h2>
         <div className="space-y-2">
-          {sessions.filter(s => new Date(s.scheduled_for) <= new Date()).map(session => (
+          {sessions.filter((s) => isSessionCompleted(s)).map(session => (
             <div key={session.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <div>
                 <p className="font-semibold text-sm">{session.title}</p>
                 <p className="text-xs text-slate-500">
                   {new Date(session.scheduled_for).toLocaleString('en-IN', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                    timeZone: 'Asia/Kolkata'
+                  })}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Upto: {getSessionEndTime(session).toLocaleString('en-IN', {
                     day: '2-digit',
                     month: '2-digit',
                     year: 'numeric',
@@ -444,7 +633,7 @@ const ClassSchedule = () => {
               </div>
             </div>
           ))}
-          {sessions.filter(s => new Date(s.scheduled_for) <= new Date()).length === 0 && (
+          {sessions.filter((s) => isSessionCompleted(s)).length === 0 && (
             <p className="text-center text-slate-400 py-4">No past sessions</p>
           )}
         </div>

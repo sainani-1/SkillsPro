@@ -54,7 +54,6 @@ export default function Notifications() {
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
-
       const notificationIds = (data || []).map((n) => n.id);
 
       // Fetch read receipts for this user only

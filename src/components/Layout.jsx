@@ -100,7 +100,6 @@ const Layout = () => {
           setUnreadNotifications(0);
           return;
         }
-
         const notificationIds = notifications.map((n) => n.id);
         const { data: reads, error: readError } = await supabase
           .from('notification_reads')

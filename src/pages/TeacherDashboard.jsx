@@ -10,6 +10,12 @@ const TeacherDashboard = () => {
   const [upcomingSessions, setUpcomingSessions] = useState([]);
   const [pendingLeaves, setPendingLeaves] = useState([]);
 
+  const getClassSessionEndTime = (session) => {
+    if (session?.ends_at) return new Date(session.ends_at);
+    const start = new Date(session.scheduled_for);
+    return new Date(start.getTime() + 60 * 60 * 1000);
+  };
+
   useEffect(() => {
     loadData();
   }, [profile]);
@@ -46,13 +52,16 @@ const TeacherDashboard = () => {
     }
 
     // Load upcoming class sessions
-    const { data: classSessions } = await supabase
+    const { data: rawClassSessions } = await supabase
       .from('class_sessions')
       .select('*')
       .eq('teacher_id', profile.id)
-      .gte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
-      .limit(5);
+      .limit(30);
+
+    const classSessions = (rawClassSessions || []).filter(
+      (s) => getClassSessionEndTime(s) > new Date()
+    ).slice(0, 5);
     
     // Load upcoming guidance sessions
     const { data: guidanceSessions } = await supabase

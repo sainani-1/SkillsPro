@@ -27,6 +27,7 @@ const StudentDashboard = () => {
   const [examResults, setExamResults] = useState({}); // courseId -> {passed, score, next_retry_date}
   const [offers, setOffers] = useState([]);
   const [showOfferCongrats, setShowOfferCongrats] = useState(false);
+  const [classAlerts, setClassAlerts] = useState([]);
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
@@ -50,6 +51,50 @@ const StudentDashboard = () => {
     fetchData();
     fetchOffers();
   }, [profile]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const fetchClassAlerts = async () => {
+      try {
+        // Source directly from assigned class sessions so teacher/admin schedules always appear.
+        const { data, error } = await supabase
+          .from('class_sessions')
+          .select('id, title, scheduled_for, created_at, meeting_type, class_session_participants!inner(student_id)')
+          .eq('class_session_participants.student_id', profile.id)
+          .gte('scheduled_for', new Date().toISOString())
+          .order('scheduled_for', { ascending: true })
+          .limit(5);
+
+        if (error) {
+          console.error('Error loading class session alerts:', error);
+          return;
+        }
+
+        const alerts = (data || []).map((session) => ({
+          id: session.id,
+          title: `Class Scheduled: ${session.title}`,
+          content: `Your class is scheduled for ${new Date(session.scheduled_for).toLocaleString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Kolkata'
+          })}.`,
+          created_at: session.created_at || session.scheduled_for
+        }));
+        setClassAlerts(alerts);
+      } catch (err) {
+        console.error('Error loading class alerts:', err);
+      }
+    };
+
+    fetchClassAlerts();
+    const interval = setInterval(fetchClassAlerts, 60000);
+    return () => clearInterval(interval);
+  }, [profile?.id]);
 
   const fetchOffers = async () => {
     if (!profile?.id) return;
@@ -213,6 +258,24 @@ const StudentDashboard = () => {
                 You can now chat with them and attend live classes.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scheduled Class Alerts */}
+      {classAlerts.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+          <h2 className="text-lg font-bold text-blue-900 mb-3">Scheduled Class Notifications</h2>
+          <div className="space-y-3">
+            {classAlerts.map((alert) => (
+              <div key={alert.id} className="bg-white border border-blue-100 rounded-lg p-3">
+                <p className="font-semibold text-slate-900 text-sm">{alert.title}</p>
+                <p className="text-slate-600 text-sm mt-1">{alert.content}</p>
+                <p className="text-xs text-slate-400 mt-2">
+                  {new Date(alert.created_at).toLocaleString('en-IN')}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       )}
