@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import Toast from '../components/Toast';
+import { claimSingleSession, takeSingleSessionNotice } from '../utils/singleSession';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -12,6 +13,9 @@ const Login = () => {
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
   const [processingOAuth, setProcessingOAuth] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
+  const [inlineNotice, setInlineNotice] = useState('');
+  const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,7 +23,63 @@ const Login = () => {
     sessionStorage.removeItem('admin_mfa_verified');
     sessionStorage.removeItem('admin_mfa_verified_user');
     sessionStorage.removeItem('admin_face_verified');
+
+    const notice = takeSingleSessionNotice();
+    if (notice) {
+      setInlineNotice(notice);
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+    const confirmedByQuery =
+      params.get('confirmed') === 'true' ||
+      params.get('email_confirmed') === 'true' ||
+      params.get('type') === 'signup' ||
+      params.get('message') === 'confirmed';
+    const confirmedByHash = hashParams.get('type') === 'signup';
+    if (confirmedByQuery || confirmedByHash) {
+      setInlineNotice('Confirmation successful. Now you can login.');
+      const cleanUrl = `${window.location.origin}/login`;
+      window.history.replaceState({}, '', cleanUrl);
+    }
   }, []);
+
+  const askTakeoverConfirmation = () =>
+    new Promise((resolve) => {
+      takeoverResolverRef.current = resolve;
+      setTakeoverModalOpen(true);
+    });
+
+  const closeTakeoverModal = (accepted) => {
+    setTakeoverModalOpen(false);
+    const resolver = takeoverResolverRef.current;
+    takeoverResolverRef.current = null;
+    if (resolver) resolver(accepted);
+  };
+
+  const ensureSingleActiveSession = async (userId) => {
+    const initial = await claimSingleSession(userId, { forceTakeover: false, deviceLabel: 'Web Login' });
+    if (initial.status === 'requires_takeover') {
+      const ok = await askTakeoverConfirmation();
+      if (!ok) return { allowed: false, message: 'Login canceled. Account is active on another device.' };
+
+      const takeover = await claimSingleSession(userId, { forceTakeover: true, deviceLabel: 'Web Login' });
+      if (takeover.status !== 'claimed') {
+        return {
+          allowed: false,
+          message: 'Could not transfer active session. Please try again.'
+        };
+      }
+      return { allowed: true, message: 'Previous device was logged out. You are now logged in here.' };
+    }
+
+    if (initial.status === 'claimed' || initial.status === 'unavailable') {
+      // unavailable => DB feature not ready; allow login without blocking.
+      return { allowed: true, message: '' };
+    }
+
+    return { allowed: false, message: 'Could not validate active session. Please try again.' };
+  };
 
   const routeGoogleUser = async (oauthUser) => {
     let { data: profile } = await supabase
@@ -59,6 +119,18 @@ const Login = () => {
 
     if (!profile.terms_accepted || !profile.google_profile_completed) {
       navigate('/complete-profile');
+      return;
+    }
+
+    const sessionCheck = await ensureSingleActiveSession(oauthUser.id);
+    if (!sessionCheck.allowed) {
+      await supabase.auth.signOut();
+      setAlertModal({
+        show: true,
+        title: 'Login Blocked',
+        message: sessionCheck.message,
+        type: 'warning'
+      });
       return;
     }
 
@@ -121,6 +193,7 @@ const Login = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setInlineNotice('');
     setLoggingIn(true);
     try {
       // First, sign in
@@ -292,6 +365,14 @@ const Login = () => {
       }
 
       // Check for admin role and MFA
+      const sessionCheck = await ensureSingleActiveSession(signInData.user.id);
+      if (!sessionCheck.allowed) {
+        await supabase.auth.signOut();
+        setInlineNotice(sessionCheck.message || 'Login blocked. Account is active on another device.');
+        setLoggingIn(false);
+        return;
+      }
+
       if (userProfile.role === 'admin') {
         sessionStorage.removeItem('admin_mfa_verified');
         sessionStorage.removeItem('admin_mfa_verified_user');
@@ -315,14 +396,23 @@ const Login = () => {
           return;
         }
         setLoggingIn(false);
-        setToast({ show: true, message: 'Logged in successfully!', type: 'success' });
+        setToast({
+          show: true,
+          message: sessionCheck.message || 'Logged in successfully!',
+          type: 'success'
+        });
         navigate('/admin-mfa-verify');
         return;
       }
 
       // Account is active, proceed to app
       setLoggingIn(false);
-      setToast({ show: true, message: 'Logged in successfully!', type: 'success' });
+      setToast({
+        show: true,
+        message: sessionCheck.message || 'Logged in successfully!',
+        type: 'success'
+      });
+      setInlineNotice('');
       navigate('/app');
     } catch (error) {
       console.error('Error during login:', error);
@@ -386,6 +476,11 @@ const Login = () => {
           onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
         />
         <form onSubmit={handleLogin} className="space-y-4">
+          {inlineNotice ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
+              {inlineNotice}
+            </div>
+          ) : null}
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
             <input
@@ -419,7 +514,56 @@ const Login = () => {
         <p className="text-center mt-2 text-sm">
           Forgot password? <Link to="/reset-password" className="text-gold-600 font-bold">Reset here</Link>
         </p>
+        <div className="mt-4">
+          <Link
+            to="/"
+            className="w-full inline-flex items-center justify-center py-3 rounded-xl bg-gold-400 text-nani-dark text-base font-bold shadow-md hover:bg-gold-500 transition"
+          >
+            Back to Home Page
+          </Link>
+        </div>
       </div>
+
+      {takeoverModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-7 py-6 bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <p className="text-xs uppercase tracking-widest font-semibold text-amber-100">Session Protection</p>
+              <h3 className="text-2xl font-bold mt-1">Already Logged In</h3>
+              <p className="text-sm text-amber-50 mt-1">This account is currently active on another device.</p>
+            </div>
+            <div className="px-7 py-6 space-y-5">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-slate-800 text-sm font-medium">
+                  Continue here and securely end the previous session?
+                </p>
+                <p className="text-xs text-slate-600 mt-2">
+                  If you choose continue, the other device will be logged out immediately.
+                </p>
+              </div>
+              <p className="text-xs text-slate-500">
+                If this was not you, choose cancel and reset your password.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => closeTakeoverModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeTakeoverModal(true)}
+                  className="px-4 py-2.5 rounded-xl bg-amber-600 text-white font-semibold hover:bg-amber-700"
+                >
+                  Logout Other and Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

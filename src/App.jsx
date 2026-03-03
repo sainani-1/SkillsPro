@@ -15,6 +15,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
+import Plans from './pages/Plans';
 import Dashboard from './pages/Dashboard';
 import CourseList from './pages/CourseList';
 import CourseDetail from './pages/CourseDetail';
@@ -152,6 +153,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/plans" element={<Plans />} />
         <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
         <Route path="/complete-profile" element={<CompleteGoogleProfile />} />
         <Route path="/reset-password" element={<ResetPassword />} />

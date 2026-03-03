@@ -7,11 +7,13 @@ const Home = () => {
     <div className="bg-slate-50 min-h-screen flex flex-col">
       <nav className="p-6 flex justify-between items-center max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-3">
-          <img
-            src="/skillpro-logo.png"
-            alt="SkillPro logo"
-            className="h-10 w-10 object-contain"
-          />
+          <div className="h-12 w-12 rounded-full border-2 border-gold-300 bg-white shadow-sm overflow-hidden">
+            <img
+              src="/skillpro-logo.png"
+              alt="SkillPro logo"
+              className="h-full w-full rounded-full object-cover"
+            />
+          </div>
           <div className="font-serif font-bold text-2xl text-nani-dark">SkillPro</div>
         </div>
         <div className="space-x-4">
@@ -30,7 +32,7 @@ const Home = () => {
         </p>
         <div className="space-x-4 mb-12">
           <Link to="/register" className="btn-primary px-8 py-4 text-lg">Start Learning Now</Link>
-          <Link to="#" className="px-8 py-4 text-lg border border-slate-300 rounded hover:bg-white transition">View Plans</Link>
+          <Link to="/plans" className="px-8 py-4 text-lg border border-slate-300 rounded hover:bg-white transition inline-block">View Plans</Link>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left max-w-4xl">

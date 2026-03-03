@@ -129,7 +129,7 @@ const Layout = () => {
       { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
       { label: 'Manage Exam Retakes', path: '/app/admin/exam-retakes' },
       { label: 'Exam Settings', path: '/app/admin/exam-settings' },
-      { label: 'Platform Settings', path: '/app/admin/settings' },
+      { label: 'Admin Settings', path: '/app/admin/settings' },
       { label: 'Reset Password', path: '/app/admin/reset-password' },
       { label: 'MFA Management', path: '/app/admin/mfa-management' },
       { label: 'Deleted Accounts', path: '/app/admin/deleted-accounts' },
@@ -217,7 +217,7 @@ const Layout = () => {
         const notificationIds = visibleNotifications.map((n) => n.id);
         const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
         const readTrackingEnabled =
-          profile.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+          localStorage.getItem(readTrackingKey) !== 'false';
         const localReadIds = getLocalReadIds(profile.id);
 
         if (!readTrackingEnabled) {
@@ -591,4 +591,6 @@ const Layout = () => {
   );
 };
 
+export { Layout };
 export default Layout;
+

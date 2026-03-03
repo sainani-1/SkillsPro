@@ -215,8 +215,7 @@ export default function Notifications() {
       const notificationIds = finalNotifs.map((n) => n.id);
       const dbNotificationIds = notificationIds.filter(isUuid);
       const readTrackingKey = `notificationReadsEnabled_${user.id}`;
-      let readTrackingEnabled =
-        user.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+      let readTrackingEnabled = localStorage.getItem(readTrackingKey) !== 'false';
       const localReadIds = getLocalReadIds(user.id);
 
       // Fetch read receipts for this user only (best-effort)
@@ -239,30 +238,6 @@ export default function Notifications() {
           }
         } catch (readErr) {
           // Keep notifications usable even when read-receipt table is blocked.
-          readTrackingEnabled = false;
-          localStorage.setItem(readTrackingKey, 'false');
-        }
-      }
-
-      const unreadIds = notificationIds.filter((id) => !readIds.has(id));
-      const unreadDbIds = unreadIds.filter(isUuid);
-
-      // Auto-mark all as read when the page is opened (best-effort)
-      if (readTrackingEnabled && unreadDbIds.length > 0) {
-        try {
-          const rows = unreadDbIds.map((id) => ({ notification_id: id, user_id: user.id }));
-          const { error: upsertError } = await supabase
-            .from('notification_reads')
-            .upsert(rows, { onConflict: 'notification_id,user_id' });
-          if (!upsertError) {
-            unreadIds.forEach((id) => readIds.add(id));
-            saveLocalReadIds(user.id, readIds);
-          } else {
-            readTrackingEnabled = false;
-            localStorage.setItem(readTrackingKey, 'false');
-          }
-        } catch (upsertErr) {
-          // Ignore write failures; list should still load.
           readTrackingEnabled = false;
           localStorage.setItem(readTrackingKey, 'false');
         }
@@ -339,6 +314,36 @@ export default function Notifications() {
     }
   };
 
+  const markAllAsRead = async () => {
+    try {
+      if (!user?.id) return;
+      const unread = notifications.filter((n) => !n.isRead);
+      if (!unread.length) return;
+
+      const localReadIds = getLocalReadIds(user.id);
+      unread.forEach((n) => localReadIds.add(n.id));
+      saveLocalReadIds(user.id, localReadIds);
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+
+      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
+      if (localStorage.getItem(readTrackingKey) === 'false') return;
+
+      const unreadDbIds = unread.map((n) => n.id).filter(isUuid);
+      if (!unreadDbIds.length) return;
+
+      const rows = unreadDbIds.map((id) => ({ notification_id: id, user_id: user.id }));
+      const { error } = await supabase
+        .from('notification_reads')
+        .upsert(rows, { onConflict: 'notification_id,user_id' });
+
+      if (error) {
+        localStorage.setItem(readTrackingKey, 'false');
+      }
+    } catch (err) {
+      // Keep UI responsive even when read tracking write fails.
+    }
+  };
+
   const getTypeColor = (type) => {
     switch (type) {
       case 'warning':
@@ -383,11 +388,21 @@ export default function Notifications() {
             <Bell className="w-8 h-8 text-amber-500" />
             <h1 className="text-4xl font-bold text-slate-900">Notifications</h1>
           </div>
-          {unreadCount > 0 && (
-            <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-              {unreadCount} new
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {unreadCount > 0 && (
+              <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
+                {unreadCount} new
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={markAllAsRead}
+              disabled={unreadCount === 0}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Mark all as read
+            </button>
+          </div>
         </div>
 
         {/* Error Message */}

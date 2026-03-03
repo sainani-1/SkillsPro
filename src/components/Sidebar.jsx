@@ -158,7 +158,7 @@ const Sidebar = () => {
         const notificationIds = visibleNotifications.map(n => n.id);
         const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
         const readTrackingEnabled =
-          role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
+          localStorage.getItem(readTrackingKey) !== 'false';
         const localReadIds = getLocalReadIds(profile.id);
 
         if (!readTrackingEnabled) {
@@ -748,9 +748,9 @@ const Sidebar = () => {
               <CheckSquare size={28} />
               {shouldShowText && <span>Exam Settings</span>}
             </NavLink>
-            <NavLink to="/app/admin/settings" className={navItemClass} title="Platform Settings">
+            <NavLink to="/app/admin/settings" className={navItemClass} title="Admin Settings">
               <Settings size={28} />
-              {shouldShowText && <span>Platform Settings</span>}
+              {shouldShowText && <span>Admin Settings</span>}
             </NavLink>
             <NavLink to="/app/admin/reset-password" className={navItemClass} title="Reset Password">
               <Lock size={28} />
@@ -799,3 +799,4 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
+

@@ -1,5 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import {
+  clearStoredSessionKey,
+  heartbeatSingleSession,
+  isCurrentDeviceSessionOwner,
+  setSingleSessionNotice
+} from '../utils/singleSession';
 
 const AuthContext = createContext();
 
@@ -33,6 +39,15 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       // Ignore cache clear failures.
     }
+  };
+
+  const handleSingleSessionConflict = async (userId) => {
+    setSingleSessionNotice('Your account was logged in from another device.');
+    clearStoredSessionKey(userId);
+    setUser(null);
+    setProfile(null);
+    clearProfileCache();
+    await supabase.auth.signOut();
   };
 
   const isPremium = (p) => {
@@ -93,6 +108,62 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let cancelled = false;
+    let checking = false;
+
+    const validateAndHeartbeat = async () => {
+      if (checking || cancelled) return;
+      checking = true;
+      try {
+        const owned = await isCurrentDeviceSessionOwner(user.id);
+        if (cancelled) return;
+        if (owned === false) {
+          await handleSingleSessionConflict(user.id);
+          return;
+        }
+        if (owned === true) {
+          await heartbeatSingleSession(user.id);
+        }
+      } finally {
+        checking = false;
+      }
+    };
+
+    validateAndHeartbeat();
+    const interval = setInterval(validateAndHeartbeat, 5000);
+    const onFocus = () => validateAndHeartbeat();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') validateAndHeartbeat();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const channel = supabase
+      .channel(`single-session-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'active_user_sessions', filter: `user_id=eq.${user.id}` },
+        validateAndHeartbeat
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'active_user_sessions', filter: `user_id=eq.${user.id}` },
+        validateAndHeartbeat
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
   const fetchProfile = async (userId, options = {}) => {
     const { background = false } = options;
     try {
@@ -115,16 +186,21 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    const currentUserId = user?.id || profile?.id;
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     clearProfileCache();
+    clearStoredSessionKey(currentUserId);
     try {
       sessionStorage.removeItem('admin_mfa_verified');
       sessionStorage.removeItem('admin_mfa_verified_user');
       sessionStorage.removeItem('admin_face_verified');
     } catch (error) {
       // Ignore storage cleanup failures.
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign('/');
     }
   };
 

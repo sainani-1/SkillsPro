@@ -81,6 +81,12 @@ const formatCertificateId = (cert) => {
 const resolveCertificateCourseTitle = (cert) =>
   cert?.generated_course_name || cert?.generated_name || cert?.course?.title || 'General Achievement';
 
+const toSafeFilePart = (value) =>
+  String(value || '')
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 /**
  * MyCertificates Component
  * Uses: useAuth (profile, isPremium), usePopup (notifications)
@@ -92,7 +98,7 @@ const resolveCertificateCourseTitle = (cert) =>
  * 3. Share via URL (copy shareable link)
  */
 const MyCertificates = () => {
-  const { profile, isPremium } = useAuth();
+  const { profile } = useAuth();
   const [certificates, setCertificates] = useState([]);
   const [revokedCount, setRevokedCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -360,7 +366,10 @@ const MyCertificates = () => {
       const dataUrl = await buildCertificateDataUrl(cert, formattedId);
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: [2400, 1800] });
       pdf.addImage(dataUrl, 'PNG', 0, 0, 2400, 1800);
-      pdf.save(`certificate-${formattedId}.pdf`);
+      const userName = toSafeFilePart(profile?.full_name || 'User');
+      const courseName = toSafeFilePart(resolveCertificateCourseTitle(cert) || 'Course');
+      const fileName = `SkillPro Certificate ${userName} ${courseName}.pdf`;
+      pdf.save(fileName);
       setDownloading(null);
     } catch (err) {
       console.error('Download error:', err);
@@ -530,15 +539,6 @@ const MyCertificates = () => {
     fetchCerts();
   }, [profile]);
 
-  if (!isPremium(profile)) {
-    return (
-      <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm text-center">
-        <h1 className="text-2xl font-bold text-slate-900">Premium required</h1>
-        <p className="text-slate-500 mt-1">Upgrade to earn and download certificates.</p>
-      </div>
-    );
-  }
-
   if (loading) return <div>Loading certificates...</div>;
 
   /**
@@ -615,37 +615,47 @@ const MyCertificates = () => {
                 </div>
               </div>
               {typeof cert.exam?.score_percent === 'number' ? (
-                <div className="text-sm text-slate-600">Score: {cert.exam.score_percent.toFixed(1)}%</div>
+                <div className="inline-flex items-center w-fit px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+                  Score: {cert.exam.score_percent.toFixed(1)}%
+                </div>
               ) : (
-                <div className="text-sm text-slate-500">Admin Generated Certificate</div>
+                <div className="inline-flex items-center w-fit px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700">
+                  Admin Generated Certificate
+                </div>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
                 <a
                   href={`/certificate-preview/${encodeURIComponent(formatCertificateId(cert))}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`flex items-center justify-center gap-2 border border-slate-200 text-slate-700 py-2 rounded-lg hover:border-nani-accent hover:text-nani-accent transition-colors ${
+                  className={`h-12 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-[15px] font-semibold text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 hover:shadow transition ${
                     cert.revoked_at ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''
                   }`}
                 >
-                  <Eye size={16} />
-                  View
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+                    <Eye size={19} strokeWidth={2.4} />
+                  </span>
+                  View Certificate
                 </a>
                 <button
                   onClick={() => downloadCertificate(cert)}
                   disabled={downloading === cert.id || !!cert.revoked_at}
-                  className="flex items-center justify-center gap-2 bg-nani-dark text-white py-2 rounded-lg hover:bg-nani-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 px-4 text-[15px] font-semibold text-white shadow-md hover:from-slate-800 hover:to-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Download size={16} />
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
+                    <Download size={19} strokeWidth={2.4} />
+                  </span>
                   {downloading === cert.id ? 'Downloading...' : 'Download PDF'}
                 </button>
                 <button
                   onClick={() => shareOnLinkedIn(cert)}
                   disabled={!!cert.revoked_at}
-                  className="flex items-center justify-center gap-2 bg-blue-700 text-white py-2 rounded-lg hover:bg-blue-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-blue-600 px-4 text-[15px] font-semibold text-white shadow-md hover:from-blue-800 hover:to-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Linkedin size={16} />
-                  LinkedIn
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
+                    <Linkedin size={19} strokeWidth={2.4} />
+                  </span>
+                  Share LinkedIn
                 </button>
               </div>
             </div>

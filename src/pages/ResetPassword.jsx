@@ -184,56 +184,90 @@ const ResetPassword = () => {
       : 'bg-blue-500/15 border-blue-400/40 text-blue-200';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-lg">
-        <div className="text-center mb-7">
-          <div className="w-16 h-16 mx-auto bg-gold-400 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-            <Lock size={32} className="text-nani-dark" />
-          </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Reset Password</h1>
-          <p className="text-slate-300">
-            {isRecoveryMode
-              ? 'Verified reset link. Set your new password.'
-              : 'Enter your email to receive reset link.'}
-          </p>
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 py-8 relative">
+      <div className="absolute top-5 right-5 md:top-8 md:right-8 z-10">
+        <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white border border-slate-200 shadow-lg flex items-center justify-center overflow-hidden">
+          <img
+            src="/skillpro-logo.png"
+            alt="SkillPro logo"
+            className="w-10 h-10 md:w-12 md:h-12 object-cover rounded-full"
+          />
         </div>
+      </div>
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1.1fr,1.2fr] rounded-3xl overflow-hidden border border-slate-700/70 shadow-2xl">
+        <aside className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 md:p-10 text-white flex flex-col justify-between">
+          <div>
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gold-400/95 mb-5">
+              <Lock size={28} className="text-slate-900" />
+            </div>
+            <h1 className="text-3xl md:text-4xl font-extrabold leading-tight">Reset Your Password</h1>
+            <p className="mt-3 text-slate-300 text-sm md:text-base">
+              {isRecoveryMode
+                ? 'Recovery session verified. Set a strong new password.'
+                : 'Enter your email and we will send a secure password reset link.'}
+            </p>
+          </div>
 
-        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-2xl space-y-5">
+          <div className="mt-8 space-y-3 text-sm">
+            <div className="flex items-center gap-3 text-slate-200">
+              <ShieldCheck size={16} className="text-emerald-400" />
+              Secure token-based reset flow
+            </div>
+            <div className="flex items-center gap-3 text-slate-200">
+              <Mail size={16} className="text-blue-300" />
+              Link opens in a verified recovery session
+            </div>
+            <div className="flex items-center gap-3 text-slate-200">
+              <KeyRound size={16} className="text-amber-300" />
+              Password update signs out old sessions
+            </div>
+          </div>
+        </aside>
+
+        <section className="bg-white/10 backdrop-blur-lg p-7 md:p-10">
+          <div className="flex items-center gap-2 mb-6">
+            <div className={`h-2 flex-1 rounded-full ${!isRecoveryMode ? 'bg-gold-400' : 'bg-slate-600'}`} />
+            <div className={`h-2 flex-1 rounded-full ${isRecoveryMode ? 'bg-gold-400' : 'bg-slate-600'}`} />
+          </div>
+
           {status.message ? (
-            <div className={`border rounded-lg p-3 text-sm ${statusClass}`}>
+            <div className={`border rounded-xl p-3 text-sm mb-5 ${statusClass}`}>
               {status.message}
             </div>
           ) : null}
 
           {!isRecoveryMode ? (
             <form onSubmit={handleSendResetLink} className="space-y-4">
-              <label className="block text-sm text-slate-300 font-medium">Email address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your registered email"
-                className="w-full p-3 rounded-lg bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
-                required
-              />
+              <label className="block text-sm text-slate-200 font-medium">Email Address</label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full pl-10 pr-3 py-3 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
+                  required
+                />
+              </div>
               <button
                 type="submit"
                 disabled={sending}
-                className="w-full bg-gold-400 hover:bg-gold-300 text-nani-dark font-bold py-3 rounded-lg transition-colors disabled:opacity-60"
+                className="w-full bg-gold-400 hover:bg-gold-300 text-slate-900 font-extrabold py-3 rounded-xl transition-colors disabled:opacity-60"
               >
-                {sending ? 'Sending reset link...' : 'Send Reset Link'}
+                {sending ? 'Sending Reset Link...' : 'Send Reset Link'}
               </button>
             </form>
           ) : (
             <form onSubmit={handleUpdatePassword} className="space-y-4">
-              <label className="block text-sm text-slate-300 font-medium">New password</label>
+              <label className="block text-sm text-slate-200 font-medium">New Password</label>
               <div className="relative">
                 <input
                   type={showNewPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="Enter new password"
-                  className="w-full p-3 pr-11 rounded-lg bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
+                  className="w-full p-3 pr-11 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
                   required
                 />
                 <button
@@ -249,17 +283,17 @@ const ResetPassword = () => {
                 <div className="h-2 rounded bg-slate-700 overflow-hidden">
                   <div className={`h-2 ${passwordStrength.color} ${passwordStrength.width} transition-all`} />
                 </div>
-                <p className="text-xs text-slate-300">Strength: {passwordStrength.label}</p>
+                <p className="text-xs text-slate-300">Password strength: {passwordStrength.label}</p>
               </div>
 
-              <label className="block text-sm text-slate-300 font-medium">Confirm new password</label>
+              <label className="block text-sm text-slate-200 font-medium">Confirm New Password</label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Confirm new password"
-                  className="w-full p-3 pr-11 rounded-lg bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
+                  className="w-full p-3 pr-11 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
                   required
                 />
                 <button
@@ -271,18 +305,18 @@ const ResetPassword = () => {
                   {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
-              <div className="text-xs text-slate-300 flex items-center gap-2">
+              <p className="text-xs text-slate-300 flex items-center gap-2">
                 <KeyRound size={14} />
-                Use at least 8 characters with upper/lowercase, number and symbol.
-              </div>
+                Minimum 8+ characters recommended with mixed-case, number and symbol.
+              </p>
 
               <button
                 type="submit"
                 disabled={updating}
-                className="w-full bg-gold-400 hover:bg-gold-300 text-nani-dark font-bold py-3 rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                className="w-full bg-gold-400 hover:bg-gold-300 text-slate-900 font-extrabold py-3 rounded-xl transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
               >
                 <CheckCircle2 size={18} />
-                {updating ? 'Updating password...' : 'Set New Password'}
+                {updating ? 'Updating Password...' : 'Set New Password'}
               </button>
             </form>
           )}
@@ -290,19 +324,12 @@ const ResetPassword = () => {
           <button
             type="button"
             onClick={() => navigate('/login')}
-            className="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white transition"
+            className="mt-5 w-full flex items-center justify-center gap-2 text-slate-300 hover:text-white transition"
           >
             <ArrowLeft size={18} />
             Back to Login
           </button>
-        </div>
-
-        {!isRecoveryMode ? (
-          <p className="text-xs text-slate-400 text-center mt-4 flex items-center justify-center gap-1">
-            <ShieldCheck size={14} />
-            Only verified email users can complete password change via reset link.
-          </p>
-        ) : null}
+        </section>
       </div>
     </div>
   );
