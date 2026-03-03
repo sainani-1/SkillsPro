@@ -27,6 +27,7 @@ const GuidanceSessions = () => {
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDateTime, setSessionDateTime] = useState('');
   const [sessionMeetLink, setSessionMeetLink] = useState('');
+  const [sessionLinkActiveUntil, setSessionLinkActiveUntil] = useState('');
   const [scheduling, setScheduling] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
@@ -59,7 +60,12 @@ const GuidanceSessions = () => {
         
         setRequests(reqs || []);
 
+        // Resolve assigned teacher IDs to readable names for student view.
+        const assignedTeacherIds = Array.from(
+          new Set((reqs || []).map((r) => r.assigned_to_teacher_id).filter(Boolean))
+        );
         // Fetch sessions for this student's requests
+        let fetchedSessions = [];
         if (reqs && reqs.length > 0) {
           const { data: sess, error: sessError } = await supabase
             .from('guidance_sessions')
@@ -68,7 +74,28 @@ const GuidanceSessions = () => {
             .order('scheduled_for', { ascending: false });
           
           if (sessError) console.error('Error fetching sessions:', sessError);
-          setSessions(sess || []);
+          fetchedSessions = sess || [];
+          setSessions(fetchedSessions);
+        } else {
+          setSessions([]);
+        }
+
+        const sessionTeacherIds = fetchedSessions.map((s) => s.teacher_id).filter(Boolean);
+        const allTeacherIds = Array.from(new Set([...assignedTeacherIds, ...sessionTeacherIds]));
+
+        if (allTeacherIds.length > 0) {
+          const { data: assignedTeachers, error: teacherErr } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', allTeacherIds);
+          if (teacherErr) {
+            console.error('Error fetching assigned teachers:', teacherErr);
+            setTeachers([]);
+          } else {
+            setTeachers(assignedTeachers || []);
+          }
+        } else {
+          setTeachers([]);
         }
       } else if (profile.role === 'admin' || profile.role === 'teacher') {
         // For teachers: fetch only requests assigned to them
@@ -151,6 +178,14 @@ const GuidanceSessions = () => {
   if (loading) {
     return <LoadingSpinner message="Loading guidance sessions..." />;
   }
+
+  const isSessionCompleted = (session) => {
+    if (!session) return false;
+    if (session.status === 'completed') return true;
+    if (session.link_active_until) return new Date(session.link_active_until).getTime() < Date.now();
+    if (!session.scheduled_for) return false;
+    return new Date(session.scheduled_for).getTime() < Date.now();
+  };
 
   const submitRequest = async () => {
     if (!topic.trim()) {
@@ -254,6 +289,7 @@ const GuidanceSessions = () => {
     setSelectedRequest(req);
     setSessionDateTime('');
     setSessionMeetLink('');
+    setSessionLinkActiveUntil('');
     setShowSessionModal(true);
   };
 
@@ -441,8 +477,18 @@ const GuidanceSessions = () => {
                     {req.assigned_to_teacher_id && (
                       <div className="bg-blue-50 rounded-lg p-3 mt-2">
                         <p className="text-sm text-slate-600">
-                          <strong>Assigned to Teacher ID:</strong> {req.assigned_to_teacher_id}
+                          <strong>Assigned Teacher:</strong>{' '}
+                          {(() => {
+                            const assignedTeacher = teachers.find((t) => t.id === req.assigned_to_teacher_id);
+                            return assignedTeacher?.full_name || req.assigned_to_teacher_id;
+                          })()}
                         </p>
+                        {(() => {
+                          const assignedTeacher = teachers.find((t) => t.id === req.assigned_to_teacher_id);
+                          return assignedTeacher?.email ? (
+                            <p className="text-xs text-slate-500 mt-1">Email: {assignedTeacher.email}</p>
+                          ) : null;
+                        })()}
                         <p className="text-xs text-slate-500 mt-1">Teacher will schedule the session with you</p>
                       </div>
                     )}
@@ -466,28 +512,48 @@ const GuidanceSessions = () => {
               <p className="text-slate-500 text-sm">No sessions scheduled yet</p>
             ) : (
               <div className="space-y-3">
-                {sessions.map(sess => (
-                  <div key={sess.id} className="border border-slate-200 rounded-lg p-4 flex items-start justify-between">
-                    <div className="flex items-start gap-3 flex-1">
-                      <Calendar className="text-nani-dark flex-shrink-0 mt-1" size={20} />
-                      <div>
-                        <p className="font-semibold text-slate-900">Mentorship Session</p>
-                        <p className="text-sm text-slate-600">{sess.teacher?.full_name}</p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          {new Date(sess.scheduled_for).toLocaleString()}
-                        </p>
+                {sessions.map(sess => {
+                  const completed = isSessionCompleted(sess);
+                  const teacher = teachers.find((t) => t.id === sess.teacher_id);
+                  return (
+                    <div key={sess.id} className="border border-slate-200 rounded-lg p-4 flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 flex-1">
+                        <Calendar className="text-nani-dark flex-shrink-0 mt-1" size={20} />
+                        <div>
+                          <p className="font-semibold text-slate-900">Mentorship Session</p>
+                          <p className="text-sm text-slate-600">{teacher?.full_name || sess.teacher_id || 'Teacher'}</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {new Date(sess.scheduled_for).toLocaleString()}
+                          </p>
+                          {sess.link_active_until && (
+                            <p className="text-xs text-slate-500 mt-1">
+                              Link active until: {new Date(sess.link_active_until).toLocaleString()}
+                            </p>
+                          )}
+                          <span className={`inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-medium ${
+                            completed ? 'bg-slate-100 text-slate-700' : 'bg-green-100 text-green-700'
+                          }`}>
+                            {completed ? 'Completed' : 'Upcoming'}
+                          </span>
+                        </div>
                       </div>
+                      {completed ? (
+                        <span className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm flex items-center gap-2 flex-shrink-0 cursor-not-allowed">
+                          Session Completed
+                        </span>
+                      ) : (
+                        <a
+                          href={sess.join_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors flex items-center gap-2 flex-shrink-0"
+                        >
+                          <LinkIcon size={16} /> Join
+                        </a>
+                      )}
                     </div>
-                    <a 
-                      href={sess.join_link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors flex items-center gap-2 flex-shrink-0"
-                    >
-                      <LinkIcon size={16} /> Join
-                    </a>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -556,6 +622,7 @@ const GuidanceSessions = () => {
               <div className="space-y-3">
                 {sessions.filter(s => s.teacher_id === profile.id).map(sess => {
                   const relatedRequest = requests.find(r => r.id === sess.request_id);
+                  const completed = isSessionCompleted(sess);
                   return (
                     <div key={sess.id} className="border border-purple-200 bg-purple-50 rounded-lg p-4">
                       <div className="flex items-start justify-between mb-3">
@@ -572,25 +639,34 @@ const GuidanceSessions = () => {
                           {sess.status}
                         </span>
                       </div>
-                      <div className="bg-white border border-purple-200 rounded-lg p-3 mt-3">
-                        <p className="text-xs text-slate-600 mb-2"><strong>Meeting Link:</strong></p>
-                        <a 
-                          href={sess.join_link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-blue-600 hover:underline break-all"
-                        >
-                          {sess.join_link}
-                        </a>
-                      </div>
-                      <a
-                        href={sess.join_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-3 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2 w-full"
-                      >
-                        🎥 Join Meeting
-                      </a>
+                      {!completed && (
+                        <>
+                          <div className="bg-white border border-purple-200 rounded-lg p-3 mt-3">
+                            <p className="text-xs text-slate-600 mb-2"><strong>Meeting Link:</strong></p>
+                            <a 
+                              href={sess.join_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:underline break-all"
+                            >
+                              {sess.join_link}
+                            </a>
+                          </div>
+                          <a
+                            href={sess.join_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2 w-full"
+                          >
+                            🎥 Join Meeting
+                          </a>
+                        </>
+                      )}
+                      {completed && (
+                        <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 mt-3 text-sm text-slate-700">
+                          Session completed. Join link is hidden.
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -659,7 +735,7 @@ const GuidanceSessions = () => {
                             <strong>Student ID:</strong> {req.student_id}
                           </p>
                           <p className="text-sm text-slate-600 mt-1">
-                            <strong>Assigned to:</strong> {assignedTeacher?.full_name || 'Unknown'} (ID: {req.assigned_to_teacher_id})
+                            <strong>Assigned to:</strong> {assignedTeacher?.full_name || req.assigned_to_teacher_id || 'Unknown'}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
                             Assigned: {req.assigned_at ? new Date(req.assigned_at).toLocaleDateString() : 'N/A'}
@@ -689,6 +765,8 @@ const GuidanceSessions = () => {
               <div className="space-y-3">
                 {sessions.map(sess => {
                   const relatedRequest = requests.find(r => r.id === sess.request_id);
+                  const completed = isSessionCompleted(sess);
+                  const teacher = teachers.find((t) => t.id === sess.teacher_id);
                   return (
                     <div key={sess.id} className="border border-slate-200 rounded-lg p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -697,7 +775,7 @@ const GuidanceSessions = () => {
                           <div className="flex-1">
                             <p className="font-semibold text-slate-900">{relatedRequest?.topic || 'Guidance Session'}</p>
                             <p className="text-sm text-slate-600 mt-1">
-                              <strong>Teacher ID:</strong> {sess.teacher_id}
+                              <strong>Teacher:</strong> {teacher?.full_name || sess.teacher_id}
                             </p>
                             <p className="text-sm text-slate-600 mt-1">
                               <strong>Student ID:</strong> {relatedRequest?.student_id || 'N/A'}
@@ -705,25 +783,33 @@ const GuidanceSessions = () => {
                             <p className="text-xs text-slate-500 mt-1">
                               📅 {new Date(sess.scheduled_for).toLocaleString()}
                             </p>
+                            {!completed && (
+                              <a 
+                                href={sess.join_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 hover:underline break-all mt-2 inline-block"
+                              >
+                                {sess.join_link}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 flex-shrink-0">
+                          {completed ? (
+                            <span className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm text-center cursor-not-allowed">
+                              Completed
+                            </span>
+                          ) : (
                             <a 
                               href={sess.join_link}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-sm text-blue-600 hover:underline break-all mt-2 inline-block"
+                              className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors text-center"
                             >
-                              {sess.join_link}
+                              Join Link
                             </a>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2 flex-shrink-0">
-                          <a 
-                            href={sess.join_link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors text-center"
-                          >
-                            Join Link
-                          </a>
+                          )}
                           <button
                             onClick={() => deleteSession(sess.id)}
                             className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
@@ -971,6 +1057,18 @@ const GuidanceSessions = () => {
                 />
                 <p className="text-xs text-slate-500 mt-1">Provide your Google Meet, Zoom, or other meeting link</p>
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Link Active Upto</label>
+                <input
+                  type="datetime-local"
+                  value={sessionLinkActiveUntil}
+                  onChange={e => setSessionLinkActiveUntil(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Optional. If not provided, link will stay active for 1 hour from session start.
+                </p>
+              </div>
             </div>
             <div className="flex gap-2 mt-6">
               <button
@@ -993,6 +1091,39 @@ const GuidanceSessions = () => {
                     });
                     return;
                   }
+                  const scheduledAt = new Date(sessionDateTime);
+                  if (Number.isNaN(scheduledAt.getTime())) {
+                    setAlertModal({
+                      show: true,
+                      title: 'Invalid Date',
+                      message: 'Please provide a valid session date and time.',
+                      type: 'warning'
+                    });
+                    return;
+                  }
+                  let linkActiveUntilIso = new Date(scheduledAt.getTime() + (60 * 60 * 1000)).toISOString();
+                  if (sessionLinkActiveUntil) {
+                    const linkActiveUntilDate = new Date(sessionLinkActiveUntil);
+                    if (Number.isNaN(linkActiveUntilDate.getTime())) {
+                      setAlertModal({
+                        show: true,
+                        title: 'Invalid Time',
+                        message: 'Please provide a valid link active upto time.',
+                        type: 'warning'
+                      });
+                      return;
+                    }
+                    if (linkActiveUntilDate.getTime() <= scheduledAt.getTime()) {
+                      setAlertModal({
+                        show: true,
+                        title: 'Invalid Time',
+                        message: 'Link active upto time should be after session start.',
+                        type: 'warning'
+                      });
+                      return;
+                    }
+                    linkActiveUntilIso = linkActiveUntilDate.toISOString();
+                  }
                   const teacherId = profile.role === 'admin'
                     ? selectedRequest.assigned_to_teacher_id
                     : profile.id;
@@ -1012,6 +1143,7 @@ const GuidanceSessions = () => {
                     teacher_id: teacherId,
                     scheduled_for: new Date(sessionDateTime).toISOString(),
                     join_link: sessionMeetLink,
+                    link_active_until: linkActiveUntilIso,
                     status: 'scheduled'
                   });
                   if (sessionError) {
@@ -1041,12 +1173,13 @@ const GuidanceSessions = () => {
                   }
                   setShowSessionModal(false);
                   setSelectedRequest(null);
+                  setSessionLinkActiveUntil('');
                   setScheduling(false);
                   await loadData();
                   setAlertModal({
                     show: true,
                     title: 'Session scheduled',
-                    message: 'Join link: ' + sessionMeetLink,
+                    message: `Join link active until ${new Date(linkActiveUntilIso).toLocaleString()}`,
                     type: 'success'
                   });
                 }}
@@ -1059,6 +1192,7 @@ const GuidanceSessions = () => {
                 onClick={() => {
                   setShowSessionModal(false);
                   setSelectedRequest(null);
+                  setSessionLinkActiveUntil('');
                   setScheduling(false);
                 }}
                 className="flex-1 bg-slate-200 text-slate-700 py-2 rounded-lg hover:bg-slate-300 transition-colors"

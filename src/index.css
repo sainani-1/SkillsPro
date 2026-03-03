@@ -5,6 +5,11 @@
 body {
   @apply bg-slate-50 text-slate-800;
   position: relative;
+  cursor: default;
+}
+
+html {
+  cursor: default;
 }
 
 body::before {
