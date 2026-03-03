@@ -12,7 +12,11 @@ const AdminChangeCourse = () => {
   const [courseSearch, setCourseSearch] = useState('');
   const [courseOptions, setCourseOptions] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
+  const [globalCourseSearch, setGlobalCourseSearch] = useState('');
+  const [globalCourseOptions, setGlobalCourseOptions] = useState([]);
+  const [selectedGlobalCourse, setSelectedGlobalCourse] = useState(null);
   const [enrolling, setEnrolling] = useState(false);
+  const [makingGlobalFree, setMakingGlobalFree] = useState(false);
   const [message, setMessage] = useState(null);
 
   const pushNotification = async (payload) => {
@@ -79,6 +83,17 @@ const AdminChangeCourse = () => {
     }
   }, [courseSearch, courses]);
 
+  // Filter courses by search for global free action
+  useEffect(() => {
+    if (!globalCourseSearch) {
+      setGlobalCourseOptions(courses);
+    } else {
+      setGlobalCourseOptions(
+        courses.filter(c => c.title.toLowerCase().includes(globalCourseSearch.toLowerCase()))
+      );
+    }
+  }, [globalCourseSearch, courses]);
+
   // Enroll user in course for free
   const handleEnroll = async () => {
     if (!selectedUser || !selectedCourse) return;
@@ -121,6 +136,71 @@ const AdminChangeCourse = () => {
         .then(({ data }) => setEnrollments(data || []));
     }
     setEnrolling(false);
+  };
+
+  const handleMakeCourseFreeForAll = async () => {
+    if (!selectedGlobalCourse) return;
+    setMakingGlobalFree(true);
+    setMessage(null);
+
+    try {
+      // 1) Mark as free for upcoming users
+      const { error: courseUpdateError } = await supabase
+        .from('courses')
+        .update({ is_free: true })
+        .eq('id', selectedGlobalCourse.id);
+
+      if (courseUpdateError) throw courseUpdateError;
+
+      // 2) Ensure existing students are enrolled
+      const [{ data: students, error: studentsError }, { data: existingEnrollments, error: enrollmentsError }] =
+        await Promise.all([
+          supabase
+            .from('profiles')
+            .select('id')
+            .eq('role', 'student'),
+          supabase
+            .from('enrollments')
+            .select('student_id')
+            .eq('course_id', selectedGlobalCourse.id),
+        ]);
+
+      if (studentsError) throw studentsError;
+      if (enrollmentsError) throw enrollmentsError;
+
+      const existingSet = new Set((existingEnrollments || []).map(e => e.student_id));
+      const missingRows = (students || [])
+        .filter(s => !existingSet.has(s.id))
+        .map(s => ({
+          student_id: s.id,
+          course_id: selectedGlobalCourse.id,
+          progress: 0,
+          completed: false,
+        }));
+
+      if (missingRows.length > 0) {
+        const chunkSize = 500;
+        for (let i = 0; i < missingRows.length; i += chunkSize) {
+          const chunk = missingRows.slice(i, i + chunkSize);
+          const { error: insertError } = await supabase.from('enrollments').insert(chunk);
+          if (insertError) throw insertError;
+        }
+      }
+
+      // Keep local course list in sync
+      setCourses(prev =>
+        prev.map(c => (c.id === selectedGlobalCourse.id ? { ...c, is_free: true } : c))
+      );
+
+      setMessage({
+        type: 'success',
+        text: `"${selectedGlobalCourse.title}" is now free for all upcoming users, and enrolled for ${missingRows.length} existing students.`,
+      });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Failed to make course free for all users.' });
+    } finally {
+      setMakingGlobalFree(false);
+    }
   };
 
   return (
@@ -217,6 +297,51 @@ const AdminChangeCourse = () => {
           {enrolling ? 'Enrolling...' : `Enroll ${selectedUser.full_name} in ${selectedCourse.title} for Free`}
         </button>
       )}
+
+      {/* Global Free Course for all users */}
+      <div className="border-t pt-6">
+        <h2 className="text-xl font-bold text-emerald-700 mb-2">
+          Make Course Free for All Users
+        </h2>
+        <p className="text-slate-600 mb-3 text-sm">
+          Search a course and make it free for future users, then auto-enroll all existing students.
+        </p>
+        <label className="block font-semibold mb-1">Search Course</label>
+        <input
+          type="text"
+          className="w-full border rounded-lg p-2 mb-2"
+          placeholder="Search course by title..."
+          value={globalCourseSearch}
+          onChange={(e) => {
+            setGlobalCourseSearch(e.target.value);
+            setSelectedGlobalCourse(null);
+          }}
+        />
+        {globalCourseOptions.length > 0 && (
+          <div className="border rounded-lg bg-white shadow max-h-40 overflow-y-auto mb-3">
+            {globalCourseOptions.map(c => (
+              <div
+                key={c.id}
+                className={`p-2 hover:bg-emerald-50 cursor-pointer ${selectedGlobalCourse?.id === c.id ? 'bg-emerald-100' : ''}`}
+                onClick={() => setSelectedGlobalCourse(c)}
+              >
+                {c.title}
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50"
+          onClick={handleMakeCourseFreeForAll}
+          disabled={!selectedGlobalCourse || makingGlobalFree}
+        >
+          {makingGlobalFree
+            ? 'Applying...'
+            : selectedGlobalCourse
+              ? `Make "${selectedGlobalCourse.title}" Free for All`
+              : 'Select a Course'}
+        </button>
+      </div>
 
       {/* Message */}
       {message && (

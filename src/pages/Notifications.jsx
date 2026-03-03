@@ -23,7 +23,18 @@ export default function Notifications() {
       message.includes('access to fetch')
     );
   };
-
+  const isTargetUserIdColumnError = (err) =>
+    String(err?.message || '').toLowerCase().includes('target_user_id');
+  const extractLegacyTargetUserId = (text) => {
+    const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
+    return match?.[1] || null;
+  };
+  const stripLegacyTargetMarker = (text) =>
+    String(text || '').replace(/^\s*\[target_user_id:[^\]]+\]\s*/i, '');
+  const isUuid = (value) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      String(value || '')
+    );
   const getLocalReadIds = (userId) => {
     if (!userId) return new Set();
     try {
@@ -49,6 +60,24 @@ export default function Notifications() {
       fetchNotifications();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 60000);
+    const onFocus = () => fetchNotifications();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchNotifications();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user?.id]);
 
   const fetchUser = async () => {
     try {
@@ -81,15 +110,110 @@ export default function Notifications() {
         return;
       }
 
-      // Fetch notifications based on user role
-      const { data, error: fetchError } = await supabase
+      // Fetch notifications based on role + direct user targeting.
+      const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, created_at')
-        .or(`target_role.eq.all,target_role.eq.${user.role}`)
+        .select('id, title, content, type, target_role, target_user_id, created_at')
+        .in('target_role', ['all', user.role])
+        .is('target_user_id', null)
         .order('created_at', { ascending: false });
 
+      let data = roleScopedRes.data || [];
+      let fetchError = roleScopedRes.error;
+
+      if (fetchError && isTargetUserIdColumnError(fetchError)) {
+        const legacy = await supabase
+          .from('admin_notifications')
+          .select('id, title, content, type, target_role, created_at')
+          .or(`target_role.eq.all,target_role.eq.${user.role}`)
+          .order('created_at', { ascending: false });
+        data = legacy.data || [];
+        fetchError = legacy.error;
+      } else if (!fetchError) {
+        const targetedRes = await supabase
+          .from('admin_notifications')
+          .select('id, title, content, type, target_role, target_user_id, created_at')
+          .eq('target_user_id', user.id)
+          .order('created_at', { ascending: false });
+        if (targetedRes.error && !isTargetUserIdColumnError(targetedRes.error)) {
+          fetchError = targetedRes.error;
+        } else if (!targetedRes.error && targetedRes.data?.length) {
+          const byId = new Map(data.map((n) => [n.id, n]));
+          targetedRes.data.forEach((n) => byId.set(n.id, n));
+          data = Array.from(byId.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+        }
+      }
+
       if (fetchError) throw fetchError;
-      const notificationIds = (data || []).map((n) => n.id);
+      const visibleData = (data || [])
+        .filter((notif) => {
+          const legacyTarget = extractLegacyTargetUserId(notif.content);
+          return !legacyTarget || String(legacyTarget) === String(user.id);
+        })
+        .map((notif) => ({
+          ...notif,
+          content: stripLegacyTargetMarker(notif.content),
+        }));
+
+      // Fallback source: class session assignments (for environments where teacher cannot insert admin_notifications).
+      let classSessionNotifs = [];
+      if (user.role === 'student') {
+        const { data: classRows } = await supabase
+          .from('class_session_participants')
+          .select('session_id, created_at, class_sessions(title, scheduled_for, ends_at)')
+          .eq('student_id', user.id)
+          .order('created_at', { ascending: false });
+
+        classSessionNotifs = (classRows || []).map((row) => {
+          const session = row.class_sessions || {};
+          const startAt = session.scheduled_for ? new Date(session.scheduled_for) : null;
+          const endAt = session.ends_at ? new Date(session.ends_at) : null;
+          const startText = startAt
+            ? startAt.toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              })
+            : 'scheduled time';
+          const endText = endAt
+            ? endAt.toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              })
+            : null;
+
+          return {
+            id: `class-session-${row.session_id}`,
+            title: `Class Scheduled: ${session.title || 'Live Session'}`,
+            content: endText
+              ? `You have a class scheduled for ${startText} (upto ${endText}).`
+              : `You have a class scheduled for ${startText}.`,
+            type: 'info',
+            target_role: 'student',
+            target_user_id: user.id,
+            created_at: row.created_at || session.scheduled_for || new Date().toISOString(),
+            isSynthetic: true,
+          };
+        });
+      }
+
+      const mergedNotifs = [...visibleData, ...classSessionNotifs];
+      const byId = new Map(mergedNotifs.map((n) => [n.id, n]));
+      const finalNotifs = Array.from(byId.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      const notificationIds = finalNotifs.map((n) => n.id);
+      const dbNotificationIds = notificationIds.filter(isUuid);
       const readTrackingKey = `notificationReadsEnabled_${user.id}`;
       let readTrackingEnabled =
         user.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
@@ -97,13 +221,13 @@ export default function Notifications() {
 
       // Fetch read receipts for this user only (best-effort)
       let readIds = new Set(localReadIds);
-      if (readTrackingEnabled && notificationIds.length > 0) {
+      if (readTrackingEnabled && dbNotificationIds.length > 0) {
         try {
           const { data: reads, error: readError } = await supabase
             .from('notification_reads')
             .select('notification_id')
             .eq('user_id', user.id)
-            .in('notification_id', notificationIds);
+            .in('notification_id', dbNotificationIds);
 
           if (!readError) {
             const dbReadIds = reads?.map((r) => r.notification_id) || [];
@@ -121,11 +245,12 @@ export default function Notifications() {
       }
 
       const unreadIds = notificationIds.filter((id) => !readIds.has(id));
+      const unreadDbIds = unreadIds.filter(isUuid);
 
       // Auto-mark all as read when the page is opened (best-effort)
-      if (readTrackingEnabled && unreadIds.length > 0) {
+      if (readTrackingEnabled && unreadDbIds.length > 0) {
         try {
-          const rows = unreadIds.map((id) => ({ notification_id: id, user_id: user.id }));
+          const rows = unreadDbIds.map((id) => ({ notification_id: id, user_id: user.id }));
           const { error: upsertError } = await supabase
             .from('notification_reads')
             .upsert(rows, { onConflict: 'notification_id,user_id' });
@@ -143,7 +268,7 @@ export default function Notifications() {
         }
       }
 
-      const formattedData = (data || []).map((notif) => ({
+      const formattedData = finalNotifs.map((notif) => ({
         ...notif,
         isRead: readIds.has(notif.id),
       }));
@@ -177,6 +302,7 @@ export default function Notifications() {
 
       const readTrackingKey = `notificationReadsEnabled_${user.id}`;
       if (localStorage.getItem(readTrackingKey) === 'false') return;
+      if (!isUuid(notificationId)) return;
 
       // Check if already marked as read (best-effort)
       const { data: existingRead } = await supabase

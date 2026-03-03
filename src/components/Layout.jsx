@@ -43,7 +43,12 @@ const Layout = () => {
       message.includes('access to fetch')
     );
   };
-
+  const isTargetUserIdColumnError = (err) =>
+    String(err?.message || '').toLowerCase().includes('target_user_id');
+  const extractLegacyTargetUserId = (text) => {
+    const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
+    return match?.[1] || null;
+  };
   // Listen to sidebar width changes
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -152,25 +157,71 @@ const Layout = () => {
 
     const fetchUnreadNotifications = async () => {
       try {
-        const { data: notifications, error: notifError } = await supabase
+        const roleScopedRes = await supabase
           .from('admin_notifications')
-          .select('id')
-          .or(`target_role.eq.all,target_role.eq.${profile.role}`)
+          .select('id, content')
+          .in('target_role', ['all', profile.role])
+          .is('target_user_id', null)
           .order('created_at', { ascending: false });
 
+        let notifications = roleScopedRes.data || [];
+        let notifError = roleScopedRes.error;
+
+        if (notifError && isTargetUserIdColumnError(notifError)) {
+          const legacy = await supabase
+            .from('admin_notifications')
+            .select('id, content')
+            .or(`target_role.eq.all,target_role.eq.${profile.role}`)
+            .order('created_at', { ascending: false });
+          notifications = legacy.data || [];
+          notifError = legacy.error;
+        } else if (!notifError) {
+          const targetedRes = await supabase
+            .from('admin_notifications')
+            .select('id, content')
+            .eq('target_user_id', profile.id)
+            .order('created_at', { ascending: false });
+
+          if (targetedRes.error && !isTargetUserIdColumnError(targetedRes.error)) {
+            notifError = targetedRes.error;
+          } else if (!targetedRes.error && targetedRes.data?.length) {
+            const idSet = new Set(notifications.map((n) => n.id));
+            targetedRes.data.forEach((n) => {
+              if (!idSet.has(n.id)) notifications.push(n);
+            });
+          }
+        }
         if (notifError) throw notifError;
-        if (!notifications || notifications.length === 0) {
+        let visibleNotifications = (notifications || []).filter((n) => {
+          const legacyTarget = extractLegacyTargetUserId(n.content);
+          return !legacyTarget || String(legacyTarget) === String(profile.id);
+        });
+
+        if (profile.role === 'student') {
+          const { data: classRows, error: classErr } = await supabase
+            .from('class_session_participants')
+            .select('session_id')
+            .eq('student_id', profile.id);
+          if (!classErr && classRows?.length) {
+            const synthetic = classRows.map((r) => ({ id: `class-session-${r.session_id}` }));
+            const byId = new Map(visibleNotifications.map((n) => [n.id, n]));
+            synthetic.forEach((n) => byId.set(n.id, n));
+            visibleNotifications = Array.from(byId.values());
+          }
+        }
+
+        if (!visibleNotifications.length) {
           setUnreadNotifications(0);
           return;
         }
-        const notificationIds = notifications.map((n) => n.id);
+        const notificationIds = visibleNotifications.map((n) => n.id);
         const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
         const readTrackingEnabled =
           profile.role !== 'student' && localStorage.getItem(readTrackingKey) !== 'false';
         const localReadIds = getLocalReadIds(profile.id);
 
         if (!readTrackingEnabled) {
-          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
           setUnreadNotifications(unread);
           return;
         }
@@ -183,13 +234,13 @@ const Layout = () => {
 
         if (readError) {
           localStorage.setItem(readTrackingKey, 'false');
-          const unread = notifications.filter((n) => !localReadIds.has(n.id)).length;
+          const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
           setUnreadNotifications(unread);
           return;
         }
 
         const readIds = new Set([...(reads || []).map((r) => r.notification_id), ...localReadIds]);
-        const unread = notifications.filter((n) => !readIds.has(n.id)).length;
+        const unread = visibleNotifications.filter((n) => !readIds.has(n.id)).length;
         setUnreadNotifications(unread);
       } catch (error) {
         setUnreadNotifications(0);
@@ -236,8 +287,11 @@ const Layout = () => {
 
           const targetRole = notif.target_role;
           const targetUserId = notif.target_user_id;
+          const legacyTargetUserId = extractLegacyTargetUserId(notif.content);
           const roleMatch = targetRole === 'all' || targetRole === profile.role;
-          const userMatch = !targetUserId || targetUserId === profile.id;
+          const userMatch =
+            (!targetUserId || targetUserId === profile.id) &&
+            (!legacyTargetUserId || String(legacyTargetUserId) === String(profile.id));
           if (!roleMatch || !userMatch) return;
 
           seenRealtimeNotificationIdsRef.current.add(notifId);

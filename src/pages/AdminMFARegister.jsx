@@ -17,7 +17,7 @@ const AdminMFARegister = () => {
   const handleGenerate = () => {
     const newSecret = authenticator.generateSecret();
     setSecret(newSecret);
-    const otpauth = authenticator.keyuri('admin', 'StepWithNani', newSecret);
+    const otpauth = authenticator.keyuri('admin', 'SkillPro', newSecret);
     setQr(otpauth);
   };
 

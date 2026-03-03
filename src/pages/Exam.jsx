@@ -50,6 +50,29 @@ function formatDisplaySubmissionId(rawId) {
   return `SkillPro-${dd}${mm}${yy}${serial}`;
 }
 
+function generateDeterministicCode(seed) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  let code = "";
+  for (let i = 0; i < 12; i += 1) {
+    hash = (hash * 1664525 + 1013904223) >>> 0;
+    code += alphabet[hash % alphabet.length];
+  }
+  return code;
+}
+
+function formatCertificateId(cert) {
+  const date = cert?.issued_at ? new Date(cert.issued_at) : new Date();
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const random = generateDeterministicCode(String(cert?.id ?? `${y}${m}${d}`));
+  return `SkillPro-${y}-${m}-${d}-${random}`;
+}
+
 export default function Exam() {
   const { courseId } = useParams();
   const navigate = useNavigate();
@@ -284,9 +307,27 @@ export default function Exam() {
         : null;
 
       if (latestSubmission && latestSubmission.passed === true) {
+        let certificatePreviewId = null;
+        try {
+          const { data: certRow } = await supabase
+            .from("certificates")
+            .select("id, issued_at")
+            .eq("user_id", userData.user.id)
+            .eq("course_id", courseId)
+            .is("revoked_at", null)
+            .order("issued_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (certRow?.id) {
+            certificatePreviewId = formatCertificateId(certRow);
+          }
+        } catch {
+          // Best-effort only, keep passed flow resilient.
+        }
         setPassedExamInfo({
           submittedAt: latestSubmission.submitted_at || null,
           scorePercent: latestSubmission.score_percent ?? null,
+          certificatePreviewId,
         });
         safeSessionRemove(getSessionKey(userData.user.id));
         safeSessionRemove(getSessionKey());
@@ -1137,7 +1178,7 @@ export default function Exam() {
     );
   }
 
-  if (questions.length === 0) {
+  if (questions.length === 0 && !passedExamInfo) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
         <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-amber-200 p-8 text-center space-y-4">
@@ -1161,7 +1202,7 @@ export default function Exam() {
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center p-6">
         <div className="max-w-2xl w-full rounded-3xl border border-emerald-200 bg-white shadow-xl overflow-hidden">
           <div className="px-8 py-7 bg-gradient-to-r from-emerald-600 to-green-500 text-white">
-            <h1 className="text-3xl font-extrabold">Exam Already Passed</h1>
+            <h1 className="text-3xl font-extrabold">Exam Completed</h1>
             <p className="mt-1 text-emerald-50">
               You have already passed this final exam. Re-attempt is not allowed.
             </p>
@@ -1184,7 +1225,22 @@ export default function Exam() {
                 Passed on: {new Date(passedExamInfo.submittedAt).toLocaleString("en-IN")}
               </p>
             ) : null}
+            <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+              Exam completed. Click below to view your certificate preview.
+            </p>
             <div className="flex flex-wrap gap-3">
+              {passedExamInfo.certificatePreviewId ? (
+                <button
+                  onClick={() =>
+                    navigate(
+                      `/certificate-preview/${encodeURIComponent(passedExamInfo.certificatePreviewId)}`
+                    )
+                  }
+                  className="px-6 py-2.5 rounded-lg bg-blue-700 text-white font-semibold hover:bg-blue-800"
+                >
+                  Show Certificate Preview
+                </button>
+              ) : null}
               <button
                 onClick={() => navigate("/app/my-certificates")}
                 className="px-6 py-2.5 rounded-lg bg-emerald-700 text-white font-semibold hover:bg-emerald-800"

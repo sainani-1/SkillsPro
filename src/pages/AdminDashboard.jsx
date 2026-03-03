@@ -49,7 +49,10 @@ const AdminDashboard = ({ initialTab = 'overview' }) => {
       return (
         <div className="space-y-6">
           <div className="bg-gradient-to-r from-purple-600 to-blue-700 p-6 rounded-xl text-white">
-            <h1 className="text-2xl font-bold mb-1">Admin Control Panel</h1>
+            <div className="flex items-center gap-3 mb-1">
+              <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-10 h-10 rounded-full object-cover border border-white/30" />
+              <h1 className="text-2xl font-bold">Admin Control Panel</h1>
+            </div>
             <p className="text-purple-100">Manage the entire SkillPro platform</p>
           </div>
 

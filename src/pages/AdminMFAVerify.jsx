@@ -86,7 +86,11 @@ export default function AdminMFAVerify() {
         return;
       }
 
+      const { data: userResp } = await supabase.auth.getUser();
       sessionStorage.setItem("admin_mfa_verified", "true");
+      if (userResp?.user?.id) {
+        sessionStorage.setItem("admin_mfa_verified_user", userResp.user.id);
+      }
       setToast({ show: true, message: "MFA Verified! Redirecting...", type: "success" });
       setTimeout(() => navigate("/app/admin/users"), 1200);
     } catch (err) {

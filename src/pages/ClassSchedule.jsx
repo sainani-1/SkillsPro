@@ -21,6 +21,7 @@ const ClassSchedule = () => {
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [deleteModal, setDeleteModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
+  const [nowTick, setNowTick] = useState(Date.now());
 
   // Convert datetime-local value to UTC ISO assuming input is IST clock time.
   // This keeps 18:14 entered by teacher displayed as 18:14 for all users in IST.
@@ -45,6 +46,17 @@ const ClassSchedule = () => {
       loadTeachers();
     }
   }, []);
+
+  // Auto refresh every 1 minute:
+  // - refresh sessions so newly scheduled classes appear automatically
+  // - update time-based status (upcoming/completed) without manual reload
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTick(Date.now());
+      loadSessions();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [profile?.id, profile?.role]);
 
   const loadTeachers = async () => {
     const { data } = await supabase
@@ -79,7 +91,11 @@ const ClassSchedule = () => {
     return new Date(start.getTime() + 60 * 60 * 1000);
   };
 
-  const isSessionCompleted = (session) => new Date() >= getSessionEndTime(session);
+  const isSessionCompleted = (session) => {
+    // nowTick forces re-render and status recomputation every minute.
+    void nowTick;
+    return new Date() >= getSessionEndTime(session);
+  };
 
   const deleteSession = async () => {
     const sessionId = deleteModal.sessionId;

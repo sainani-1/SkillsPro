@@ -119,6 +119,13 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setProfile(null);
     clearProfileCache();
+    try {
+      sessionStorage.removeItem('admin_mfa_verified');
+      sessionStorage.removeItem('admin_mfa_verified_user');
+      sessionStorage.removeItem('admin_face_verified');
+    } catch (error) {
+      // Ignore storage cleanup failures.
+    }
   };
 
   return (

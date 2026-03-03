@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
@@ -9,9 +9,115 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [loggingIn, setLoggingIn] = useState(false);
-  const [resendingVerification, setResendingVerification] = useState(false);
+  const [googleSigningIn, setGoogleSigningIn] = useState(false);
+  const [processingOAuth, setProcessingOAuth] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Always require fresh MFA verification when admin starts a new login flow.
+    sessionStorage.removeItem('admin_mfa_verified');
+    sessionStorage.removeItem('admin_mfa_verified_user');
+    sessionStorage.removeItem('admin_face_verified');
+  }, []);
+
+  const routeGoogleUser = async (oauthUser) => {
+    let { data: profile } = await supabase
+      .from('profiles')
+      .select('id, role, is_disabled, terms_accepted, google_profile_completed, auth_provider')
+      .eq('id', oauthUser.id)
+      .maybeSingle();
+
+    if (!profile) {
+      const meta = oauthUser.user_metadata || {};
+      const bootstrapProfile = {
+        id: oauthUser.id,
+        auth_user_id: oauthUser.id,
+        role: 'student',
+        email: oauthUser.email || null,
+        full_name: meta.full_name || meta.name || '',
+        auth_provider: 'google',
+        terms_accepted: false,
+        google_profile_completed: false,
+        updated_at: new Date().toISOString()
+      };
+      const { error: upsertError } = await supabase.from('profiles').upsert(bootstrapProfile, { onConflict: 'id' });
+      if (upsertError) throw upsertError;
+      profile = bootstrapProfile;
+    }
+
+    if (profile.is_disabled) {
+      await supabase.auth.signOut();
+      setAlertModal({
+        show: true,
+        title: 'Account Disabled',
+        message: 'Your account has been disabled by an administrator. Please contact support.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (!profile.terms_accepted || !profile.google_profile_completed) {
+      navigate('/complete-profile');
+      return;
+    }
+
+    navigate('/app');
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hasOAuthError = !!searchParams.get('error');
+
+    const handleOAuthReturn = async () => {
+      try {
+        if (hasOAuthError) {
+          const description = searchParams.get('error_description') || searchParams.get('error');
+          setAlertModal({
+            show: true,
+            title: 'Google Sign-in Error',
+            message: decodeURIComponent(description || 'OAuth sign-in failed.'),
+            type: 'error'
+          });
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        const provider = session?.user?.app_metadata?.provider;
+        if (!session?.user || provider !== 'google') return;
+        await routeGoogleUser(session.user);
+      } catch (error) {
+        if (!isMounted) return;
+        setAlertModal({
+          show: true,
+          title: 'Google Sign-in Error',
+          message: error.message || 'Unable to complete Google sign-in.',
+          type: 'error'
+        });
+      } finally {
+        if (isMounted) setProcessingOAuth(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event !== 'SIGNED_IN') return;
+      const provider = session?.user?.app_metadata?.provider;
+      if (provider === 'google' && session?.user) {
+        setProcessingOAuth(true);
+        await routeGoogleUser(session.user);
+        setProcessingOAuth(false);
+      }
+    });
+
+    handleOAuthReturn();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -188,6 +294,7 @@ const Login = () => {
       // Check for admin role and MFA
       if (userProfile.role === 'admin') {
         sessionStorage.removeItem('admin_mfa_verified');
+        sessionStorage.removeItem('admin_mfa_verified_user');
         sessionStorage.removeItem('admin_face_verified');
         // Check if MFA is enabled for admin
         const { data: factors, error: mfaError } = await supabase.auth.mfa.listFactors();
@@ -230,57 +337,47 @@ const Login = () => {
     }
   };
 
-  const handleResendVerification = async () => {
-    if (!email.trim()) {
-      setAlertModal({
-        show: true,
-        title: 'Email Required',
-        message: 'Enter your email first, then click resend verification.',
-        type: 'warning'
-      });
-      return;
-    }
-
-    setResendingVerification(true);
+  const handleGoogleLogin = async () => {
+    setGoogleSigningIn(true);
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: email.trim(),
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
         options: {
-          emailRedirectTo: `${window.location.origin}/login`
+          redirectTo: `${window.location.origin}/login?provider=google`
         }
       });
-
       if (error) throw error;
-
-      setAlertModal({
-        show: true,
-        title: 'Verification Sent',
-        message: 'Verification email sent. Please check inbox/spam and verify before login.',
-        type: 'success'
-      });
     } catch (error) {
       setAlertModal({
         show: true,
-        title: 'Resend Failed',
-        message: error.message || 'Unable to resend verification email.',
+        title: 'Google Sign-in Error',
+        message: error.message || 'Unable to continue with Google.',
         type: 'error'
       });
-    } finally {
-      setResendingVerification(false);
+      setGoogleSigningIn(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-100 to-slate-200 p-4">
       <Toast
         show={toast.show}
         message={toast.message}
         type={toast.type}
         onClose={() => setToast({ show: false, message: '', type: 'success' })}
       />
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
+      <div className="relative overflow-hidden bg-white/95 backdrop-blur p-8 rounded-2xl shadow-xl border border-slate-100 w-full max-w-md">
+        <img
+          src="/skillpro-logo.png"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 m-auto w-56 h-56 object-contain opacity-5 pointer-events-none select-none"
+        />
+        <div className="text-center mb-6">
+          <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-14 h-14 rounded-full mx-auto mb-3 object-cover border border-slate-200" />
+          <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>
+          <p className="text-sm text-slate-500 mt-1">Login to continue learning</p>
+        </div>
         <AlertModal
           show={alertModal.show}
           title={alertModal.title}
@@ -289,42 +386,39 @@ const Login = () => {
           onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
         />
         <form onSubmit={handleLogin} className="space-y-4">
-          <input
-            type="email"
-            placeholder="Email"
-            className="w-full border rounded px-3 py-2"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            className="w-full border rounded px-3 py-2"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-          />
-          <button type="submit" className="w-full btn-gold py-3" disabled={loggingIn}>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
+            <input
+              type="email"
+              placeholder="Enter your email"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-gold-300 focus:border-gold-400"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+            <input
+              type="password"
+              placeholder="Enter your password"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-gold-300 focus:border-gold-400"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <button type="submit" className="w-full btn-gold py-3 rounded-lg" disabled={loggingIn}>
             {loggingIn ? 'Logging in...' : 'Sign In'}
           </button>
         </form>
+        {/* Google sign-in temporarily disabled */}
         <p className="text-center mt-6 text-sm">
           New here? <Link to="/register" className="text-blue-600 font-bold">Create Account</Link>
         </p>
         <p className="text-center mt-2 text-sm">
           Forgot password? <Link to="/reset-password" className="text-gold-600 font-bold">Reset here</Link>
         </p>
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={handleResendVerification}
-            disabled={resendingVerification}
-            className="w-full border border-blue-200 bg-blue-50 text-blue-700 rounded px-3 py-2 text-sm font-semibold hover:bg-blue-100 disabled:opacity-60"
-          >
-            {resendingVerification ? 'Sending verification...' : 'Resend verification email'}
-          </button>
-        </div>
       </div>
     </div>
   );

@@ -24,8 +24,19 @@ const CertificateBlocks = () => {
     try {
       const { error } = await supabase.from('admin_notifications').insert(payload);
       if (error && String(error.message || '').includes('target_user_id')) {
-        const { target_user_id, ...fallback } = payload;
-        await supabase.from('admin_notifications').insert(fallback);
+        if (payload?.target_user_id) {
+          // Legacy fallback: keep it role-scoped but encode intended recipient in content.
+          // Reader pages will filter by this marker so it does not broadcast to all students.
+          const { target_user_id, ...fallback } = payload;
+          const marker = `[target_user_id:${target_user_id}] `;
+          await supabase.from('admin_notifications').insert({
+            ...fallback,
+            content: `${marker}${payload.content || ''}`,
+          });
+        } else {
+          const { target_user_id, ...fallback } = payload;
+          await supabase.from('admin_notifications').insert(fallback);
+        }
       }
     } catch {
       // Keep certificate workflows resilient even if notification insert fails.
@@ -171,6 +182,18 @@ const CertificateBlocks = () => {
         if (error) throw error;
       }
 
+      await pushNotification({
+        title: action === 'block' ? 'Certificates Blocked' : 'Certificates Unblocked',
+        content:
+          action === 'block'
+            ? 'Your certificates were blocked by admin due to policy violation.'
+            : 'Your certificates were restored by admin.',
+        type: action === 'block' ? 'warning' : 'success',
+        target_role: 'student',
+        target_user_id: user.id,
+        admin_id: adminUser?.id || null,
+      });
+
       await loadUsers();
       setAlertModal({
         show: true,
@@ -199,18 +222,6 @@ const CertificateBlocks = () => {
       } catch (insertErr) {
         console.warn('Could not materialize missing certificate rows:', insertErr);
       }
-
-      await pushNotification({
-        title: action === 'block' ? 'Certificates Blocked' : 'Certificates Unblocked',
-        content:
-          action === 'block'
-            ? 'Your certificates were blocked by admin due to policy violation.'
-            : 'Your certificates were restored by admin.',
-        type: action === 'block' ? 'warning' : 'success',
-        target_role: 'student',
-        target_user_id: user.id,
-        admin_id: adminUser?.id || null,
-      });
 
       const [{ data: certRows, error: certError }, { data: generatedRows, error: generatedError }] = await Promise.all([
         supabase

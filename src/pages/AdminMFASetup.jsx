@@ -94,10 +94,11 @@ export default function AdminMFASetup() {
       return;
     }
 
-    sessionStorage.setItem(
-      "admin_mfa_verified",
-      "true"
-    );
+    const { data: userResp } = await supabase.auth.getUser();
+    sessionStorage.setItem("admin_mfa_verified", "true");
+    if (userResp?.user?.id) {
+      sessionStorage.setItem("admin_mfa_verified_user", userResp.user.id);
+    }
 
     openPopup('Success', 'MFA Enabled', 'success');
 

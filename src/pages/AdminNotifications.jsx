@@ -11,6 +11,11 @@ export default function AdminNotifications() {
   const [content, setContent] = useState('');
   const [type, setType] = useState('info');
   const [targetRole, setTargetRole] = useState('all');
+  const [recipientMode, setRecipientMode] = useState('role');
+  const [userSearch, setUserSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userOptions, setUserOptions] = useState([]);
+  const [userLoading, setUserLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fetchingNotifications, setFetchingNotifications] = useState(true);
   const [editId, setEditId] = useState(null);
@@ -28,19 +33,51 @@ export default function AdminNotifications() {
       message.includes('access to fetch')
     );
   };
+  const isTargetUserIdColumnError = (err) =>
+    String(err?.message || '').toLowerCase().includes('target_user_id');
 
   useEffect(() => {
     fetchNotifications();
   }, []);
 
+  useEffect(() => {
+    const query = userSearch.trim();
+    if (recipientMode !== 'particular' || query.length < 2) {
+      setUserOptions([]);
+      setUserLoading(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setUserLoading(true);
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .ilike('email', `%${query}%`)
+        .limit(8);
+      setUserOptions(data || []);
+      setUserLoading(false);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [recipientMode, userSearch]);
+
   const fetchNotifications = async () => {
     try {
       setFetchingNotifications(true);
-      const { data, error: fetchError } = await supabase
+      let { data, error: fetchError } = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, created_at, admin_id')
+        .select('id, title, content, type, target_role, target_user_id, created_at, admin_id')
         .order('created_at', { ascending: false });
 
+      if (fetchError) {
+        const fallback = await supabase
+          .from('admin_notifications')
+          .select('id, title, content, type, target_role, created_at, admin_id')
+          .order('created_at', { ascending: false });
+        data = fallback.data;
+        fetchError = fallback.error;
+      }
       if (fetchError) throw fetchError;
       setNotifications(data || []);
     } catch (err) {
@@ -56,6 +93,10 @@ export default function AdminNotifications() {
       setError('Please fill in all fields');
       return;
     }
+    if (recipientMode === 'particular' && !selectedUser?.id) {
+      setError('Please search and select a user email');
+      return;
+    }
 
     try {
       setLoading(true);
@@ -67,32 +108,55 @@ export default function AdminNotifications() {
         return;
       }
 
+      const payload = {
+        title,
+        content,
+        type,
+        target_role: recipientMode === 'particular' ? 'all' : targetRole,
+        target_user_id: recipientMode === 'particular' ? selectedUser.id : null,
+      };
+
       if (editId) {
         // Update existing notification
-        const { error: updateError } = await supabase
+        let { error: updateError } = await supabase
           .from('admin_notifications')
           .update({
-            title,
-            content,
-            type,
-            target_role: targetRole,
+            ...payload,
             updated_at: new Date().toISOString(),
           })
           .eq('id', editId);
+        if (updateError && isTargetUserIdColumnError(updateError)) {
+          const { target_user_id, ...fallbackPayload } = payload;
+          const fallback = await supabase
+            .from('admin_notifications')
+            .update({
+              ...fallbackPayload,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', editId);
+          updateError = fallback.error;
+        }
 
         if (updateError) throw updateError;
         setEditId(null);
       } else {
         // Create new notification
-        const { error: insertError } = await supabase
+        let { error: insertError } = await supabase
           .from('admin_notifications')
           .insert({
             admin_id: userSession.session.user.id,
-            title,
-            content,
-            type,
-            target_role: targetRole,
+            ...payload,
           });
+        if (insertError && isTargetUserIdColumnError(insertError)) {
+          const { target_user_id, ...fallbackPayload } = payload;
+          const fallback = await supabase
+            .from('admin_notifications')
+            .insert({
+              admin_id: userSession.session.user.id,
+              ...fallbackPayload,
+            });
+          insertError = fallback.error;
+        }
 
         if (insertError) throw insertError;
       }
@@ -101,6 +165,10 @@ export default function AdminNotifications() {
       setContent('');
       setType('info');
       setTargetRole('all');
+      setRecipientMode('role');
+      setUserSearch('');
+      setSelectedUser(null);
+      setUserOptions([]);
       await fetchNotifications();
     } catch (err) {
       setError(isFetchNetworkIssue(err) ? 'Failed to post notification (network/CORS issue). Please check browser extensions or network.' : (err.message || 'Failed to save notification'));
@@ -130,7 +198,17 @@ export default function AdminNotifications() {
     setTitle(notification.title);
     setContent(notification.content);
     setType(notification.type);
-    setTargetRole(notification.target_role);
+    if (notification.target_user_id) {
+      setRecipientMode('particular');
+      setSelectedUser({ id: notification.target_user_id });
+      setUserSearch(notification.target_user_id);
+      setTargetRole('all');
+    } else {
+      setRecipientMode('role');
+      setTargetRole(notification.target_role);
+      setSelectedUser(null);
+      setUserSearch('');
+    }
   };
 
   const handleCancel = () => {
@@ -139,6 +217,10 @@ export default function AdminNotifications() {
     setContent('');
     setType('info');
     setTargetRole('all');
+    setRecipientMode('role');
+    setUserSearch('');
+    setSelectedUser(null);
+    setUserOptions([]);
     setError('');
   };
 
@@ -205,6 +287,28 @@ export default function AdminNotifications() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Send To
+                </label>
+                <select
+                  value={recipientMode}
+                  onChange={(e) => {
+                    const nextMode = e.target.value;
+                    setRecipientMode(nextMode);
+                    if (nextMode !== 'particular') {
+                      setUserSearch('');
+                      setSelectedUser(null);
+                      setUserOptions([]);
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                >
+                  <option value="role">By Role</option>
+                  <option value="particular">Particular User (Email)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Type
                 </label>
                 <select
@@ -225,6 +329,7 @@ export default function AdminNotifications() {
                 <select
                   value={targetRole}
                   onChange={(e) => setTargetRole(e.target.value)}
+                  disabled={recipientMode === 'particular'}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                 >
                   <option value="all">All Users</option>
@@ -233,6 +338,47 @@ export default function AdminNotifications() {
                 </select>
               </div>
             </div>
+            {recipientMode === 'particular' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Search User Email
+                </label>
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Type at least 2 characters of email..."
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                />
+                {userLoading && <p className="text-xs text-slate-500 mt-2">Searching users...</p>}
+                {userOptions.length > 0 && (
+                  <div className="mt-2 border border-slate-200 rounded-lg max-h-48 overflow-y-auto">
+                    {userOptions.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedUser(u);
+                          setUserSearch(u.email || '');
+                          setUserOptions([]);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 ${
+                          selectedUser?.id === u.id ? 'bg-amber-50' : ''
+                        }`}
+                      >
+                        <span className="font-medium text-slate-800">{u.full_name || 'User'}</span>{' '}
+                        <span className="text-xs text-slate-500">({u.email || 'no-email'})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedUser?.id && (
+                  <p className="text-xs text-green-700 mt-2">
+                    Selected: {selectedUser.full_name || 'User'} ({selectedUser.email || selectedUser.id})
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-2">
               <button
@@ -279,7 +425,13 @@ export default function AdminNotifications() {
                           {notif.type.toUpperCase()}
                         </span>
                         <span className="text-xs text-slate-500">
-                          {notif.target_role === 'all' ? 'All Users' : notif.target_role === 'student' ? 'Students' : 'Teachers'}
+                          {notif.target_user_id
+                            ? `Particular User (${notif.target_user_id})`
+                            : notif.target_role === 'all'
+                              ? 'All Users'
+                              : notif.target_role === 'student'
+                                ? 'Students'
+                                : 'Teachers'}
                         </span>
                       </div>
                       <h3 className="text-lg font-semibold text-slate-900 mb-1">{notif.title}</h3>

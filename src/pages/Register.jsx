@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
-import LoadingSpinner from '../components/LoadingSpinner';
 import { prepareAvatarFile } from '../utils/imageUtils';
 
 const Register = () => {
@@ -14,6 +13,7 @@ const Register = () => {
   const [file, setFile] = useState(null);
   const [errors, setErrors] = useState({});
   const [registrationPaused, setRegistrationPaused] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Stream options based on education level
   const streamOptions = {
@@ -74,6 +74,9 @@ const Register = () => {
     if (formData.studyStream === 'Others' && !formData.customStudyStream.trim()) {
       newErrors.customStudyStream = 'Please enter your stream/branch';
     }
+    if (!termsAccepted) {
+      newErrors.termsAccepted = 'You must accept Terms and Conditions';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -129,6 +132,7 @@ const Register = () => {
     
     setLoading(true);
     try {
+        const formattedPhone = formData.phone.trim() || null;
         const resolvedStudyStream =
           formData.studyStream === 'Others'
             ? formData.customStudyStream.trim()
@@ -142,11 +146,14 @@ const Register = () => {
               emailRedirectTo: `${window.location.origin}/login`,
               data: {
                 full_name: formData.fullName.trim(),
-                phone: formData.phone.trim(),
+                phone: formattedPhone,
+                terms_accepted: true,
+                terms_accepted_at: new Date().toISOString(),
                 education_level: formData.educationLevel,
                 study_stream: resolvedStudyStream,
                 diploma_certificate: formData.diploma || null,
                 core_subject: resolvedStudyStream || formData.coreSubject || null,
+                auth_provider: 'email',
                 role: 'student'
               }
             }
@@ -185,12 +192,16 @@ const Register = () => {
             id: user.id,
             full_name: formData.fullName.trim(),
             email: formData.email.trim(),
-            phone: formData.phone.trim(),
+            phone: formattedPhone,
+            terms_accepted: true,
+            terms_accepted_at: new Date().toISOString(),
+            google_profile_completed: true,
             education_level: formData.educationLevel,
             study_stream: resolvedStudyStream,
             diploma_certificate: formData.diploma || null,
             avatar_url: avatarUrl,
             core_subject: resolvedStudyStream || formData.coreSubject || null,
+            auth_provider: 'email',
             role: 'student',
             updated_at: new Date().toISOString(),
         }], { onConflict: 'id' });
@@ -220,9 +231,16 @@ const Register = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+        <div className="relative overflow-hidden bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+            <img
+              src="/skillpro-logo.png"
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 m-auto w-56 h-56 object-contain opacity-5 pointer-events-none select-none"
+            />
             <div className="text-center mb-8">
-                <h1 className="text-2xl font-serif font-bold text-nani-dark">Join StepWithNani</h1>
+                <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-16 h-16 rounded-full mx-auto mb-3 object-cover" />
+                <h1 className="text-2xl font-serif font-bold text-nani-dark">Join SkillPro</h1>
                 <p className="text-slate-500">Create your account</p>
             </div>
             
@@ -239,6 +257,7 @@ const Register = () => {
             <>
             <form onSubmit={handleRegister} className="space-y-4">
                 <div>
+                    <label className="block text-sm text-slate-600 mb-1 font-medium">Full Name *</label>
                     <input 
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.fullName ? 'border-red-500' : ''}`}
                         placeholder="Full Name" 
@@ -252,9 +271,10 @@ const Register = () => {
                 </div>
 
                 <div>
+                    <label className="block text-sm text-slate-600 mb-1 font-medium">Phone Number *</label>
                     <input 
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.phone ? 'border-red-500' : ''}`}
-                        placeholder="Phone Number" 
+                        placeholder="Phone Number *" 
                         value={formData.phone}
                         onChange={e => {
                           setFormData({...formData, phone: e.target.value});
@@ -335,10 +355,12 @@ const Register = () => {
                         rows="3"
                         value={formData.diploma}
                         onChange={e => setFormData({...formData, diploma: e.target.value})}
-                    />\n                  </div>
+                    />
+                  </div>
                 )}
 
                 <div>
+                    <label className="block text-sm text-slate-600 mb-1 font-medium">Email Address *</label>
                     <input 
                         type="email" 
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.email ? 'border-red-500' : ''}`}
@@ -353,6 +375,7 @@ const Register = () => {
                 </div>
 
                 <div>
+                    <label className="block text-sm text-slate-600 mb-1 font-medium">Password *</label>
                     <input 
                         type="password" 
                         className={`w-full p-3 border rounded-lg bg-slate-50 ${errors.password ? 'border-red-500' : ''}`}
@@ -377,8 +400,27 @@ const Register = () => {
                         }} 
                         className="w-full text-sm border rounded-lg p-2"
                     />
-                    {file && <p className="text-green-600 text-xs mt-1">✓ {file.name}</p>}
+                    {file && <p className="text-green-600 text-xs mt-1">Selected: {file.name}</p>}
                 </div>
+
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={termsAccepted}
+                    onChange={e => {
+                      setTermsAccepted(e.target.checked);
+                      if (errors.termsAccepted) setErrors({ ...errors, termsAccepted: '' });
+                    }}
+                  />
+                  <span>
+                    I agree to the{' '}
+                    <Link to="/terms-and-conditions" target="_blank" className="text-blue-600 font-semibold underline">
+                      Terms and Conditions
+                    </Link>.
+                  </span>
+                </label>
+                {errors.termsAccepted && <p className="text-red-500 text-xs -mt-2">{errors.termsAccepted}</p>}
 
                 <button disabled={loading} className="w-full btn-primary py-3 font-bold mt-6">
                     {loading ? 'Creating Account...' : 'Register Now'}

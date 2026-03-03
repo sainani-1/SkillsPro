@@ -75,11 +75,17 @@ import AdminStudentReassignments from './pages/AdminStudentReassignments';
 import AdminMFAManagement from './pages/AdminMFAManagement';
 import CertificatePreview from './pages/CertificatePreview';
 import AdminDeletedAccounts from './pages/AdminDeletedAccounts';
+import TermsAndConditions from './pages/TermsAndConditions';
+import CompleteGoogleProfile from './pages/CompleteGoogleProfile';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
   if (loading) return <LoadingSpinner message="Initializing your account..." />;
   if (!user) return <Navigate to="/login" />;
+  const isGoogleAuth = user?.app_metadata?.provider === 'google' || profile?.auth_provider === 'google';
+  const googleProfileIncomplete =
+    isGoogleAuth && (!profile?.google_profile_completed || !profile?.terms_accepted);
+  if (googleProfileIncomplete) return <Navigate to="/complete-profile" />;
 
   // Check if user is disabled
   if (profile?.is_disabled) {
@@ -128,9 +134,10 @@ const AdminRoute = ({ children }) => {
     return <Navigate to="/app" />;
 
   // ✅ MFA SESSION CHECK
-  const mfaVerified = sessionStorage.getItem("admin_mfa_verified");
+  const mfaVerified = sessionStorage.getItem("admin_mfa_verified") === "true";
+  const mfaVerifiedUser = sessionStorage.getItem("admin_mfa_verified_user");
 
-  if (!mfaVerified) {
+  if (!mfaVerified || mfaVerifiedUser !== profile?.id) {
     return <Navigate to="/admin-mfa-verify" />;
   }
 
@@ -145,6 +152,8 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
+        <Route path="/complete-profile" element={<CompleteGoogleProfile />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/reset-password-confirm" element={<ResetPassword />} />
         <Route path="/register-admin" element={<RegisterAdmin />} />

@@ -4,6 +4,20 @@
 
 body {
   @apply bg-slate-50 text-slate-800;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url('/skillpro-logo.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: min(48vmin, 420px);
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .btn-primary {
