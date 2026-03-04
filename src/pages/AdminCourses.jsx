@@ -4,6 +4,33 @@ import AlertModal from '../components/AlertModal';
 import { Save, RefreshCw, Edit2, X, Plus, Trash2, Award } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+const CODING_LANGUAGES = ['python', 'java', 'cpp', 'c'];
+const makeDefaultQuestion = (examId, orderIndex = 0) => ({
+  exam_id: examId,
+  question: '',
+  question_type: 'mcq',
+  coding_description: '',
+  options: ['', '', '', ''],
+  correct_index: 0,
+  coding_language: 'python',
+  shown_test_cases: [],
+  hidden_test_cases: [],
+  order_index: orderIndex,
+});
+
+function normalizeCases(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 const AdminCourses = () => {
   const [courses, setCourses] = useState([]);
   const [minQuestionsByCourse, setMinQuestionsByCourse] = useState({});
@@ -306,7 +333,7 @@ const AdminCourses = () => {
         ...prev,
         [examId]: [
           ...(prev[examId] || []),
-          { exam_id: examId, question: '', options: ['', '', '', ''], correct_index: 0, order_index: (prev[examId]?.length || 0) }
+          makeDefaultQuestion(examId, (prev[examId]?.length || 0))
         ]
       };
       saveDraftQuestions(examId, next[examId]);
@@ -362,6 +389,50 @@ const AdminCourses = () => {
     });
   };
 
+  const addTestCase = (examId, qIndex, bucket) => {
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).map((q, i) => {
+          if (i !== qIndex) return q;
+          return { ...q, [bucket]: [...normalizeCases(q[bucket]), { input: '', output: '' }] };
+        })
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
+  const updateTestCase = (examId, qIndex, bucket, testIndex, field, value) => {
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).map((q, i) => {
+          if (i !== qIndex) return q;
+          const list = normalizeCases(q[bucket]).map((tc, idx) => idx === testIndex ? { ...tc, [field]: value } : tc);
+          return { ...q, [bucket]: list };
+        })
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
+  const deleteTestCase = (examId, qIndex, bucket, testIndex) => {
+    setQuestions(prev => {
+      const next = {
+        ...prev,
+        [examId]: (prev[examId] || []).map((q, i) => {
+          if (i !== qIndex) return q;
+          const list = normalizeCases(q[bucket]).filter((_, idx) => idx !== testIndex);
+          return { ...q, [bucket]: list };
+        })
+      };
+      saveDraftQuestions(examId, next[examId]);
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (activeTab !== 'questions' || !selectedCourse || !exams[selectedCourse.id]?.id) return;
     const examId = exams[selectedCourse.id].id;
@@ -387,8 +458,14 @@ const AdminCourses = () => {
       const questionsToInsert = questions[examId].map((q, idx) => ({
         exam_id: examId,
         question: q.question,
-        options: q.options,
-        correct_index: q.correct_index,
+        question_type: q.question_type === 'coding' ? 'coding' : 'mcq',
+        coding_description: q.question_type === 'coding' ? (q.coding_description || '') : null,
+        options: q.question_type === 'coding' ? [] : (q.options || []),
+        // Keep numeric value to support existing DB schemas where correct_index is NOT NULL.
+        correct_index: q.question_type === 'coding' ? 0 : q.correct_index,
+        coding_language: q.question_type === 'coding' ? (q.coding_language || 'python') : null,
+        shown_test_cases: q.question_type === 'coding' ? normalizeCases(q.shown_test_cases) : [],
+        hidden_test_cases: q.question_type === 'coding' ? normalizeCases(q.hidden_test_cases) : [],
         order_index: idx
       }));
 
@@ -902,6 +979,18 @@ const AdminCourses = () => {
                           placeholder="Enter question..."
                         />
                       </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Question Type</label>
+                        <select
+                          className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={q.question_type || 'mcq'}
+                          onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'question_type', e.target.value)}
+                        >
+                          <option value="mcq">MCQ</option>
+                          <option value="coding">Coding</option>
+                        </select>
+                      </div>
+                      {(q.question_type || 'mcq') === 'mcq' ? (
                       <div className="space-y-2">
                         <label className="text-xs font-semibold text-slate-600 block">Options (Select correct answer)</label>
                         {(q.options || []).map((opt, oIdx) => (
@@ -922,11 +1011,110 @@ const AdminCourses = () => {
                               placeholder={`Option ${oIdx + 1}`}
                             />
                             {q.correct_index === oIdx && (
-                              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">✓ Correct</span>
+                              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">Correct</span>
                             )}
                           </div>
                         ))}
                       </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Coding Description</label>
+                            <textarea
+                              className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[90px]"
+                              value={q.coding_description || ''}
+                              onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'coding_description', e.target.value)}
+                              placeholder="Explain the coding task, constraints, and expected behavior..."
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Default Language</label>
+                            <select
+                              className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              value={q.coding_language || 'python'}
+                              onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'coding_language', e.target.value)}
+                            >
+                              {CODING_LANGUAGES.map((lang) => (
+                                <option key={lang} value={lang}>{lang.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-semibold text-slate-600">Shown Test Cases</label>
+                              <button
+                                type="button"
+                                onClick={() => addTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases')}
+                                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                              >
+                                + Add Shown
+                              </button>
+                            </div>
+                            {normalizeCases(q.shown_test_cases).map((tc, tcIdx) => (
+                              <div key={`shown-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
+                                <input
+                                  type="text"
+                                  className="text-xs p-2 border border-slate-300 rounded"
+                                  placeholder="Input"
+                                  value={tc.input || ''}
+                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx, 'input', e.target.value)}
+                                />
+                                <input
+                                  type="text"
+                                  className="text-xs p-2 border border-slate-300 rounded"
+                                  placeholder="Expected output"
+                                  value={tc.output || ''}
+                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx, 'output', e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => deleteTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx)}
+                                  className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-semibold text-slate-600">Hidden Test Cases</label>
+                              <button
+                                type="button"
+                                onClick={() => addTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases')}
+                                className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200"
+                              >
+                                + Add Hidden
+                              </button>
+                            </div>
+                            {normalizeCases(q.hidden_test_cases).map((tc, tcIdx) => (
+                              <div key={`hidden-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
+                                <input
+                                  type="text"
+                                  className="text-xs p-2 border border-slate-300 rounded"
+                                  placeholder="Input"
+                                  value={tc.input || ''}
+                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx, 'input', e.target.value)}
+                                />
+                                <input
+                                  type="text"
+                                  className="text-xs p-2 border border-slate-300 rounded"
+                                  placeholder="Expected output"
+                                  value={tc.output || ''}
+                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx, 'output', e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => deleteTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx)}
+                                  className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {(questions[exams[selectedCourse.id].id] || []).length === 0 && (
