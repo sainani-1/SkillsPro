@@ -13,6 +13,7 @@ const AdminMFAManagement = () => {
   const [processingId, setProcessingId] = useState('');
   const [verifyingFactorId, setVerifyingFactorId] = useState('');
   const [verifyIntent, setVerifyIntent] = useState('unregister');
+  const [verifyStep, setVerifyStep] = useState('first');
   const [oldCode, setOldCode] = useState(['', '', '', '', '', '']);
   const oldCodeRefs = useRef([]);
 
@@ -58,7 +59,7 @@ const AdminMFAManagement = () => {
   const verifyOldCodeAndContinue = async () => {
     if (!verifyingFactorId) return;
     if (oldCodeValue.length !== 6) {
-      openPopup('Validation', 'Enter the current 6-digit MFA code.', 'warning');
+      openPopup('Validation', 'Enter the 6-digit MFA code.', 'warning');
       return;
     }
 
@@ -76,23 +77,27 @@ const AdminMFAManagement = () => {
       });
       if (verifyError) throw verifyError;
 
+      if (verifyIntent === 'unregister' && verifyStep === 'first') {
+        setVerifyStep('second');
+        resetOldCode();
+        openPopup('Step 1 Completed', 'First MFA verification successful. Enter a fresh MFA code for final confirmation.', 'success');
+        return;
+      }
+
       const { error: unenrollError } = await supabase.auth.mfa.unenroll({ factorId: verifyingFactorId });
       if (unenrollError) throw unenrollError;
 
       setVerifyingFactorId('');
+      setVerifyStep('first');
       setVerifyIntent('unregister');
       resetOldCode();
-      openPopup('Step 1 Completed', 'Old MFA code verified and factor removed.', 'success');
+      openPopup('Success', 'MFA factor removed.', 'success');
       await loadFactors();
       if (verifyIntent === 'register_again') {
         navigate('/admin-mfa-setup');
         return;
       }
-      const setupNow = await confirm(
-        'Old MFA is removed. Do you want to register new MFA now? (Step 2 confirmation happens in setup with new code verification)',
-        'Register New MFA'
-      );
-      if (setupNow) navigate('/admin-mfa-setup');
+      if (verifyIntent === 'unregister') return;
     } catch (error) {
       openPopup('Verification failed', error.message || 'Current MFA code is invalid.', 'error');
       resetOldCode();
@@ -131,6 +136,7 @@ const AdminMFAManagement = () => {
     );
     if (!ok) return;
     setVerifyIntent('unregister');
+    setVerifyStep('first');
     resetOldCode();
     setVerifyingFactorId(factorId);
   };
@@ -147,6 +153,7 @@ const AdminMFAManagement = () => {
     );
     if (!ok) return;
     setVerifyIntent('register_again');
+    setVerifyStep('first');
     resetOldCode();
     setVerifyingFactorId(primaryFactor.id);
   };
@@ -219,7 +226,9 @@ const AdminMFAManagement = () => {
           <div className="w-full max-w-md bg-white rounded-2xl border-t-8 border-blue-500 shadow-xl p-8 space-y-6">
             <h3 className="text-2xl font-bold text-blue-700 text-center">Verify MFA</h3>
             <p className="text-sm text-slate-600 text-center">
-              Step 1 confirmation: Enter your current 6-digit MFA code to continue.
+              {verifyIntent === 'unregister' && verifyStep === 'second'
+                ? 'Step 2 confirmation: Enter a fresh 6-digit MFA code to finalize unregister.'
+                : 'Step 1 confirmation: Enter your current 6-digit MFA code to continue.'}
             </p>
             <div className="flex justify-center gap-3">
               {[...Array(6)].map((_, i) => (
@@ -249,6 +258,7 @@ const AdminMFAManagement = () => {
                 type="button"
                 onClick={() => {
                   setVerifyingFactorId('');
+                  setVerifyStep('first');
                   resetOldCode();
                 }}
                 disabled={!!processingId}
@@ -262,7 +272,11 @@ const AdminMFAManagement = () => {
                 disabled={!!processingId || oldCodeValue.length !== 6}
                 className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
               >
-                {processingId ? 'Verifying MFA...' : 'Verify MFA & Continue'}
+                {processingId
+                  ? 'Verifying MFA...'
+                  : verifyIntent === 'unregister' && verifyStep === 'second'
+                    ? 'Verify MFA & Unregister'
+                    : 'Verify MFA & Continue'}
               </button>
             </div>
           </div>
