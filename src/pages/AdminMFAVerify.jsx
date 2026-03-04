@@ -106,13 +106,13 @@ export default function AdminMFAVerify() {
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />
       <AlertModal show={alert.show} title={alert.title} message={alert.message} type={alert.type} onClose={() => setAlert({ ...alert, show: false })} />
       <div className="flex flex-col items-center mb-8">
-        <div className="w-20 h-20 rounded-full border-2 border-blue-400/50 flex items-center justify-center shadow-lg mb-2 overflow-hidden">
-          <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain rounded-full mix-blend-multiply" />
+        <div className="w-20 h-20 rounded-full border-2 border-blue-400/50 bg-white flex items-center justify-center shadow-lg mb-2 overflow-hidden">
+          <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain rounded-full" />
         </div>
         <span className="text-2xl font-extrabold text-nani-dark tracking-tight">SkillPro</span>
       </div>
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md flex flex-col items-center gap-6 border-t-8 border-blue-500 animate-fade-in">
-        <h2 className="text-2xl font-bold text-blue-700">Admin MFA Verification</h2>
+        <h2 className="text-2xl font-bold text-blue-700">Verify MFA</h2>
         <p className="text-slate-600 text-center">Enter the 6-digit code from your authenticator app to continue.</p>
         <div className="flex justify-center gap-3 mt-2 w-full">
           {[...Array(6)].map((_, i) => (
@@ -141,7 +141,7 @@ export default function AdminMFAVerify() {
             loading || codeStr.length !== 6 || !codeStr.split("").every((d) => d) ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
           }`}
         >
-          {loading ? "Verifying..." : "Verify"}
+          {loading ? "Verifying MFA..." : "Verify MFA"}
         </button>
       </div>
     </div>

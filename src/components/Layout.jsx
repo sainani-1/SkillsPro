@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { Bell, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import AvatarImage from './AvatarImage';
 import Toast from './Toast';
+import { logAdminNavigation } from '../utils/adminActivityLogger';
 
 const Layout = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [panelSearch, setPanelSearch] = useState('');
   const [showPanelSearch, setShowPanelSearch] = useState(false);
@@ -143,6 +145,7 @@ const Layout = () => {
       { label: 'Exam Settings', path: '/app/admin/exam-settings' },
       { label: 'Admin Settings', path: '/app/admin/settings' },
       { label: 'Reset Password', path: '/app/admin/reset-password' },
+      { label: 'Activity Logs', path: '/app/admin/activity-logs' },
       { label: 'MFA Management', path: '/app/admin/mfa-management' },
       { label: 'Deleted Accounts', path: '/app/admin/deleted-accounts' },
       { label: 'Startup Ideas', path: '/app/admin/startup-ideas' },
@@ -273,6 +276,17 @@ const Layout = () => {
       window.removeEventListener('focus', onFocus);
     };
   }, [profile?.id, profile?.role, notificationPollingEnabled]);
+
+  useEffect(() => {
+    if (profile?.role !== 'admin' || !profile?.id) return;
+    logAdminNavigation({
+      adminId: profile.id,
+      pathname: location.pathname,
+      details: {
+        source: 'layout',
+      },
+    });
+  }, [profile?.id, profile?.role, location.pathname]);
 
   useEffect(() => {
     if (!profile?.id || !profile?.role) return;

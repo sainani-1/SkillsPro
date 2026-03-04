@@ -193,13 +193,24 @@ const AdminStudentReassignments = () => {
       }
 
       // Reassign open guidance requests as well.
-      const { error: guidanceErr } = await supabase
+      let guidanceRes = await supabase
         .from('guidance_requests')
         .update({ assigned_to_teacher_id: toTeacherId, updated_at: now })
         .eq('assigned_to_teacher_id', fromTeacherId)
         .in('student_id', selectedStudentIds)
         .in('status', ['pending', 'assigned', 'scheduled']);
-      if (guidanceErr) throw guidanceErr;
+      if (
+        guidanceRes.error &&
+        String(guidanceRes.error.message || '').toLowerCase().includes('updated_at')
+      ) {
+        guidanceRes = await supabase
+          .from('guidance_requests')
+          .update({ assigned_to_teacher_id: toTeacherId })
+          .eq('assigned_to_teacher_id', fromTeacherId)
+          .in('student_id', selectedStudentIds)
+          .in('status', ['pending', 'assigned', 'scheduled']);
+      }
+      if (guidanceRes.error) throw guidanceRes.error;
 
       const fromTeacher = teachers.find((t) => t.id === fromTeacherId);
       const toTeacher = teachers.find((t) => t.id === toTeacherId);

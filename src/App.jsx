@@ -80,6 +80,7 @@ import AdminDeletedAccounts from './pages/AdminDeletedAccounts';
 import TermsAndConditions from './pages/TermsAndConditions';
 import CompleteGoogleProfile from './pages/CompleteGoogleProfile';
 import AdminSupportContact from './pages/AdminSupportContact';
+import AdminActivityLogs from './pages/AdminActivityLogs';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -259,6 +260,7 @@ function App() {
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/support-contact" element={<AdminRoute><AdminSupportContact /></AdminRoute>} />
+          <Route path="admin/activity-logs" element={<AdminRoute><AdminActivityLogs /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
           <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />

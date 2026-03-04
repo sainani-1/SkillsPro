@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
@@ -16,9 +16,25 @@ export default function AdminMFASetup() {
   const [factorId, setFactorId] = useState(null);
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
+  const [checkingFactors, setCheckingFactors] = useState(true);
+  const [hasExistingFactor, setHasExistingFactor] = useState(false);
+  const inputRefs = useRef([]);
+  const codeStr = code.join("");
 
   useEffect(() => {
-    // Reserved for future autofill / saved names.
+    const checkExistingFactors = async () => {
+      try {
+        setCheckingFactors(true);
+        const { data, error } = await supabase.auth.mfa.listFactors();
+        if (error) throw error;
+        setHasExistingFactor((data?.totp || []).length > 0);
+      } catch {
+        setHasExistingFactor(false);
+      } finally {
+        setCheckingFactors(false);
+      }
+    };
+    checkExistingFactors();
   }, []);
 
   const buildSkillProOtpUri = (uri, selectedLabel) => {
@@ -41,6 +57,20 @@ export default function AdminMFASetup() {
     }
 
     setLoading(true);
+    const { data: factorData, error: factorError } = await supabase.auth.mfa.listFactors();
+    if (factorError) {
+      openPopup('Error', factorError.message || 'Failed to check existing MFA factors.', 'error');
+      setLoading(false);
+      return;
+    }
+    const existing = factorData?.totp || [];
+    if (existing.length > 0) {
+      setHasExistingFactor(true);
+      openPopup('Not allowed', 'Only one MFA is allowed. Unregister old MFA first in MFA Management.', 'warning');
+      setLoading(false);
+      return;
+    }
+
     const { data, error } =
       await supabase.auth.mfa.enroll({
         factorType: "totp",
@@ -67,8 +97,7 @@ export default function AdminMFASetup() {
     next[index] = digit;
     setCode(next);
     if (index < 5) {
-      const nextInput = document.getElementById(`mfa-setup-digit-${index + 1}`);
-      if (nextInput) nextInput.focus();
+      inputRefs.current[index + 1]?.focus();
     }
   };
 
@@ -81,16 +110,31 @@ export default function AdminMFASetup() {
       return;
     }
     if (index > 0) {
-      const prevInput = document.getElementById(`mfa-setup-digit-${index - 1}`);
-      if (prevInput) prevInput.focus();
+      inputRefs.current[index - 1]?.focus();
       const next = [...code];
       next[index - 1] = "";
       setCode(next);
     }
   };
 
-  const verify = async () => {
-    const codeValue = code.join("");
+  const resetCodeAndFocusFirst = () => {
+    setCode(["", "", "", "", "", ""]);
+    requestAnimationFrame(() => {
+      const first = inputRefs.current[0];
+      if (first) {
+        first.focus();
+        first.select();
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!loading && step === "verify" && factorId && codeStr.length === 6 && code.every((d) => d)) {
+      verify(codeStr);
+    }
+  }, [codeStr, loading, step, factorId]);
+
+  const verify = async (codeValue = code.join("")) => {
     if (codeValue.length !== 6) {
       openPopup('Validation', 'Enter full 6-digit code.', 'warning');
       return;
@@ -106,6 +150,7 @@ export default function AdminMFASetup() {
 
     if (error) {
       openPopup('Error', 'Invalid Code', 'error');
+      resetCodeAndFocusFirst();
       setLoading(false);
       return;
     }
@@ -130,10 +175,32 @@ export default function AdminMFASetup() {
         <p className="text-sm text-slate-500 text-center mb-6">
           {step === "name" && "Step 1 of 3: Enter your MFA name"}
           {step === "qr" && "Step 2 of 3: Scan this QR in your authenticator app"}
-          {step === "verify" && "Step 3 of 3: Enter 6-digit MFA code"}
+          {step === "verify" && "Step 3 of 3: Verify MFA with 6-digit code"}
         </p>
 
-        {step === "name" && (
+        {checkingFactors ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+            Checking existing MFA...
+          </div>
+        ) : null}
+
+        {!checkingFactors && hasExistingFactor ? (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-800 space-y-3">
+            <p className="font-semibold">Existing MFA is already registered.</p>
+            <p className="text-sm">
+              For security, first verify old MFA in MFA Management (step 1), then register and verify new MFA code (step 2).
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/app/admin/mfa-management')}
+              className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700"
+            >
+              Go to MFA Management
+            </button>
+          </div>
+        ) : null}
+
+        {!checkingFactors && !hasExistingFactor && step === "name" && (
           <div className="space-y-4">
             <input
               className="border border-slate-300 p-3 w-full rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -151,7 +218,7 @@ export default function AdminMFASetup() {
           </div>
         )}
 
-        {step === "qr" && qr && (
+        {!checkingFactors && !hasExistingFactor && step === "qr" && qr && (
           <div className="space-y-5">
             <div className="relative w-64 h-64 mx-auto rounded-2xl border border-slate-200 p-3 bg-white shadow-sm">
               {qr.startsWith("otpauth://") ? (
@@ -170,8 +237,8 @@ export default function AdminMFASetup() {
                 />
               )}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border border-slate-300/60 shadow flex items-center justify-center overflow-hidden">
-                  <img src={LOGO_URL} alt="Logo" className="w-9 h-9 object-contain rounded-full mix-blend-multiply" />
+                <div className="w-12 h-12 rounded-full border border-slate-300 shadow bg-white flex items-center justify-center overflow-hidden">
+                  <img src={LOGO_URL} alt="Logo" className="w-9 h-9 object-contain rounded-full" />
                 </div>
               </div>
             </div>
@@ -179,18 +246,19 @@ export default function AdminMFASetup() {
               onClick={() => setStep("verify")}
               className="bg-blue-600 text-white w-full py-3 rounded-lg font-semibold hover:bg-blue-700"
             >
-              Next: Enter MFA Code
+              Next: Verify MFA
             </button>
           </div>
         )}
 
-        {step === "verify" && (
+        {!checkingFactors && !hasExistingFactor && step === "verify" && (
           <div className="space-y-5">
             <div className="flex justify-center gap-2">
               {[...Array(6)].map((_, i) => (
                 <input
                   key={i}
                   id={`mfa-setup-digit-${i}`}
+                  ref={(el) => (inputRefs.current[i] = el)}
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]*"
@@ -198,8 +266,12 @@ export default function AdminMFASetup() {
                   value={code[i]}
                   onChange={(e) => handleCodeChange(e.target.value, i)}
                   onKeyDown={(e) => handleCodeKeyDown(e, i)}
-                  className={`w-11 h-12 text-center text-xl font-mono rounded-lg border-2 ${
-                    code[i] ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300"
+                  disabled={loading}
+                  autoFocus={i === 0}
+                  className={`w-12 h-14 text-center text-2xl font-mono rounded-lg border-2 transition-all duration-150 outline-none ${
+                    code[i]
+                      ? "border-blue-600 bg-blue-50 text-blue-700 shadow"
+                      : "border-slate-300 bg-white text-slate-400"
                   }`}
                 />
               ))}
@@ -212,11 +284,11 @@ export default function AdminMFASetup() {
                 Back
               </button>
               <button
-                disabled={loading}
+                disabled={loading || codeStr.length !== 6 || !code.every((d) => d)}
                 onClick={verify}
                 className="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:opacity-60"
               >
-                {loading ? "Verifying..." : "Verify & Finish"}
+                {loading ? "Verifying MFA..." : "Verify MFA & Finish"}
               </button>
             </div>
           </div>

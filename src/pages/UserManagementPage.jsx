@@ -20,7 +20,7 @@ const UserManagementPage = () => {
         setLoading(true);
         const { data } = await supabase
           .from('profiles')
-          .select('id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
+          .select('id, auth_user_id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
           .order('full_name');
         setUsers(data || []);
         setLoading(false);
@@ -51,6 +51,27 @@ const UserManagementPage = () => {
         openPopup('Error', 'Error changing role: ' + error.message, 'error');
       } finally {
         setChangingRole(null);
+      }
+    };
+
+    const removeFakeUser = async (user) => {
+      const isFake = !user?.auth_user_id;
+      if (!isFake) {
+        openPopup('Not Allowed', 'This user is linked to authentication and cannot be removed as fake user.', 'warning');
+        return;
+      }
+      const ok = window.confirm(`Remove fake user "${user.full_name || user.email}"?`);
+      if (!ok) return;
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', user.id);
+        if (error) throw error;
+        openPopup('Removed', 'Fake user removed successfully.', 'success');
+        loadUsers();
+      } catch (error) {
+        openPopup('Error', error.message || 'Failed to remove fake user.', 'error');
       }
     };
 
@@ -206,6 +227,15 @@ const UserManagementPage = () => {
                         )}
                       </td>
                       <td className="px-4 py-3">
+                        {!u.auth_user_id ? (
+                          <button
+                            type="button"
+                            onClick={() => removeFakeUser(u)}
+                            className="px-2 py-1 mr-2 bg-red-100 text-red-700 rounded text-xs font-semibold hover:bg-red-200"
+                          >
+                            Remove Fake
+                          </button>
+                        ) : null}
                         <select
                           value={u.role}
                           onChange={(e) => changeUserRole(u.id, e.target.value)}
@@ -231,6 +261,7 @@ const UserManagementPage = () => {
 const AddUserModal = ({ onClose, onSuccess }) => {
     const [form, setForm] = useState({
         email: '',
+        password: '',
         fullName: '',
         phone: '',
         role: 'student',
@@ -238,40 +269,71 @@ const AddUserModal = ({ onClose, onSuccess }) => {
     });
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ text: '', type: '' });
+    const endpoint = import.meta.env.VITE_ADMIN_CREATE_USER_ENDPOINT || '/api/admin/create-user';
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setMessage({ text: '', type: '' });
 
-        if (!form.email.trim() || !form.fullName.trim() || !form.phone.trim()) {
+        if (!form.email.trim() || !form.password.trim() || !form.fullName.trim() || !form.phone.trim()) {
             setMessage({ text: 'Please fill all required fields', type: 'error' });
+            return;
+        }
+        if (form.password.length < 6) {
+            setMessage({ text: 'Password must be at least 6 characters', type: 'error' });
             return;
         }
 
         setLoading(true);
         try {
-            // Generate a simple temporary ID (in real app, you might use UUID)
-            const tempId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const payload = {
+                email: form.email.trim().toLowerCase(),
+                password: form.password,
+                full_name: form.fullName.trim(),
+                phone: form.phone.trim(),
+                role: form.role,
+                core_subject: form.role === 'teacher' ? form.coreSubject : null,
+            };
 
-            // Insert user directly into profiles table
-            const { error } = await supabase
-                .from('profiles')
-                .insert([{
-                    email: form.email.trim(),
-                    full_name: form.fullName.trim(),
-                    phone: form.phone.trim(),
-                    role: form.role,
-                    core_subject: form.role === 'teacher' ? form.coreSubject : null,
-                    avatar_url: null
-                }]);
+            let invokeError = null;
+            const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-create-user', {
+                body: payload
+            });
+            if (!fnError && fnData?.success) {
+                setMessage({ text: 'User created successfully. They can login with the provided email/password.', type: 'success' });
+                setTimeout(() => {
+                    setForm({ email: '', password: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });
+                    onSuccess();
+                }, 1500);
+                return;
+            }
+            invokeError = fnError?.message || fnData?.message || null;
 
-            if (error) throw error;
+            // Optional compatibility fallback for projects using custom backend route.
+            if (import.meta.env.VITE_ADMIN_CREATE_USER_ENDPOINT) {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-            setMessage({ text: '? User added successfully!', type: 'success' });
-            setTimeout(() => {
-                setForm({ email: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });
-                onSuccess();
-            }, 1500);
+                if (!res.ok) {
+                    const raw = await res.text();
+                    throw new Error(raw || invokeError || 'Failed to create user');
+                }
+
+                setMessage({ text: 'User created successfully. They can login with the provided email/password.', type: 'success' });
+                setTimeout(() => {
+                    setForm({ email: '', password: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });
+                    onSuccess();
+                }, 1500);
+                return;
+            }
+
+            throw new Error(
+                invokeError ||
+                'Failed to create user. Deploy Supabase function "admin-create-user" or configure VITE_ADMIN_CREATE_USER_ENDPOINT.'
+            );
         } catch (error) {
             setMessage({ text: error.message, type: 'error' });
         } finally {
@@ -293,6 +355,9 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                 </div>
 
                 <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                    <p className="text-xs text-slate-500">
+                        Creates both Auth account and profile via Supabase function `admin-create-user`.
+                    </p>
                     <div>
                         <label className="block text-xs font-semibold text-slate-600 mb-1">Email *</label>
                         <input
@@ -300,6 +365,18 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                             value={form.email}
                             onChange={e => setForm({ ...form, email: e.target.value })}
                             placeholder="user@example.com"
+                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Password *</label>
+                        <input
+                            type="password"
+                            value={form.password}
+                            onChange={e => setForm({ ...form, password: e.target.value })}
+                            placeholder="Minimum 6 characters"
                             className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             required
                         />

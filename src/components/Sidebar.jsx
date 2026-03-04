@@ -770,6 +770,10 @@ const Sidebar = () => {
               <Mail size={28} />
               {shouldShowText && <span>Support Contact</span>}
             </NavLink>
+            <NavLink to="/app/admin/activity-logs" className={navItemClass} title="Activity Logs">
+              <ClipboardList size={28} />
+              {shouldShowText && <span>Activity Logs</span>}
+            </NavLink>
             <NavLink to="/app/admin/reset-password" className={navItemClass} title="Reset Password">
               <Lock size={28} />
               {shouldShowText && <span>Reset Password</span>}
