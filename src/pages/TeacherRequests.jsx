@@ -26,7 +26,14 @@ const TeacherRequests = () => {
         String(error.message || '').includes('target_user_id')
       ) {
         const { target_user_id, ...fallback } = payload;
-        await supabase.from('admin_notifications').insert(fallback);
+        const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
+        await supabase.from('admin_notifications').insert({
+          ...fallback,
+          content:
+            marker && !String(fallback.content || '').includes('[target_user_id:')
+              ? `${marker}${fallback.content || ''}`
+              : fallback.content,
+        });
       }
     } catch {
       // Keep request flow resilient if notification insert fails.

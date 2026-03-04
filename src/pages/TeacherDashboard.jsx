@@ -22,34 +22,44 @@ const TeacherDashboard = () => {
 
   const loadData = async () => {
     if (!profile?.id) return;
-    // Load assigned students from mentor assignments
-    const { data: mentorStuds } = await supabase
-      .from('teacher_assignments')
-      .select('student_id')
-      .eq('teacher_id', profile.id)
-      .eq('active', true);
-    
-    // Load assigned students from guidance requests
+    // Primary source of truth: students assigned to this teacher on profile row.
+    const { data: assignedProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, avatar_url, premium_until')
+      .eq('role', 'student')
+      .eq('assigned_teacher_id', profile.id)
+      .order('full_name', { ascending: true });
+
+    const studentsById = new Map((assignedProfiles || []).map((s) => [s.id, s]));
+
+    // Secondary source: guidance allocations that may exist before profile assignment sync.
     const { data: guidanceStuds } = await supabase
       .from('guidance_requests')
       .select('student_id')
-      .eq('assigned_to_teacher_id', profile.id);
-    
-    // Combine and deduplicate students from both sources.
-    const allStudentIds = new Set([
-      ...(mentorStuds || []).map(s => s.student_id),
-      ...(guidanceStuds || []).map(s => s.student_id)
-    ]);
-    const studentIds = Array.from(allStudentIds).filter(Boolean);
-    if (studentIds.length) {
-      const { data: studentProfiles } = await supabase
+      .eq('assigned_to_teacher_id', profile.id)
+      .in('status', ['pending', 'assigned', 'scheduled']);
+
+    const missingGuidanceStudentIds = Array.from(
+      new Set((guidanceStuds || []).map((s) => s.student_id).filter(Boolean))
+    ).filter((id) => !studentsById.has(id));
+
+    if (missingGuidanceStudentIds.length > 0) {
+      const { data: extraProfiles } = await supabase
         .from('profiles')
         .select('id, full_name, email, avatar_url, premium_until')
-        .in('id', studentIds);
-      setStudents(studentProfiles || []);
-    } else {
-      setStudents([]);
+        .in('id', missingGuidanceStudentIds)
+        .eq('role', 'student');
+
+      (extraProfiles || []).forEach((s) => {
+        studentsById.set(s.id, s);
+      });
     }
+
+    setStudents(
+      Array.from(studentsById.values()).sort((a, b) =>
+        String(a.full_name || '').localeCompare(String(b.full_name || ''))
+      )
+    );
 
     // Load upcoming class sessions
     const { data: rawClassSessions } = await supabase

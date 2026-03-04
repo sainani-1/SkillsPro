@@ -282,8 +282,9 @@ const ClassSchedule = () => {
         const { error: notifError } = await supabase.from('admin_notifications').insert(notificationRows);
         if (notifError && (String(notifError.message || '').includes('target_user_id') || String(notifError.message || '').includes('class_session_id'))) {
           // Backward compatibility when new columns are not present yet.
-          const fallbackRows = recipientStudentIds.map(() => ({
+          const fallbackRows = recipientStudentIds.map((studentId) => ({
             ...basePayload,
+            content: `[target_user_id:${studentId}] ${basePayload.content}`,
             admin_id: profile?.id || null
           }));
           await supabase.from('admin_notifications').insert(fallbackRows);

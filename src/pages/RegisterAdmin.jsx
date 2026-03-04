@@ -41,6 +41,10 @@ const RegisterAdmin = () => {
       newErrors.password = 'Password must be at least 6 characters';
     }
     
+    if (!file) {
+      newErrors.file = 'Profile photo is required';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -166,15 +170,16 @@ const RegisterAdmin = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Profile Photo (Optional)</label>
+            <label className="block text-sm font-medium mb-2">Profile Photo *</label>
             <input type="file" accept="image/*" 
               onChange={e => {
                 setFile(e.target.files?.[0] || null);
                 if (errors.file) setErrors({...errors, file: ''});
               }} 
-              className="w-full text-sm border rounded-lg p-2"
+              className={`w-full text-sm border rounded-lg p-2 ${errors.file ? 'border-red-500' : ''}`}
             />
-            {file && <p className="text-green-600 text-xs mt-1">✓ {file.name}</p>}
+            {file && <p className="text-green-600 text-xs mt-1">Selected: {file.name}</p>}
+            {errors.file && <p className="text-red-500 text-xs mt-1">{errors.file}</p>}
           </div>
 
           <div>
@@ -219,3 +224,4 @@ const RegisterAdmin = () => {
 };
 
 export default RegisterAdmin;
+

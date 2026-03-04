@@ -138,36 +138,19 @@ const Settings = () => {
     setLoading(true);
 
     try {
-      const nowIso = new Date().toISOString();
-
-      const { error: logError } = await supabase
-        .from('deleted_accounts')
-        .insert({
+      const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+        body: {
           user_id: profile.id,
-          full_name: profile.full_name || null,
-          email: profile.email || email || null,
-          role: profile.role || 'student',
-          phone: profile.phone || null,
-          reason: deleteReason.trim(),
-          deleted_by: profile.id,
-          deleted_at: nowIso
-        });
-      if (logError) throw logError;
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          is_disabled: true,
-          deleted_at: nowIso,
-          deleted_reason: deleteReason.trim(),
-          deleted_by: profile.id,
-          updated_at: nowIso
-        })
-        .eq('id', profile.id);
-
+          reason: deleteReason.trim()
+        }
+      });
       if (error) throw error;
 
-      openPopup('Deleted', 'Your account has been deleted and disabled. Logging out...', 'success');
+      openPopup(
+        'Deleted',
+        data?.message || 'Your account has been deleted. Logging out...',
+        'success'
+      );
       setTimeout(() => {
         signOut();
       }, 2000);
@@ -571,11 +554,11 @@ const Settings = () => {
               <div className="border border-red-300 rounded-lg p-6">
                 <h3 className="font-bold text-slate-900 mb-2">Delete Account</h3>
                 <p className="text-slate-600 mb-4">
-                  This will disable your account and record your deletion reason. Your historical certificates stay stored for verification and admin audit.
+                  This will permanently delete your account login and record your deletion reason for admin audit.
                 </p>
                 <ul className="list-disc list-inside text-slate-600 space-y-1 mb-6">
                   <li>You will be logged out immediately</li>
-                  <li>You cannot login again unless admin re-enables account</li>
+                  <li>You can register again later with the same email</li>
                   <li>Deletion reason is shown in admin panel</li>
                   <li>Certificates remain stored in Supabase</li>
                 </ul>

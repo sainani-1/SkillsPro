@@ -170,8 +170,8 @@ export default function AdminMFASetup() {
                 />
               )}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center overflow-hidden">
-                  <img src={LOGO_URL} alt="Logo" className="w-9 h-9 object-contain rounded-full" />
+                <div className="w-12 h-12 rounded-full border border-slate-300/60 shadow flex items-center justify-center overflow-hidden">
+                  <img src={LOGO_URL} alt="Logo" className="w-9 h-9 object-contain rounded-full mix-blend-multiply" />
                 </div>
               </div>
             </div>

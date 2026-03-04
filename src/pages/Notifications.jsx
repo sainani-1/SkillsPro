@@ -23,6 +23,16 @@ export default function Notifications() {
       message.includes('access to fetch')
     );
   };
+  const isMissingTargetUserColumn = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    const hint = String(err?.hint || '').toLowerCase();
+    return (
+      msg.includes('target_user_id') ||
+      details.includes('target_user_id') ||
+      hint.includes('target_user_id')
+    );
+  };
   const extractLegacyTargetUserId = (text) => {
     const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
     return match?.[1] || null;
@@ -83,7 +93,7 @@ export default function Notifications() {
       if (sessionData?.session?.user?.id) {
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('id, role')
+          .select('id, role, created_at')
           .eq('id', sessionData.session.user.id)
           .single();
 
@@ -109,18 +119,37 @@ export default function Notifications() {
       }
 
       // Fetch notifications using role scope only (schema-safe across deployments).
-      const roleScopedRes = await supabase
+      let roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, created_at')
-        .or(`target_role.eq.all,target_role.eq.${user.role}`)
+        .select('id, title, content, type, target_role, target_user_id, created_at')
+        .or(`target_role.eq.all,target_role.eq.${user.role},target_user_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
-      const data = roleScopedRes.data || [];
-      const fetchError = roleScopedRes.error;
+      if (roleScopedRes.error && isMissingTargetUserColumn(roleScopedRes.error)) {
+        roleScopedRes = await supabase
+          .from('admin_notifications')
+          .select('id, title, content, type, target_role, created_at')
+          .or(`target_role.eq.all,target_role.eq.${user.role}`)
+          .order('created_at', { ascending: false });
+      }
 
-      if (fetchError) throw fetchError;
+      const data = roleScopedRes.data || [];
+      if (roleScopedRes.error) throw roleScopedRes.error;
       const visibleData = (data || [])
         .filter((notif) => {
+          const accountCreatedAt = user?.created_at ? new Date(user.created_at).getTime() : null;
+          const notifCreatedAt = notif?.created_at ? new Date(notif.created_at).getTime() : null;
+          if (
+            accountCreatedAt &&
+            notifCreatedAt &&
+            Number.isFinite(accountCreatedAt) &&
+            Number.isFinite(notifCreatedAt) &&
+            notifCreatedAt < accountCreatedAt
+          ) {
+            return false;
+          }
+          const explicitTarget = notif.target_user_id;
+          if (explicitTarget && String(explicitTarget) !== String(user.id)) return false;
           const legacyTarget = extractLegacyTargetUserId(notif.content);
           return !legacyTarget || String(legacyTarget) === String(user.id);
         })

@@ -24,7 +24,14 @@ const AdminChangeCourse = () => {
       const { error } = await supabase.from('admin_notifications').insert(payload);
       if (error && String(error.message || '').includes('target_user_id')) {
         const { target_user_id, ...fallback } = payload;
-        await supabase.from('admin_notifications').insert(fallback);
+        const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
+        await supabase.from('admin_notifications').insert({
+          ...fallback,
+          content:
+            marker && !String(fallback.content || '').includes('[target_user_id:')
+              ? `${marker}${fallback.content || ''}`
+              : fallback.content,
+        });
       }
     } catch {
       // Keep enrollment flow resilient even if notification insert fails.

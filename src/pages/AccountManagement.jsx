@@ -84,37 +84,30 @@ const AccountManagement = () => {
         updatePayload = { is_disabled: false };
         successMsg = '✅ Account enabled!';
       } else if (action === 'delete') {
-        // Delete account permanently
-        console.log('Attempting to delete user:', selectedUser.id);
-        
-        try {
-          const { error: deleteError } = await supabase
-            .from('profiles')
-            .delete()
-            .eq('id', selectedUser.id);
-          
-          if (deleteError) {
-            console.error('Delete error:', deleteError);
-            throw deleteError;
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
+          body: {
+            user_id: selectedUser.id,
+            reason: 'Deleted by admin from Account Management (' + (selectedUser.email || selectedUser.id) + ')'
           }
-          
-          console.log('Delete successful');
-          // Show success message
-          setAlertModal({
-            show: true,
-            title: 'Success',
-            message: '✅ Account permanently deleted!',
-            type: 'success'
-          });
-          await loadUsers();
-          setShowModal(false);
-          setDeleteConfirm('');
-          setLoading(false);
-          return;
-        } catch (err) {
-          console.error('Delete operation failed:', err);
-          throw err;
+        });
+
+        if (fnError) {
+          throw new Error(fnError.message || 'Failed to delete user');
         }
+
+        setAlertModal({
+          show: true,
+          title: fnData?.deleted ? 'Success' : 'Partial Success',
+          message: fnData?.message || (fnData?.deleted
+            ? 'Account permanently deleted!'
+            : 'Account cleanup completed.'),
+          type: fnData?.deleted ? 'success' : 'warning'
+        });
+        await loadUsers();
+        setShowModal(false);
+        setDeleteConfirm('');
+        setLoading(false);
+        return;
       }
 
       if (!updatePayload) return;
@@ -473,3 +466,4 @@ const AccountManagement = () => {
 };
 
 export default AccountManagement;
+

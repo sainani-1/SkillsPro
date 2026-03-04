@@ -35,6 +35,32 @@ const Register = () => {
   };
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const navigate = useNavigate();
+  const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
+
+  const cachePendingAvatar = async (email, sourceFile) => {
+    if (!email || !sourceFile) return;
+    try {
+      const safeFile = await prepareAvatarFile(sourceFile);
+      const key = getPendingAvatarKey(email);
+      const fileForCache = safeFile || sourceFile;
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read avatar file'));
+        reader.readAsDataURL(fileForCache);
+      });
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          dataUrl,
+          mime: fileForCache.type || 'image/jpeg',
+          savedAt: new Date().toISOString()
+        })
+      );
+    } catch (err) {
+      // Ignore cache failures; registration should continue.
+    }
+  };
 
   // Check if registrations are paused
   useEffect(() => {
@@ -84,6 +110,9 @@ const Register = () => {
       } else if (formData.password.length < 6) {
         stepErrors.password = 'Password must be at least 6 characters';
       }
+      if (!file) {
+        stepErrors.file = 'Profile photo is required';
+      }
     }
 
     if (step === 4 && !termsAccepted) {
@@ -112,6 +141,9 @@ const Register = () => {
       newErrors.password = 'Password is required';
     } else if (formData.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
+    }
+    if (!file) {
+      newErrors.file = 'Profile photo is required';
     }
     if (!formData.educationLevel) {
       newErrors.educationLevel = 'Education level is required';
@@ -234,13 +266,13 @@ const Register = () => {
             .from('avatars')
             .upload(filePath, safeFile, { upsert: true, contentType: safeFile?.type || file.type });
 
-          if (!uploadError) {
-            const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-            avatarUrl = data?.publicUrl || avatarUrl;
-          }
+          if (uploadError) throw uploadError;
+          const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+          avatarUrl = data?.publicUrl || avatarUrl;
         } catch (photoErr) {
           console.warn('Photo upload warning:', photoErr.message);
-          // Continue with default avatar if upload fails
+          // Cache avatar locally and apply on first successful login after email verification.
+          await cachePendingAvatar(formData.email, file);
         }
       }
 
@@ -292,7 +324,7 @@ const Register = () => {
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900 text-white p-8 md:p-10 shadow-2xl">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.35),transparent_48%),radial-gradient(circle_at_bottom_left,rgba(14,116,144,0.3),transparent_45%)] pointer-events-none" />
           <div className="relative z-10 h-full flex flex-col">
-            <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-16 h-16 rounded-full border border-white/30 object-cover shadow-lg" />
+            <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-16 h-16 rounded-full object-contain mix-blend-multiply shadow-lg" />
             <h1 className="mt-6 text-3xl md:text-4xl font-bold leading-tight">Start your SkillPro journey</h1>
             <p className="mt-3 text-slate-200 text-sm md:text-base max-w-md">
               Create your account to access classes, exams, certificates, and personalized learning updates.
@@ -484,7 +516,7 @@ const Register = () => {
                       </div>
 
                       <div>
-                        <label className="block text-sm text-slate-600 mb-2 font-semibold">Profile Photo (Optional)</label>
+                        <label className="block text-sm text-slate-600 mb-2 font-semibold">Profile Photo *</label>
                         <input
                           type="file"
                           accept="image/*"
@@ -492,9 +524,10 @@ const Register = () => {
                             setFile(e.target.files?.[0] || null);
                             if (errors.file) setErrors({ ...errors, file: '' });
                           }}
-                          className="w-full text-sm border border-slate-200 rounded-xl p-2 bg-slate-50 focus:outline-none"
+                          className={`w-full text-sm border rounded-xl p-2 bg-slate-50 focus:outline-none ${errors.file ? 'border-red-500' : 'border-slate-200'}`}
                         />
                         {file && <p className="text-green-600 text-xs mt-1">Selected: {file.name}</p>}
+                        {errors.file && <p className="text-red-500 text-xs mt-1">{errors.file}</p>}
                       </div>
                     </>
                   )}

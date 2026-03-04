@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { setContestQuestions } from './contestModel';
 import { weeklyContest } from './contestModel';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function AdminContestSetup() {
   const [questions, setQuestions] = useState([]);
@@ -94,10 +95,25 @@ export default function AdminContestSetup() {
       });
   }
 
+  function handleDeleteQuestion(index) {
+    setQuestions((prev) => prev.filter((_, i) => i !== index));
+  }
+
   if (initialLoading) {
     return (
-      <div style={{ minHeight: '40vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', color: '#6366f1' }}>
-        Loading contest setup...
+      <div style={{ maxWidth: '760px', margin: '2rem auto', padding: '0 1rem' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%)',
+          border: '1px solid #c7d2fe',
+          borderRadius: '1.25rem',
+          padding: '2rem',
+          boxShadow: '0 8px 24px rgba(99,102,241,0.12)'
+        }}>
+          <LoadingSpinner fullPage={false} message="Loading contest setup..." />
+          <p style={{ textAlign: 'center', marginTop: '1rem', color: '#334155', fontSize: '0.95rem' }}>
+            Fetching schedule and questions. This may take a few seconds.
+          </p>
+        </div>
       </div>
     );
   }
@@ -151,7 +167,18 @@ export default function AdminContestSetup() {
         <h3 style={{ fontSize: '1.3rem', color: '#334155', marginBottom: '1rem' }}>Contest Questions</h3>
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {questions.map((q, idx) => (
-            <li key={idx} style={{ background: '#e0e7ff', borderRadius: '0.5rem', padding: '1rem', marginBottom: '0.7rem', fontWeight: 'bold', color: '#6366f1' }}>{q.title}</li>
+            <li key={idx} style={{ background: '#e0e7ff', borderRadius: '0.5rem', padding: '1rem', marginBottom: '0.7rem', fontWeight: 'bold', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {q.title || `Question ${idx + 1}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDeleteQuestion(idx)}
+                style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '0.4rem', padding: '0.35rem 0.8rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Delete
+              </button>
+            </li>
           ))}
         </ul>
       </div>

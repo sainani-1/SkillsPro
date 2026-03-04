@@ -9,6 +9,7 @@ import { isContestActive, getContestQuestions } from './contestModel';
 import { weeklyContest } from './contestModel';
 import { runCode } from './codeRunner';
 import Toast from '../components/Toast';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function LogicBuildingContest() {
         // State for inline while loop suggestion
@@ -193,8 +194,43 @@ export default function LogicBuildingContest() {
   }, []);
 
   // Show loading while auth/profile is loading
-  if (loading) return <div style={{minHeight:'40vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',color:'#6366f1'}}>Loading...</div>;
-  if (contestConfigLoading) return <div style={{minHeight:'40vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',color:'#6366f1'}}>Loading contest settings...</div>;
+  if (loading) {
+    return (
+      <div style={{ maxWidth: '760px', margin: '2rem auto', padding: '0 1rem' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%)',
+          border: '1px solid #c7d2fe',
+          borderRadius: '1.25rem',
+          padding: '2rem',
+          boxShadow: '0 8px 24px rgba(99,102,241,0.12)'
+        }}>
+          <LoadingSpinner fullPage={false} message="Preparing Logic Building Contest..." />
+          <p style={{ textAlign: 'center', marginTop: '1rem', color: '#334155', fontSize: '0.95rem' }}>
+            Verifying your profile and premium access.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (contestConfigLoading) {
+    return (
+      <div style={{ maxWidth: '760px', margin: '2rem auto', padding: '0 1rem' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%)',
+          border: '1px solid #c7d2fe',
+          borderRadius: '1.25rem',
+          padding: '2rem',
+          boxShadow: '0 8px 24px rgba(99,102,241,0.12)'
+        }}>
+          <LoadingSpinner fullPage={false} message="Loading contest..." />
+          <p style={{ textAlign: 'center', marginTop: '1rem', color: '#334155', fontSize: '0.95rem' }}>
+            Loading contest...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Restrict to premium users
   if (!isPremium(profile)) {

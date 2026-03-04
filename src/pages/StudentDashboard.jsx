@@ -19,7 +19,6 @@ const StudentDashboard = () => {
   const { profile, isPremium } = useAuth();
   const [courses, setCourses] = useState([]);
   const [teacher, setTeacher] = useState(null);
-  const [chatOpen, setChatOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPremiumGift, setShowPremiumGift] = useState(false);
   const [premiumDays, setPremiumDays] = useState(0);
@@ -61,7 +60,7 @@ const StudentDashboard = () => {
         // Source directly from assigned class sessions so teacher/admin schedules always appear.
         const { data, error } = await supabase
           .from('class_sessions')
-          .select('id, title, scheduled_for, created_at, meeting_type, class_session_participants!inner(student_id)')
+          .select('id, title, scheduled_for, created_at, meeting_type, meeting_link, class_session_participants!inner(student_id)')
           .eq('class_session_participants.student_id', profile.id)
           .gte('scheduled_for', new Date().toISOString())
           .order('scheduled_for', { ascending: true })
@@ -75,6 +74,8 @@ const StudentDashboard = () => {
         const alerts = (data || []).map((session) => ({
           id: session.id,
           title: `Class Scheduled: ${session.title}`,
+          scheduled_for: session.scheduled_for,
+          meeting_link: session.meeting_link,
           content: `Your class is scheduled for ${new Date(session.scheduled_for).toLocaleString('en-IN', {
             day: '2-digit',
             month: 'short',
@@ -395,12 +396,12 @@ const StudentDashboard = () => {
                           <img src={teacher.avatar_url || "https://via.placeholder.com/60"} className="w-20 h-20 rounded-full mx-auto mb-2 object-cover" />
                           <p className="font-bold">{teacher.full_name}</p>
                           <p className="text-xs text-slate-500 mb-4">Senior Instructor</p>
-                          <button 
-                              onClick={() => setChatOpen(true)}
+                          <Link
+                              to="/app/chat"
                               className="w-full bg-nani-light text-white py-2 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-opacity-90"
                           >
                               <MessageCircle size={16} /> Ask a Doubt
-                          </button>
+                          </Link>
                       </div>
                   ) : (
                       <div className="text-center py-4">
@@ -426,24 +427,47 @@ const StudentDashboard = () => {
                     </div>
                   </div>
               </div>
-
-              {/* Daily Schedule */}
+              {/* Upcoming Sessions */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
                   <h3 className="font-bold mb-4 flex items-center gap-2">
-                      <Calendar size={18} /> Today's Sessions
+                      <Calendar size={18} /> Upcoming Sessions
                   </h3>
-                  <div className="space-y-3">
-                      <div className="p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
-                          <p className="font-bold text-sm">Morning Session</p>
-                          <p className="text-xs text-slate-500">09:00 AM - 10:00 AM</p>
-                          <Link to="#" className="text-blue-600 text-xs font-bold mt-1 block">Join Link</Link>
-                      </div>
-                      <div className="p-3 bg-indigo-50 rounded-lg border-l-4 border-indigo-500">
-                          <p className="font-bold text-sm">Evening Session</p>
-                          <p className="text-xs text-slate-500">05:00 PM - 06:00 PM</p>
-                          <Link to="#" className="text-indigo-600 text-xs font-bold mt-1 block">Join Link</Link>
-                      </div>
-                  </div>
+                  {classAlerts.length === 0 ? (
+                    <p className="text-sm text-slate-500">No upcoming sessions</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {classAlerts.slice(0, 3).map((session) => (
+                        <div key={session.id} className="p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                          <p className="font-bold text-sm">{session.title}</p>
+                          <p className="text-xs text-slate-500">
+                            {new Date(session.scheduled_for).toLocaleString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true,
+                              timeZone: 'Asia/Kolkata'
+                            })}
+                          </p>
+                          {session.meeting_link ? (
+                            <a
+                              href={session.meeting_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 text-xs font-bold mt-1 block"
+                            >
+                              Join Link
+                            </a>
+                          ) : (
+                            <Link to="/app/class-schedule" className="text-blue-600 text-xs font-bold mt-1 block">
+                              Open Schedule
+                            </Link>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
               </div>
           </div>
         </div>
@@ -453,24 +477,6 @@ const StudentDashboard = () => {
           <Link to="/app/courses" className="text-nani-light font-semibold mt-3 inline-block">View course list</Link>
         </div>
       )}
-      
-      {/* Live Chat Drawer (Simple implementation) */}
-      {chatOpen && (
-          <div className="fixed bottom-0 right-4 w-80 bg-white shadow-2xl rounded-t-xl border border-slate-200 z-50 h-96 flex flex-col">
-              <div className="p-3 bg-nani-dark text-white rounded-t-xl flex justify-between">
-                  <span className="font-bold">Chat with {teacher?.full_name}</span>
-                  <button onClick={() => setChatOpen(false)}>✕</button>
-              </div>
-              <div className="flex-1 p-4 overflow-y-auto bg-slate-50">
-                  <div className="text-center text-xs text-slate-400 my-2">Today</div>
-                  <div className="bg-blue-100 p-2 rounded-lg rounded-tl-none max-w-[80%] mb-2 text-sm">Hello! How can I help you today?</div>
-              </div>
-              <div className="p-2 border-t flex">
-                  <input className="flex-1 border rounded px-2 text-sm" placeholder="Type a message..." />
-                  <button className="ml-2 p-2 text-blue-600">➤</button>
-              </div>
-          </div>
-      )}
     </div>
   );
 };
@@ -478,3 +484,4 @@ const StudentDashboard = () => {
 const UserBadge = () => <div className="w-4 h-4 bg-gold-400 rounded-full inline-block"></div>;
 
 export default StudentDashboard;
+

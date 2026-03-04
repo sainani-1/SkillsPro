@@ -45,14 +45,14 @@ export const normalizeAvatarUrl = (avatarUrl) => {
   if (!supabaseUrl) return FALLBACK_AVATAR;
 
   const cleanPath = raw.replace(/^\/+/, '');
-  const objectPath = cleanPath.startsWith('avatars/') ? cleanPath : `avatars/${cleanPath}`;
-  return `${supabaseUrl}/storage/v1/object/public/${objectPath}`;
+  const objectPath = cleanPath.replace(/^avatars\//, '');
+  return `${supabaseUrl}/storage/v1/object/public/avatars/${objectPath}`;
 };
 
 export const buildAvatarPublicUrl = (objectPath) => {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   if (!supabaseUrl || !objectPath) return null;
   const clean = String(objectPath).replace(/^\/+/, '');
-  const finalPath = clean.startsWith('avatars/') ? clean : `avatars/${clean}`;
-  return `${supabaseUrl}/storage/v1/object/public/${finalPath}`;
+  const finalPath = clean.replace(/^avatars\//, '');
+  return `${supabaseUrl}/storage/v1/object/public/avatars/${finalPath}`;
 };

@@ -186,11 +186,11 @@ const ResetPassword = () => {
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 py-8 relative">
       <div className="absolute top-5 right-5 md:top-8 md:right-8 z-10">
-        <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white border border-slate-200 shadow-lg flex items-center justify-center overflow-hidden">
+        <div className="w-14 h-14 md:w-16 md:h-16 rounded-full shadow-lg flex items-center justify-center overflow-hidden">
           <img
             src="/skillpro-logo.png"
             alt="SkillPro logo"
-            className="w-10 h-10 md:w-12 md:h-12 object-cover rounded-full"
+            className="w-10 h-10 md:w-12 md:h-12 object-contain rounded-full mix-blend-multiply"
           />
         </div>
       </div>

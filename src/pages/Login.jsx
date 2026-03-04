@@ -18,6 +18,44 @@ const Login = () => {
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
+  const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
+
+  const applyPendingAvatarIfAny = async (userId, userEmail) => {
+    if (!userId || !userEmail) return null;
+    const storageKey = getPendingAvatarKey(userEmail);
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed?.dataUrl) return null;
+
+      const mime = parsed.mime || 'image/jpeg';
+      const extension = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+      const filePath = `${userId}.${extension}`;
+
+      const blob = await fetch(parsed.dataUrl).then((r) => r.blob());
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, blob, { upsert: true, contentType: mime });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      const publicUrl = data?.publicUrl || null;
+      if (!publicUrl) return null;
+
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+      if (profileUpdateError) throw profileUpdateError;
+
+      localStorage.removeItem(storageKey);
+      return publicUrl;
+    } catch (err) {
+      console.warn('Pending avatar apply failed:', err.message || err);
+      return null;
+    }
+  };
 
   useEffect(() => {
     // Always require fresh MFA verification when admin starts a new login flow.
@@ -367,6 +405,17 @@ const Login = () => {
         }
       }
 
+      // Apply cached registration photo on first verified login if avatar was not stored earlier.
+      if (!userProfile?.avatar_url) {
+        const restoredAvatar = await applyPendingAvatarIfAny(
+          signInData.user.id,
+          signInData.user.email || email
+        );
+        if (restoredAvatar) {
+          userProfile = { ...userProfile, avatar_url: restoredAvatar };
+        }
+      }
+
       // Check if account is disabled
       if (userProfile.is_disabled) {
         await supabase.auth.signOut();
@@ -478,7 +527,7 @@ const Login = () => {
       />
       <div className="relative overflow-hidden bg-white/95 backdrop-blur p-8 rounded-2xl shadow-xl border border-slate-100 w-full max-w-md">
         <div className="text-center mb-6">
-          <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-14 h-14 rounded-full mx-auto mb-3 object-cover border border-slate-200" />
+          <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-14 h-14 rounded-full mx-auto mb-3 object-contain mix-blend-multiply" />
           <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>
           <p className="text-sm text-slate-500 mt-1">Login to continue learning</p>
         </div>

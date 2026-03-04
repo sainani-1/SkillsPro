@@ -106,8 +106,8 @@ export default function AdminMFAVerify() {
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />
       <AlertModal show={alert.show} title={alert.title} message={alert.message} type={alert.type} onClose={() => setAlert({ ...alert, show: false })} />
       <div className="flex flex-col items-center mb-8">
-        <div className="w-20 h-20 rounded-full border-2 border-blue-400 flex items-center justify-center shadow-lg mb-2 overflow-hidden bg-white">
-          <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain rounded-full" />
+        <div className="w-20 h-20 rounded-full border-2 border-blue-400/50 flex items-center justify-center shadow-lg mb-2 overflow-hidden">
+          <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain rounded-full mix-blend-multiply" />
         </div>
         <span className="text-2xl font-extrabold text-nani-dark tracking-tight">SkillPro</span>
       </div>

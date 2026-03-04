@@ -127,10 +127,15 @@ export default function AdminNotifications() {
           .eq('id', editId);
         if (updateError && isTargetUserIdColumnError(updateError)) {
           const { target_user_id, ...fallbackPayload } = payload;
+          const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
           const fallback = await supabase
             .from('admin_notifications')
             .update({
               ...fallbackPayload,
+              content:
+                marker && !String(fallbackPayload.content || '').includes('[target_user_id:')
+                  ? `${marker}${fallbackPayload.content || ''}`
+                  : fallbackPayload.content,
               updated_at: new Date().toISOString(),
             })
             .eq('id', editId);
@@ -149,11 +154,16 @@ export default function AdminNotifications() {
           });
         if (insertError && isTargetUserIdColumnError(insertError)) {
           const { target_user_id, ...fallbackPayload } = payload;
+          const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
           const fallback = await supabase
             .from('admin_notifications')
             .insert({
               admin_id: userSession.session.user.id,
               ...fallbackPayload,
+              content:
+                marker && !String(fallbackPayload.content || '').includes('[target_user_id:')
+                  ? `${marker}${fallbackPayload.content || ''}`
+                  : fallbackPayload.content,
             });
           insertError = fallback.error;
         }

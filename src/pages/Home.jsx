@@ -7,11 +7,11 @@ const Home = () => {
     <div className="bg-slate-50 min-h-screen flex flex-col">
       <nav className="p-6 flex justify-between items-center max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-full border-2 border-gold-300 bg-white shadow-sm overflow-hidden">
+          <div className="h-12 w-12 rounded-full shadow-sm overflow-hidden">
             <img
               src="/skillpro-logo.png"
               alt="SkillPro logo"
-              className="h-full w-full rounded-full object-cover"
+              className="h-full w-full rounded-full object-contain mix-blend-multiply"
             />
           </div>
           <div className="font-serif font-bold text-2xl text-nani-dark">SkillPro</div>

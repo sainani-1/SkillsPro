@@ -22,7 +22,14 @@ const AdminStudentReassignments = () => {
       if (error && String(error.message || '').includes('target_user_id')) {
         const fallbackRows = rows.map((r) => {
           const { target_user_id, ...rest } = r;
-          return rest;
+          const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
+          return {
+            ...rest,
+            content:
+              marker && !String(rest.content || '').includes('[target_user_id:')
+                ? `${marker}${rest.content || ''}`
+                : rest.content,
+          };
         });
         await supabase.from('admin_notifications').insert(fallbackRows);
       }
