@@ -41,6 +41,7 @@ export default function LogicBuildingContest() {
   const [results, setResults] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [contestActive, setContestActive] = useState(false);
+  const [contestConfigLoading, setContestConfigLoading] = useState(true);
   const [scoreMsg, setScoreMsg] = useState('');
   const [scoreboard, setScoreboard] = useState([]);
   const [prizeTitle, setPrizeTitle] = useState('');
@@ -65,10 +66,14 @@ export default function LogicBuildingContest() {
 
   React.useEffect(() => {
     async function checkActive() {
-      await weeklyContest.load();
-      setQuestions(weeklyContest.questions);
-      const active = await isContestActive();
-      setContestActive(active);
+      try {
+        await weeklyContest.load();
+        setQuestions(weeklyContest.questions);
+        const active = await isContestActive();
+        setContestActive(active);
+      } finally {
+        setContestConfigLoading(false);
+      }
     }
     checkActive();
     const unsubscribe = weeklyContest.subscribe(async () => {
@@ -189,6 +194,7 @@ export default function LogicBuildingContest() {
 
   // Show loading while auth/profile is loading
   if (loading) return <div style={{minHeight:'40vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',color:'#6366f1'}}>Loading...</div>;
+  if (contestConfigLoading) return <div style={{minHeight:'40vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',color:'#6366f1'}}>Loading contest settings...</div>;
 
   // Restrict to premium users
   if (!isPremium(profile)) {

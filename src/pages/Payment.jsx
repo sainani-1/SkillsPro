@@ -14,7 +14,8 @@ const Payment = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [paymentFailed, setPaymentFailed] = useState(false);
-  const [premiumCost, setPremiumCost] = useState(199);
+  const [premiumCost, setPremiumCost] = useState(null);
+  const [pricingLoading, setPricingLoading] = useState(true);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const razorpayInstanceRef = React.useRef(null);
 
@@ -29,11 +30,16 @@ const Payment = () => {
           .single();
         
         if (data) {
-          setPremiumCost(parseInt(data.value) || 199);
+          const parsedCost = parseInt(data.value, 10);
+          setPremiumCost(Number.isFinite(parsedCost) ? parsedCost : 199);
+        } else {
+          setPremiumCost(199);
         }
       } catch (error) {
         console.error('Error loading premium cost:', error);
-        // Use default value if settings not found
+        setPremiumCost(199);
+      } finally {
+        setPricingLoading(false);
       }
     };
     loadPremiumCost();
@@ -309,6 +315,10 @@ const Payment = () => {
         </div>
       </div>
     );
+  }
+
+  if (pricingLoading || premiumCost === null) {
+    return <LoadingSpinner message="Loading pricing..." />;
   }
 
   return (

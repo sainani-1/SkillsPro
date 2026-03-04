@@ -1,11 +1,12 @@
 // Admin UI for setting weekly contest questions
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { setContestQuestions } from './contestModel';
 import { weeklyContest } from './contestModel';
 
 export default function AdminContestSetup() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
   const [newQuestion, setNewQuestion] = useState({
     title: '',
@@ -19,6 +20,27 @@ export default function AdminContestSetup() {
   const [day, setDay] = useState(weeklyContest.day);
   const [startTime, setStartTime] = useState(weeklyContest.startTime);
   const [endTime, setEndTime] = useState(weeklyContest.endTime);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadContestConfig = async () => {
+      try {
+        await weeklyContest.load();
+        if (!mounted) return;
+        setDay(weeklyContest.day);
+        setStartTime(weeklyContest.startTime);
+        setEndTime(weeklyContest.endTime);
+        setQuestions(weeklyContest.questions || []);
+      } catch (e) {
+        if (!mounted) return;
+        setError((e && e.message) ? e.message : 'Failed to load contest config');
+      } finally {
+        if (mounted) setInitialLoading(false);
+      }
+    };
+    loadContestConfig();
+    return () => { mounted = false; };
+  }, []);
 
   function handleAddQuestion() {
     setQuestions([...questions, newQuestion]);
@@ -70,6 +92,14 @@ export default function AdminContestSetup() {
         setError((e && e.message) ? e.message : 'Failed to save contest');
         console.error('Firestore save error:', e);
       });
+  }
+
+  if (initialLoading) {
+    return (
+      <div style={{ minHeight: '40vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', color: '#6366f1' }}>
+        Loading contest setup...
+      </div>
+    );
   }
 
   return (

@@ -28,6 +28,7 @@ const StudentDashboard = () => {
   const [offers, setOffers] = useState([]);
   const [showOfferCongrats, setShowOfferCongrats] = useState(false);
   const [classAlerts, setClassAlerts] = useState([]);
+  const [premiumCost, setPremiumCost] = useState(null);
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
@@ -94,6 +95,24 @@ const StudentDashboard = () => {
     fetchClassAlerts();
     const interval = setInterval(fetchClassAlerts, 60000);
     return () => clearInterval(interval);
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const loadPremiumCost = async () => {
+      try {
+        const { data } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'premium_cost')
+          .maybeSingle();
+        const parsedCost = parseInt(data?.value, 10);
+        setPremiumCost(Number.isFinite(parsedCost) ? parsedCost : 199);
+      } catch {
+        setPremiumCost(199);
+      }
+    };
+    loadPremiumCost();
   }, [profile?.id]);
 
   const fetchOffers = async () => {
@@ -291,7 +310,7 @@ const StudentDashboard = () => {
           </p>
           {!isPremium(profile) && (
             <Link to="/app/payment" className="mt-4 inline-block bg-gold-500 text-white px-6 py-3 rounded-lg hover:bg-gold-600 font-semibold">
-              Get Premium (₹1999)
+              Get Premium {premiumCost !== null ? `(₹${premiumCost})` : ''}
             </Link>
           )}
         </div>

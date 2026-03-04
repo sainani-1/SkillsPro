@@ -103,6 +103,7 @@ const CourseList = () => {
         const [selectedCourseForExam, setSelectedCourseForExam] = useState(null);
         const [selectedExamId, setSelectedExamId] = useState(null);
         const [examQuestions, setExamQuestions] = useState([]);
+        const [premiumCost, setPremiumCost] = useState(null);
         const [newQuestion, setNewQuestion] = useState({
           question: '',
           options: ['', '', '', ''],
@@ -160,6 +161,23 @@ const CourseList = () => {
           };
           
           fetchCourses();
+        }, []);
+
+        useEffect(() => {
+          const loadPremiumCost = async () => {
+            try {
+              const { data } = await supabase
+                .from('settings')
+                .select('value')
+                .eq('key', 'premium_cost')
+                .maybeSingle();
+              const parsedCost = parseInt(data?.value, 10);
+              setPremiumCost(Number.isFinite(parsedCost) ? parsedCost : 199);
+            } catch {
+              setPremiumCost(199);
+            }
+          };
+          loadPremiumCost();
         }, []);
 
         // Fetch exam results for premium users
@@ -518,7 +536,9 @@ const CourseList = () => {
          <div className="bg-gradient-to-r from-gold-400 to-gold-600 p-6 rounded-xl mb-6 flex items-center justify-between text-white">
            <div>
              <h2 className="text-xl font-bold mb-1">Unlock All 50+ Courses</h2>
-             <p className="text-gold-100 text-sm">Get 6 months unlimited access for just ₹1999</p>
+            <p className="text-gold-100 text-sm">
+              Get 6 months unlimited access for just {premiumCost !== null ? `₹${premiumCost}` : 'our premium price'}
+            </p>
            </div>
            <Link to="/app/payment" className="group bg-white text-gold-600 px-6 py-3 rounded-lg font-semibold border-2 border-gold-600 hover:bg-gradient-to-r hover:from-gold-500 hover:to-gold-700 hover:text-white hover:shadow-2xl hover:shadow-gold-400/50 hover:scale-110 hover:-translate-y-1 transition-all duration-300 ease-in-out cursor-pointer relative overflow-hidden">
              <span className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity duration-300"></span>
