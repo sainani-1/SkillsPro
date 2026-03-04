@@ -82,18 +82,6 @@ const CourseList = () => {
         const { profile, isPremium } = useAuth();
   const { popupNode, openPopup } = usePopup();
           const premium = isPremium(profile);
-          const [studentEnrollments, setStudentEnrollments] = useState([]);
-
-          // Fetch enrollments for student
-          useEffect(() => {
-            if (profile?.role === 'student' && profile?.id) {
-              supabase
-                .from('enrollments')
-                .select('course_id')
-                .eq('student_id', profile.id)
-                .then(({ data }) => setStudentEnrollments(data || []));
-            }
-          }, [profile]);
         const [courses, setCourses] = useState([]);
         const [examResults, setExamResults] = useState({});
         const [searchQuery, setSearchQuery] = useState('');
@@ -599,12 +587,7 @@ const CourseList = () => {
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {filteredCourses.map(course => {
                   const isFree = !!course.is_free;
-                    // Check if student is enrolled
-                    let isEnrolled = false;
-                    if (profile?.role === 'student' && profile?.id) {
-                      isEnrolled = studentEnrollments.some(e => e.course_id === course.id);
-                  }
-                  const canAccess = premium || isFree || isEnrolled;
+                  const canAccess = premium || isFree;
                   return (
                     <div key={course.id} className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all group relative">
                       {/* Course Image */}

@@ -53,6 +53,14 @@ const CourseDetail = () => {
     };
 
     const handleEnroll = async () => {
+        if (!course?.is_free && !premium) {
+            openPopup('Premium required', 'Upgrade to Premium to enroll in this paid course.', 'warning');
+            return;
+        }
+        if (!profile?.id) {
+            openPopup('Sign in required', 'Please sign in to enroll in this course.', 'warning');
+            return;
+        }
         setLoading(true);
         try {
             await supabase.from('enrollments').insert({
@@ -124,10 +132,8 @@ const CourseDetail = () => {
         return <LoadingSpinner message="Loading course..." />;
     }
 
-    // Allow access if premium or course is free
-    // Admins can access any course for free
-    // Enrolled students can access their courses even if not premium
-    if (!premium && course && !course.is_free && profile?.role !== 'admin' && !enrolled) {
+    // Allow access only if premium is active or the course is free.
+    if (!premium && course && !course.is_free) {
         return (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 text-center">
                 <Lock className="mx-auto text-slate-400" size={32} />
