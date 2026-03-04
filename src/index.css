@@ -19,10 +19,12 @@ body::before {
   background-image: url('/skillpro-logo.png');
   background-repeat: no-repeat;
   background-position: center;
-  background-size: min(48vmin, 420px);
-  opacity: 0.04;
+  background-size: min(42vmin, 360px);
+  opacity: 0.08;
+  mix-blend-mode: normal;
+  filter: none;
   pointer-events: none;
-  z-index: 0;
+  z-index: 999;
 }
 
 .btn-primary {

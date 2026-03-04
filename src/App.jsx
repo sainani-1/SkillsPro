@@ -3,11 +3,12 @@ import AdminContestSetup from './logicBuilding/AdminContestSetup';
 import LogicBuildingContest from './logicBuilding/LogicBuildingContest';
 import AdminChangeCourse from './pages/AdminChangeCourse';
 import AdminScoreboard from './logicBuilding/AdminScoreboard';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import LoadingSpinner from './components/LoadingSpinner';
+import { supabase } from './supabaseClient';
 import AdminMFASetup from "./pages/AdminMFASetup";
 import AdminMFAVerify from "./pages/AdminMFAVerify";
 // Pages
@@ -78,9 +79,34 @@ import CertificatePreview from './pages/CertificatePreview';
 import AdminDeletedAccounts from './pages/AdminDeletedAccounts';
 import TermsAndConditions from './pages/TermsAndConditions';
 import CompleteGoogleProfile from './pages/CompleteGoogleProfile';
+import AdminSupportContact from './pages/AdminSupportContact';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
+  const [supportContactEmail, setSupportContactEmail] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSupportEmail = async () => {
+      try {
+        const { data } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'support_contact_email')
+          .maybeSingle();
+        if (mounted) setSupportContactEmail(data?.value || '');
+      } catch {
+        if (mounted) setSupportContactEmail('');
+      }
+    };
+    if (profile?.is_disabled || profile?.is_locked) {
+      loadSupportEmail();
+    }
+    return () => {
+      mounted = false;
+    };
+  }, [profile?.is_disabled, profile?.is_locked]);
+
   if (loading) return <LoadingSpinner message="Initializing your account..." />;
   if (!user) return <Navigate to="/login" />;
   const isGoogleAuth = user?.app_metadata?.provider === 'google' || profile?.auth_provider === 'google';
@@ -91,15 +117,26 @@ const ProtectedRoute = ({ children }) => {
   // Check if user is disabled
   if (profile?.is_disabled) {
     return (
-      <div className="h-screen flex items-center justify-center bg-slate-900 text-white flex-col p-6">
-        <div className="text-center space-y-4 max-w-xl">
-          <h1 className="text-3xl font-bold text-red-400">Account Disabled</h1>
-          <p>
+      <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-red-950 text-white p-6 flex items-center justify-center relative overflow-hidden">
+        <img
+          src="/skillpro-logo.png"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 m-auto w-72 h-72 object-contain opacity-15 mix-blend-multiply pointer-events-none select-none"
+        />
+        <div className="max-w-xl w-full rounded-2xl border border-red-300/30 bg-white/5 backdrop-blur-sm shadow-2xl p-8 text-center space-y-4 relative z-10">
+          <h1 className="text-3xl font-bold text-red-300">Account Disabled</h1>
+          <p className="text-red-100">
             Your account has been disabled by admin due to suspicious activity.
           </p>
-          <p className="text-sm text-slate-300">
-            Please contact admin/support for reactivation.
-          </p>
+          <div className="rounded-xl bg-red-500/10 border border-red-300/30 p-4">
+            <p className="text-sm text-red-100">Please contact admin/support for reactivation.</p>
+            {supportContactEmail ? (
+              <a className="inline-block mt-2 text-sm font-semibold underline text-red-200" href={`mailto:${supportContactEmail}`}>
+                {supportContactEmail}
+              </a>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -115,6 +152,9 @@ const ProtectedRoute = ({ children }) => {
             <h1 className="text-3xl font-bold">Account Locked</h1>
             <p>Your account has been locked due to suspicious activity detected during an exam.</p>
             <p className="text-sm">Lock expires on: {lockedUntil.toLocaleDateString('en-IN')}</p>
+            {supportContactEmail ? (
+              <p className="text-sm">Support: <a className="font-semibold underline" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a></p>
+            ) : null}
           </div>
         </div>
       );
@@ -218,6 +258,7 @@ function App() {
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
+          <Route path="admin/support-contact" element={<AdminRoute><AdminSupportContact /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
           <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />

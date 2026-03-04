@@ -15,6 +15,7 @@ const Login = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
   const [inlineNotice, setInlineNotice] = useState('');
+  const [supportContactEmail, setSupportContactEmail] = useState('');
   const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
 
@@ -42,7 +43,26 @@ const Login = () => {
       const cleanUrl = `${window.location.origin}/login`;
       window.history.replaceState({}, '', cleanUrl);
     }
+
+    const loadSupportEmail = async () => {
+      try {
+        const { data } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'support_contact_email')
+          .maybeSingle();
+        setSupportContactEmail(data?.value || '');
+      } catch {
+        setSupportContactEmail('');
+      }
+    };
+    loadSupportEmail();
   }, []);
+
+  const getSupportLine = () =>
+    supportContactEmail
+      ? `Please contact ${supportContactEmail}.`
+      : 'Please contact support.';
 
   const askTakeoverConfirmation = () =>
     new Promise((resolve) => {
@@ -106,15 +126,15 @@ const Login = () => {
       profile = bootstrapProfile;
     }
 
-    if (profile.is_disabled) {
-      await supabase.auth.signOut();
-      setAlertModal({
-        show: true,
-        title: 'Account Disabled',
-        message: 'Your account has been disabled by an administrator. Please contact support.',
-        type: 'error'
-      });
-      return;
+      if (profile.is_disabled) {
+        await supabase.auth.signOut();
+        setAlertModal({
+          show: true,
+          title: 'Account Disabled',
+          message: `Your account has been disabled by an administrator. ${getSupportLine()}`,
+          type: 'error'
+        });
+        return;
     }
 
     if (!profile.terms_accepted || !profile.google_profile_completed) {
@@ -352,14 +372,14 @@ const Login = () => {
         await supabase.auth.signOut();
         setAlertModal({
           show: true,
-          title: userProfile.deleted_at ? 'Account Deleted' : 'Account Disabled',
-          message: userProfile.deleted_at
-            ? (userProfile.deleted_reason
-              ? `Your account was deleted. Reason: ${userProfile.deleted_reason}`
-              : 'Your account was deleted. Please contact support.')
-            : 'Your account has been disabled by an administrator. Please contact support.',
-          type: 'error'
-        });
+            title: userProfile.deleted_at ? 'Account Deleted' : 'Account Disabled',
+            message: userProfile.deleted_at
+              ? (userProfile.deleted_reason
+                ? `Your account was deleted. Reason: ${userProfile.deleted_reason}`
+                : `Your account was deleted. ${getSupportLine()}`)
+            : `Your account has been disabled by an administrator. ${getSupportLine()}`,
+            type: 'error'
+          });
         setLoggingIn(false);
         return;
       }
@@ -457,12 +477,6 @@ const Login = () => {
         onClose={() => setToast({ show: false, message: '', type: 'success' })}
       />
       <div className="relative overflow-hidden bg-white/95 backdrop-blur p-8 rounded-2xl shadow-xl border border-slate-100 w-full max-w-md">
-        <img
-          src="/skillpro-logo.png"
-          alt=""
-          aria-hidden="true"
-          className="absolute inset-0 m-auto w-56 h-56 object-contain opacity-5 pointer-events-none select-none"
-        />
         <div className="text-center mb-6">
           <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-14 h-14 rounded-full mx-auto mb-3 object-cover border border-slate-200" />
           <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>

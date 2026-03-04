@@ -30,7 +30,6 @@ export default function AdminMFAVerify() {
     if (!loading && codeStr.length === 6 && codeStr.split("").every((d) => d)) {
       verify(codeStr);
     }
-    // eslint-disable-next-line
   }, [codeStr, loading]);
 
   const handleChange = (e, idx) => {

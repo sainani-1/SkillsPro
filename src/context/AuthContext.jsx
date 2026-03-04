@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   clearStoredSessionKey,
@@ -14,6 +14,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const conflictStateRef = useRef({ strikes: 0, lastAt: 0 });
 
   const PROFILE_CACHE_KEY = 'profile_cache';
 
@@ -114,6 +115,7 @@ export const AuthProvider = ({ children }) => {
 
     let cancelled = false;
     let checking = false;
+    conflictStateRef.current = { strikes: 0, lastAt: 0 };
 
     const validateAndHeartbeat = async () => {
       if (checking || cancelled) return;
@@ -122,9 +124,18 @@ export const AuthProvider = ({ children }) => {
         const owned = await isCurrentDeviceSessionOwner(user.id);
         if (cancelled) return;
         if (owned === false) {
-          await handleSingleSessionConflict(user.id);
+          const now = Date.now();
+          const prev = conflictStateRef.current;
+          const withinWindow = now - prev.lastAt < 15000;
+          const nextStrikes = withinWindow ? prev.strikes + 1 : 1;
+          conflictStateRef.current = { strikes: nextStrikes, lastAt: now };
+          // Require repeated mismatches to reduce accidental logouts from transient/stale checks.
+          if (nextStrikes >= 2) {
+            await handleSingleSessionConflict(user.id);
+          }
           return;
         }
+        conflictStateRef.current = { strikes: 0, lastAt: 0 };
         if (owned === true) {
           await heartbeatSingleSession(user.id);
         }

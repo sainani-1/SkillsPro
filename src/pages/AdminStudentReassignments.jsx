@@ -84,14 +84,12 @@ const AdminStudentReassignments = () => {
 
   useEffect(() => {
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     loadSourceStudents(fromTeacherId).catch((error) => {
       openPopup('Load failed', error.message || 'Unable to load source students.', 'error');
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromTeacherId]);
 
   const filteredStudents = useMemo(() => {

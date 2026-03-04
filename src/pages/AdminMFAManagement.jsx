@@ -27,7 +27,6 @@ const AdminMFAManagement = () => {
 
   useEffect(() => {
     loadFactors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleUnregister = async (factorId) => {

@@ -42,7 +42,7 @@ const AdminCourses = () => {
   const [message, setMessage] = useState('');
   const [expandedCourse, setExpandedCourse] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState(null);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [courseSearch, setCourseSearch] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [showNewCourseForm, setShowNewCourseForm] = useState(false);
@@ -56,7 +56,7 @@ const AdminCourses = () => {
     is_free: false
   });
   const [deleteModal, setDeleteModal] = useState({ show: false, courseId: null, courseTitle: '' });
-  const itemsPerPage = 4;
+  const [questionEditor, setQuestionEditor] = useState({ open: false, examId: null, index: 0 });
   const getQuestionDraftKey = (examId) => `exam_questions_draft_${examId}`;
 
   const loadDraftQuestions = (examId) => {
@@ -86,11 +86,15 @@ const AdminCourses = () => {
     }
   };
 
-  const paginatedCourses = courses.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-  const totalPages = Math.ceil(courses.length / itemsPerPage);
+  const filteredCourses = courses.filter((course) => {
+    const q = courseSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      String(course.id || '').toLowerCase().includes(q) ||
+      String(course.title || '').toLowerCase().includes(q) ||
+      String(course.category || '').toLowerCase().includes(q)
+    );
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -341,6 +345,12 @@ const AdminCourses = () => {
     });
   };
 
+  const addQuestionAndOpenEditor = (examId) => {
+    const newIndex = (questions[examId] || []).length;
+    addQuestion(examId);
+    setQuestionEditor({ open: true, examId, index: newIndex });
+  };
+
   const saveQuestionsDraft = (examId) => {
     saveDraftQuestions(examId, questions[examId] || []);
     setMessage('✅ Draft saved. Students cannot see these questions until you publish.');
@@ -356,6 +366,29 @@ const AdminCourses = () => {
       saveDraftQuestions(examId, next[examId]);
       return next;
     });
+  };
+
+  const deleteQuestionWithEditorState = (examId, index) => {
+    const currentLen = (questions[examId] || []).length;
+    deleteQuestion(examId, index);
+    setQuestionEditor(prev => {
+      if (!prev.open || prev.examId !== examId) return prev;
+      const remaining = currentLen - 1;
+      if (remaining <= 0) return { open: false, examId: null, index: 0 };
+      if (index < prev.index) return { ...prev, index: prev.index - 1 };
+      if (index === prev.index) {
+        return { ...prev, index: Math.max(0, Math.min(prev.index, remaining - 1)) };
+      }
+      return prev;
+    });
+  };
+
+  const openQuestionEditor = (examId, index) => {
+    setQuestionEditor({ open: true, examId, index });
+  };
+
+  const closeQuestionEditor = () => {
+    setQuestionEditor({ open: false, examId: null, index: 0 });
   };
 
   const handleQuestionChange = (examId, index, field, value) => {
@@ -440,6 +473,12 @@ const AdminCourses = () => {
     if (!draft) return;
     setQuestions(prev => ({ ...prev, [examId]: draft }));
   }, [activeTab, selectedCourse, exams]);
+
+  useEffect(() => {
+    if (activeTab !== 'questions' || !selectedCourse) {
+      closeQuestionEditor();
+    }
+  }, [activeTab, selectedCourse]);
 
   const handleSaveQuestions = async (examId) => {
     if (!questions[examId]) return;
@@ -549,6 +588,13 @@ const AdminCourses = () => {
     setActiveTab('overview');
   };
 
+  const activeExamId = selectedCourse ? exams[selectedCourse.id]?.id : null;
+  const activeQuestions = activeExamId ? (questions[activeExamId] || []) : [];
+  const editingQuestion =
+    questionEditor.open && questionEditor.examId === activeExamId
+      ? activeQuestions[questionEditor.index]
+      : null;
+
   return (
     <div className="flex h-screen bg-slate-50">
       <AlertModal 
@@ -565,19 +611,47 @@ const AdminCourses = () => {
             <h1 className="text-2xl font-bold text-slate-900">Admin Course Management</h1>
             <p className="text-slate-500 text-sm">Edit course details, exam duration, and video links</p>
           </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={loadData} 
-              className="flex items-center gap-2 text-sm bg-white border px-3 py-2 rounded-lg hover:bg-slate-50"
-            >
-              <RefreshCw size={16} /> Refresh
-            </button>
-            <button 
-              onClick={() => setShowNewCourseForm(true)} 
-              className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            >
-              <Plus size={16} /> Add New Course
-            </button>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+            <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-3">
+              <input
+                type="text"
+                value={courseSearch}
+                onChange={(e) => setCourseSearch(e.target.value)}
+                placeholder="Search courses by title, category, or ID..."
+                className="w-full text-sm outline-none"
+              />
+              {courseSearch && (
+                <button
+                  onClick={() => setCourseSearch('')}
+                  className="text-xs text-slate-500 hover:text-slate-800"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={loadData} 
+                className="flex items-center gap-2 text-sm bg-white border px-3 py-2 rounded-lg hover:bg-slate-50"
+              >
+                <RefreshCw size={16} /> Refresh
+              </button>
+              <button 
+                onClick={() => setShowNewCourseForm(true)} 
+                className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+              >
+                <Plus size={16} /> Add New Course
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 font-semibold">
+              Total Courses: {courses.length}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 font-semibold">
+              Showing: {filteredCourses.length}
+            </span>
           </div>
         </div>
 
@@ -593,10 +667,14 @@ const AdminCourses = () => {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
           No courses found
         </div>
+      ) : filteredCourses.length === 0 ? (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
+          No matching courses for "{courseSearch}"
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4">
-            {paginatedCourses.map(course => (
+            {filteredCourses.map(course => (
               <div key={course.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               {/* Course Header */}
               <div className="p-4 bg-gradient-to-r from-blue-50 to-slate-50 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
@@ -788,72 +866,43 @@ const AdminCourses = () => {
             </div>
             ))}
           </div>
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
-              <button
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-              >
-                ← Previous
-              </button>
-              
-              <div className="flex items-center gap-1">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-2 rounded-lg font-semibold transition-colors ${
-                      currentPage === page
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-              </div>
-              
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-              >
-                Next →
-              </button>
-              
-              <span className="ml-4 text-sm text-slate-600 font-semibold">
-                Page {currentPage} of {totalPages}
-              </span>
-            </div>
-          )}
         </div>
       )}
       </div>
 
-      {/* Side Panel */}
+      {/* Course Details Modal */}
       {selectedCourse && (
-        <div className="w-96 bg-white border-l border-slate-200 shadow-lg flex flex-col overflow-hidden">
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={closeCourseDetail}
+        >
+        <div
+          className="bg-white w-full max-w-5xl h-[90vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Header */}
-          <div className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white flex items-center justify-between">
-            <h2 className="font-bold text-lg">{selectedCourse.title}</h2>
+          <div className="px-6 py-4 bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-600 text-white flex items-center justify-between">
+            <div>
+              <h2 className="font-bold text-xl">{selectedCourse.title}</h2>
+              <p className="text-xs text-blue-100 mt-0.5">
+                ID: {selectedCourse.id} | Category: {selectedCourse.category || 'General'}
+              </p>
+            </div>
             <button
               onClick={closeCourseDetail}
-              className="p-1 hover:bg-blue-600 rounded transition-colors"
+              className="p-1.5 hover:bg-blue-700 rounded-lg transition-colors"
             >
               <X size={20} />
             </button>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 border-b px-4 pt-4">
+          <div className="flex gap-2 border-b px-6 py-3 bg-white">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`px-3 py-2 font-semibold text-sm transition-colors ${
+              className={`px-3 py-1.5 rounded-lg font-semibold text-sm transition-colors ${
                 activeTab === 'overview'
-                  ? 'border-b-2 border-blue-600 text-blue-600'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -861,9 +910,9 @@ const AdminCourses = () => {
             </button>
             <button
               onClick={() => setActiveTab('questions')}
-              className={`px-3 py-2 font-semibold text-sm transition-colors ${
+              className={`px-3 py-1.5 rounded-lg font-semibold text-sm transition-colors ${
                 activeTab === 'questions'
-                  ? 'border-b-2 border-blue-600 text-blue-600'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -871,9 +920,9 @@ const AdminCourses = () => {
             </button>
             <button
               onClick={() => setActiveTab('results')}
-              className={`px-3 py-2 font-semibold text-sm transition-colors ${
+              className={`px-3 py-1.5 rounded-lg font-semibold text-sm transition-colors ${
                 activeTab === 'results'
-                  ? 'border-b-2 border-blue-600 text-blue-600'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -882,10 +931,10 @@ const AdminCourses = () => {
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-slate-50 to-slate-100">
             {/* Overview Tab */}
             {activeTab === 'overview' && (
-              <div className="space-y-4">
+              <div className="space-y-4 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Video Link</label>
                   <input
@@ -938,216 +987,128 @@ const AdminCourses = () => {
 
             {/* Questions Tab */}
             {activeTab === 'questions' && exams[selectedCourse.id] && (
-              <div className="flex gap-6">
-                {/* Sidebar for question navigation */}
-                <div className="min-w-[80px] bg-slate-100 rounded p-3 flex flex-col items-center shadow">
-                  <h4 className="text-xs font-bold mb-2">Questions</h4>
-                  {(questions[exams[selectedCourse.id].id] || []).map((_, idx) => (
-                    <button
-                      key={idx}
-                      className="mb-2 w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 focus:bg-blue-300 focus:outline-none"
-                      onClick={() => {
-                        const el = document.getElementById(`admin-question-${idx}`);
-                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      }}
-                    >
-                      {idx + 1}
-                    </button>
-                  ))}
+              <div className="space-y-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-semibold text-slate-900">Exam Questions ({activeQuestions.length})</h3>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => addQuestionAndOpenEditor(activeExamId)} className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 font-semibold"><Plus size={16} /> Add Question</button>
+                      <button onClick={() => saveQuestionsDraft(activeExamId)} className="flex items-center gap-2 bg-amber-600 text-white px-3 py-2 rounded text-sm hover:bg-amber-700 font-semibold"><Save size={16} /> Save Draft</button>
+                      <button onClick={() => handleSaveQuestions(activeExamId)} disabled={savingId === `questions-${activeExamId}`} className="flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 font-semibold disabled:opacity-60"><Save size={16} /> {savingId === `questions-${activeExamId}` ? 'Publishing...' : 'Publish Questions'}</button>
+                    </div>
+                  </div>
                 </div>
-                {/* Main question list */}
-                <div className="space-y-4 flex-1">
-                  <h3 className="font-semibold text-slate-900">Exam Questions ({(questions[exams[selectedCourse.id].id] || []).length})</h3>
-                  {(questions[exams[selectedCourse.id].id] || []).map((q, idx) => (
-                    <div key={idx} id={`admin-question-${idx}`} className="bg-slate-50 p-3 rounded border border-slate-200 space-y-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold text-slate-700 bg-slate-200 px-2 py-1 rounded">Q{idx + 1}</span>
-                        <button
-                          onClick={() => deleteQuestion(exams[selectedCourse.id].id, idx)}
-                          className="text-red-600 hover:text-red-700 p-1 hover:bg-red-50 rounded transition-colors"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-600 block mb-1">Question Text</label>
-                        <input
-                          type="text"
-                          className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          value={q.question || ''}
-                          onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'question', e.target.value)}
-                          placeholder="Enter question..."
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-600 block mb-1">Question Type</label>
-                        <select
-                          className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          value={q.question_type || 'mcq'}
-                          onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'question_type', e.target.value)}
-                        >
-                          <option value="mcq">MCQ</option>
-                          <option value="coding">Coding</option>
-                        </select>
-                      </div>
-                      {(q.question_type || 'mcq') === 'mcq' ? (
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-600 block">Options (Select correct answer)</label>
-                        {(q.options || []).map((opt, oIdx) => (
-                          <div key={oIdx} className="flex items-center gap-2 p-2 rounded border border-slate-200 hover:bg-white transition-colors"
-                            style={q.correct_index === oIdx ? { backgroundColor: '#dcfce7', borderColor: '#22c55e' } : {}}>
-                            <input
-                              type="radio"
-                              name={`correct-${idx}`}
-                              checked={q.correct_index === oIdx}
-                              onChange={() => handleQuestionChange(exams[selectedCourse.id].id, idx, 'correct_index', oIdx)}
-                              className="w-3 h-3 cursor-pointer"
-                            />
-                            <input
-                              type="text"
-                              className="flex-1 text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                              value={opt}
-                              onChange={e => handleOptionChange(exams[selectedCourse.id].id, idx, oIdx, e.target.value)}
-                              placeholder={`Option ${oIdx + 1}`}
-                            />
-                            {q.correct_index === oIdx && (
-                              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">Correct</span>
-                            )}
+
+                {activeQuestions.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 bg-white border border-slate-200 rounded-xl">No questions added yet</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {activeQuestions.map((q, idx) => (
+                      <div key={idx} role="button" tabIndex={0} onClick={() => openQuestionEditor(activeExamId, idx)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openQuestionEditor(activeExamId, idx); }} className="text-left bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-blue-300 transition cursor-pointer">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-1 rounded">Q{idx + 1}</span>
+                            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${(q.question_type || 'mcq') === 'coding' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>{(q.question_type || 'mcq') === 'coding' ? 'Coding' : 'MCQ'}</span>
                           </div>
-                        ))}
+                          <button type="button" onClick={(e) => { e.stopPropagation(); deleteQuestionWithEditorState(activeExamId, idx); }} className="text-red-600 hover:text-red-700 p-1 hover:bg-red-50 rounded" title="Delete question"><Trash2 size={14} /></button>
+                        </div>
+                        <p className="text-sm text-slate-800 mt-3">{q.question?.trim() || 'No question text yet'}</p>
                       </div>
-                      ) : (
-                        <div className="space-y-3">
+                    ))}
+                  </div>
+                )}
+
+                {editingQuestion && (
+                  <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-4xl max-h-[92vh] overflow-hidden">
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50">
+                        <p className="text-sm font-semibold text-slate-900">Edit Question {questionEditor.index + 1} of {activeQuestions.length}</p>
+                        <button onClick={closeQuestionEditor} className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200"><X size={16} /></button>
+                      </div>
+                      <div className="p-5 overflow-y-auto max-h-[72vh] space-y-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-3">
                           <div>
-                            <label className="text-xs font-semibold text-slate-600 block mb-1">Coding Description</label>
-                            <textarea
-                              className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[90px]"
-                              value={q.coding_description || ''}
-                              onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'coding_description', e.target.value)}
-                              placeholder="Explain the coding task, constraints, and expected behavior..."
-                            />
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Question Text</label>
+                            <textarea className="w-full text-xs p-2 border border-slate-300 rounded-lg min-h-[80px]" value={editingQuestion.question || ''} onChange={e => handleQuestionChange(activeExamId, questionEditor.index, 'question', e.target.value)} placeholder="Enter question..." />
                           </div>
                           <div>
-                            <label className="text-xs font-semibold text-slate-600 block mb-1">Default Language</label>
-                            <select
-                              className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              value={q.coding_language || 'python'}
-                              onChange={e => handleQuestionChange(exams[selectedCourse.id].id, idx, 'coding_language', e.target.value)}
-                            >
-                              {CODING_LANGUAGES.map((lang) => (
-                                <option key={lang} value={lang}>{lang.toUpperCase()}</option>
-                              ))}
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Question Type</label>
+                            <select className="w-full text-xs p-2 border border-slate-300 rounded-lg" value={editingQuestion.question_type || 'mcq'} onChange={e => handleQuestionChange(activeExamId, questionEditor.index, 'question_type', e.target.value)}>
+                              <option value="mcq">MCQ</option>
+                              <option value="coding">Coding</option>
                             </select>
                           </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-600">Shown Test Cases</label>
-                              <button
-                                type="button"
-                                onClick={() => addTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases')}
-                                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
-                              >
-                                + Add Shown
-                              </button>
-                            </div>
-                            {normalizeCases(q.shown_test_cases).map((tc, tcIdx) => (
-                              <div key={`shown-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
-                                <input
-                                  type="text"
-                                  className="text-xs p-2 border border-slate-300 rounded"
-                                  placeholder="Input"
-                                  value={tc.input || ''}
-                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx, 'input', e.target.value)}
-                                />
-                                <input
-                                  type="text"
-                                  className="text-xs p-2 border border-slate-300 rounded"
-                                  placeholder="Expected output"
-                                  value={tc.output || ''}
-                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx, 'output', e.target.value)}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => deleteTestCase(exams[selectedCourse.id].id, idx, 'shown_test_cases', tcIdx)}
-                                  className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-600">Hidden Test Cases</label>
-                              <button
-                                type="button"
-                                onClick={() => addTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases')}
-                                className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200"
-                              >
-                                + Add Hidden
-                              </button>
-                            </div>
-                            {normalizeCases(q.hidden_test_cases).map((tc, tcIdx) => (
-                              <div key={`hidden-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
-                                <input
-                                  type="text"
-                                  className="text-xs p-2 border border-slate-300 rounded"
-                                  placeholder="Input"
-                                  value={tc.input || ''}
-                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx, 'input', e.target.value)}
-                                />
-                                <input
-                                  type="text"
-                                  className="text-xs p-2 border border-slate-300 rounded"
-                                  placeholder="Expected output"
-                                  value={tc.output || ''}
-                                  onChange={e => updateTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx, 'output', e.target.value)}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => deleteTestCase(exams[selectedCourse.id].id, idx, 'hidden_test_cases', tcIdx)}
-                                  className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
                         </div>
-                      )}
+
+                        {(editingQuestion.question_type || 'mcq') === 'mcq' ? (
+                          <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-600 block">Options</label>
+                            {(editingQuestion.options || []).map((opt, oIdx) => (
+                              <div key={oIdx} className="flex items-center gap-2 p-2 rounded border border-slate-200" style={editingQuestion.correct_index === oIdx ? { backgroundColor: '#dcfce7', borderColor: '#22c55e' } : {}}>
+                                <input type="radio" name={`correct-editor-${questionEditor.index}`} checked={editingQuestion.correct_index === oIdx} onChange={() => handleQuestionChange(activeExamId, questionEditor.index, 'correct_index', oIdx)} className="w-3 h-3" />
+                                <input type="text" className="flex-1 text-xs p-1.5 border border-slate-300 rounded" value={opt} onChange={e => handleOptionChange(activeExamId, questionEditor.index, oIdx, e.target.value)} placeholder={`Option ${oIdx + 1}`} />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="text-xs font-semibold text-slate-600 block mb-1">Coding Description</label>
+                              <textarea className="w-full text-xs p-2 border border-slate-300 rounded-lg min-h-[140px]" value={editingQuestion.coding_description || ''} onChange={e => handleQuestionChange(activeExamId, questionEditor.index, 'coding_description', e.target.value)} placeholder="Describe problem statement..." />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-600 block mb-1">Default Language</label>
+                              <select className="w-full md:w-[220px] text-xs p-2 border border-slate-300 rounded-lg" value={editingQuestion.coding_language || 'python'} onChange={e => handleQuestionChange(activeExamId, questionEditor.index, 'coding_language', e.target.value)}>
+                                {CODING_LANGUAGES.map((lang) => (<option key={lang} value={lang}>{lang.toUpperCase()}</option>))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-slate-700">Shown Test Cases ({normalizeCases(editingQuestion.shown_test_cases).length})</label>
+                                <button type="button" onClick={() => addTestCase(activeExamId, questionEditor.index, 'shown_test_cases')} className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"><Plus size={12} /> Add Shown</button>
+                              </div>
+                              {normalizeCases(editingQuestion.shown_test_cases).map((tc, tcIdx) => (
+                                <div key={`shown-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
+                                  <textarea className="text-xs p-2 border border-slate-300 rounded min-h-[68px]" placeholder="Input" value={tc.input || ''} onChange={e => updateTestCase(activeExamId, questionEditor.index, 'shown_test_cases', tcIdx, 'input', e.target.value)} />
+                                  <textarea className="text-xs p-2 border border-slate-300 rounded min-h-[68px]" placeholder="Expected output" value={tc.output || ''} onChange={e => updateTestCase(activeExamId, questionEditor.index, 'shown_test_cases', tcIdx, 'output', e.target.value)} />
+                                  <button type="button" onClick={() => deleteTestCase(activeExamId, questionEditor.index, 'shown_test_cases', tcIdx)} className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs h-fit">Delete</button>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-slate-700">Hidden Test Cases ({normalizeCases(editingQuestion.hidden_test_cases).length})</label>
+                                <button type="button" onClick={() => addTestCase(activeExamId, questionEditor.index, 'hidden_test_cases')} className="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200"><Plus size={12} /> Add Hidden</button>
+                              </div>
+                              {normalizeCases(editingQuestion.hidden_test_cases).map((tc, tcIdx) => (
+                                <div key={`hidden-${tcIdx}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 p-2 border border-slate-200 rounded bg-white">
+                                  <textarea className="text-xs p-2 border border-slate-300 rounded min-h-[68px]" placeholder="Input" value={tc.input || ''} onChange={e => updateTestCase(activeExamId, questionEditor.index, 'hidden_test_cases', tcIdx, 'input', e.target.value)} />
+                                  <textarea className="text-xs p-2 border border-slate-300 rounded min-h-[68px]" placeholder="Expected output" value={tc.output || ''} onChange={e => updateTestCase(activeExamId, questionEditor.index, 'hidden_test_cases', tcIdx, 'output', e.target.value)} />
+                                  <button type="button" onClick={() => deleteTestCase(activeExamId, questionEditor.index, 'hidden_test_cases', tcIdx)} className="text-red-600 hover:text-red-700 px-2 py-1 border border-red-200 rounded text-xs h-fit">Delete</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200 bg-white">
+                        <button type="button" onClick={() => deleteQuestionWithEditorState(activeExamId, questionEditor.index)} className="text-red-600 hover:text-red-700 px-3 py-2 border border-red-200 rounded text-xs font-semibold">Delete Question</button>
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => setQuestionEditor(prev => ({ ...prev, index: Math.max(prev.index - 1, 0) }))} disabled={questionEditor.index === 0} className="px-3 py-2 border border-slate-300 rounded text-xs font-semibold disabled:opacity-50">Previous</button>
+                          <button type="button" onClick={() => setQuestionEditor(prev => ({ ...prev, index: Math.min(prev.index + 1, Math.max(activeQuestions.length - 1, 0)) }))} disabled={questionEditor.index >= activeQuestions.length - 1} className="px-3 py-2 border border-slate-300 rounded text-xs font-semibold disabled:opacity-50">Next</button>
+                          <button type="button" onClick={closeQuestionEditor} className="px-3 py-2 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700">Done</button>
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                  {(questions[exams[selectedCourse.id].id] || []).length === 0 && (
-                    <div className="text-center py-8 text-slate-500">
-                      <p className="text-sm mb-3">No questions added yet</p>
-                    </div>
-                  )}
-                  <button
-                    onClick={() => addQuestion(exams[selectedCourse.id].id)}
-                    className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 transition-colors font-semibold"
-                  >
-                    <Plus size={16} /> Add Question
-                  </button>
-                  <button
-                    onClick={() => saveQuestionsDraft(exams[selectedCourse.id].id)}
-                    className="w-full flex items-center justify-center gap-2 bg-amber-600 text-white px-3 py-2 rounded text-sm hover:bg-amber-700 transition-colors font-semibold"
-                  >
-                    <Save size={16} /> Save Draft
-                  </button>
-                  <button
-                    onClick={() => handleSaveQuestions(exams[selectedCourse.id].id)}
-                    disabled={savingId === `questions-${exams[selectedCourse.id].id}`}
-                    className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold disabled:opacity-60"
-                  >
-                    <Save size={16} /> {savingId === `questions-${exams[selectedCourse.id].id}` ? 'Publishing...' : 'Publish Questions'}
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             )}
-
             {/* Results Tab */}
             {activeTab === 'results' && exams[selectedCourse.id] && (
-              <div className="space-y-3">
+              <div className="space-y-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                 <h3 className="font-semibold text-slate-900">Student Results</h3>
                 
                 {(submissions[exams[selectedCourse.id].id] || []).length === 0 ? (
@@ -1191,6 +1152,7 @@ const AdminCourses = () => {
               </div>
             )}
           </div>
+        </div>
         </div>
       )}
 
@@ -1363,3 +1325,6 @@ const AdminCourses = () => {
 };
 
 export default AdminCourses;
+
+
+
