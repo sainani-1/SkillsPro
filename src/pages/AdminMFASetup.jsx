@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { QRCodeSVG } from "qrcode.react";
 import usePopup from '../hooks/usePopup.jsx';
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || "/skillpro-logo.png";
+const MFA_ISSUER = "SkillPro";
 
 export default function AdminMFASetup() {
 
@@ -18,6 +20,19 @@ export default function AdminMFASetup() {
   useEffect(() => {
     // Reserved for future autofill / saved names.
   }, []);
+
+  const buildSkillProOtpUri = (uri, selectedLabel) => {
+    if (!uri) return null;
+    try {
+      const otpUrl = new URL(uri);
+      const accountLabel = selectedLabel?.trim() || "Admin";
+      otpUrl.pathname = `/${MFA_ISSUER}:${accountLabel}`;
+      otpUrl.searchParams.set("issuer", MFA_ISSUER);
+      return otpUrl.toString();
+    } catch {
+      return uri;
+    }
+  };
 
   const enrollMFA = async () => {
     if (!selectedName) {
@@ -38,7 +53,8 @@ export default function AdminMFASetup() {
       return;
     }
 
-    setQr(data.totp.qr_code);
+    const otpUri = buildSkillProOtpUri(data?.totp?.uri, selectedName);
+    setQr(otpUri || data?.totp?.qr_code || null);
     setFactorId(data.id);
     setStep("qr");
     setLoading(false);
@@ -138,11 +154,21 @@ export default function AdminMFASetup() {
         {step === "qr" && qr && (
           <div className="space-y-5">
             <div className="relative w-64 h-64 mx-auto rounded-2xl border border-slate-200 p-3 bg-white shadow-sm">
-              <img
-                src={qr}
-                alt="MFA QR"
-                className="w-full h-full object-contain rounded-lg"
-              />
+              {qr.startsWith("otpauth://") ? (
+                <QRCodeSVG
+                  value={qr}
+                  size={232}
+                  level="M"
+                  includeMargin={false}
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <img
+                  src={qr}
+                  alt="MFA QR"
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              )}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-12 h-12 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center overflow-hidden">
                   <img src={LOGO_URL} alt="Logo" className="w-9 h-9 object-contain rounded-full" />
