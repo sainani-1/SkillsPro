@@ -126,3 +126,15 @@ export const heartbeatSingleSession = async (userId) => {
     .eq('user_id', userId)
     .eq('active_session_key', localKey);
 };
+
+export const releaseSingleSession = async (userId) => {
+  if (!userId) return;
+  const localKey = getStoredSessionKey(userId);
+  if (!localKey) return;
+
+  await supabase
+    .from('active_user_sessions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('active_session_key', localKey);
+};

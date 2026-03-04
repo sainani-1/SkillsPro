@@ -18,6 +18,7 @@ const AdminSettings = () => {
   const [examDuration, setExamDuration] = useState(60);
   const [minQuestions, setMinQuestions] = useState(25);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [supportContactEmail, setSupportContactEmail] = useState('');
   const [registrationPaused, setRegistrationPaused] = useState(false);
   const [plans, setPlans] = useState([]);
   const [planForm, setPlanForm] = useState(DEFAULT_PLAN_FORM);
@@ -51,7 +52,7 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['exam_duration', 'premium_cost', 'registration_paused', 'min_questions', 'public_plans']);
+        .in('key', ['exam_duration', 'premium_cost', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email']);
 
       if (error) throw error;
 
@@ -61,6 +62,7 @@ const AdminSettings = () => {
         if (setting.key === 'registration_paused') setRegistrationPaused(setting.value === 'true');
         if (setting.key === 'min_questions') setMinQuestions(parseInt(setting.value, 10) || 25);
         if (setting.key === 'public_plans') setPlans(parsePlans(setting.value));
+        if (setting.key === 'support_contact_email') setSupportContactEmail(setting.value || '');
       });
     } catch (error) {
       openPopup('Error', `Failed to load settings: ${error.message}`, 'error');
@@ -83,6 +85,7 @@ const AdminSettings = () => {
       await saveSetting('premium_cost', premiumCost);
       await saveSetting('registration_paused', registrationPaused);
       await saveSetting('min_questions', minQuestions);
+      await saveSetting('support_contact_email', supportContactEmail.trim());
       openPopup('Success', 'General settings saved successfully.', 'success');
     } catch (error) {
       openPopup('Error', `Failed to save settings: ${error.message}`, 'error');
@@ -194,6 +197,16 @@ const AdminSettings = () => {
               className="w-full p-3 border border-slate-300 rounded-lg"
               value={premiumCost}
               onChange={(e) => setPremiumCost(parseInt(e.target.value, 10) || 199)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Support Contact Email</label>
+            <input
+              type="email"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              placeholder="support@yourdomain.com"
+              value={supportContactEmail}
+              onChange={(e) => setSupportContactEmail(e.target.value)}
             />
           </div>
           <div className="flex items-end">

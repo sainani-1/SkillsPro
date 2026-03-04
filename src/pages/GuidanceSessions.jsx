@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import AlertModal from '../components/AlertModal';
@@ -8,7 +9,7 @@ import useDialog from '../hooks/useDialog.jsx';
 
 const GuidanceSessions = () => {
   const { confirm, dialogNode } = useDialog();
-  const { profile } = useAuth();
+  const { profile, isPremium } = useAuth();
   const [requests, setRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -29,6 +30,8 @@ const GuidanceSessions = () => {
   const [sessionMeetLink, setSessionMeetLink] = useState('');
   const [sessionLinkActiveUntil, setSessionLinkActiveUntil] = useState('');
   const [scheduling, setScheduling] = useState(false);
+  const [premiumCost, setPremiumCost] = useState(199);
+  const [supportContactEmail, setSupportContactEmail] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
@@ -40,6 +43,17 @@ const GuidanceSessions = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      const { data: settingRows } = await supabase
+        .from('settings')
+        .select('key, value')
+        .in('key', ['premium_cost', 'support_contact_email']);
+
+      const settingsMap = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value || '']));
+      if (settingsMap.premium_cost) {
+        setPremiumCost(parseInt(settingsMap.premium_cost, 10) || 199);
+      }
+      setSupportContactEmail(settingsMap.support_contact_email || '');
+
       if (profile.role === 'student') {
         // Fetch student's guidance requests
         const { data: reqs, error: reqError } = await supabase
@@ -179,6 +193,8 @@ const GuidanceSessions = () => {
     return <LoadingSpinner message="Loading guidance sessions..." />;
   }
 
+  const studentCanRequestSession = profile.role === 'student' && isPremium(profile);
+
   const isSessionCompleted = (session) => {
     if (!session) return false;
     if (session.status === 'completed') return true;
@@ -188,6 +204,15 @@ const GuidanceSessions = () => {
   };
 
   const submitRequest = async () => {
+    if (!isPremium(profile)) {
+      setAlertModal({
+        show: true,
+        title: 'Premium Required',
+        message: 'Upgrade to Premium to request mentorship/live sessions.',
+        type: 'warning'
+      });
+      return;
+    }
     if (!topic.trim()) {
       setAlertModal({
         show: true,
@@ -416,34 +441,58 @@ const GuidanceSessions = () => {
           {/* Request Form */}
           <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
             <h2 className="text-lg font-bold mb-4">Request Mentorship Session</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium mb-2">Topic</label>
-                <input 
-                  type="text"
-                  value={topic}
-                  onChange={e => setTopic(e.target.value)}
-                  placeholder="e.g., Career path in web development"
-                  className="w-full border border-slate-200 rounded-lg p-3"
-                />
+            {studentCanRequestSession ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Topic</label>
+                  <input 
+                    type="text"
+                    value={topic}
+                    onChange={e => setTopic(e.target.value)}
+                    placeholder="e.g., Career path in web development"
+                    className="w-full border border-slate-200 rounded-lg p-3"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Notes (optional)</label>
+                  <textarea 
+                    value={notes}
+                    onChange={e => setNotes(e.target.value)}
+                    placeholder="Additional details..."
+                    className="w-full border border-slate-200 rounded-lg p-3"
+                    rows={3}
+                  />
+                </div>
+                <button 
+                  onClick={submitRequest}
+                  className="bg-nani-dark text-white px-6 py-2 rounded-lg hover:bg-nani-accent transition-colors"
+                >
+                  Submit Request
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Notes (optional)</label>
-                <textarea 
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  placeholder="Additional details..."
-                  className="w-full border border-slate-200 rounded-lg p-3"
-                  rows={3}
-                />
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <p className="text-sm text-amber-900 font-semibold">
+                  Premium required to request live mentorship sessions with teachers.
+                </p>
+                <p className="text-sm text-amber-800">
+                  Upgrade to Premium for just ₹{premiumCost} and unlock teacher guidance sessions.
+                </p>
+                {supportContactEmail ? (
+                  <p className="text-sm text-amber-900">
+                    Need help? Contact: <a className="font-semibold underline" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a>
+                  </p>
+                ) : (
+                  <p className="text-sm text-amber-900">Need help? Please contact admin support.</p>
+                )}
+                <Link
+                  to="/app/payment"
+                  className="inline-flex items-center justify-center rounded-lg bg-amber-600 text-white px-4 py-2 font-semibold hover:bg-amber-700 transition-colors"
+                >
+                  Upgrade to Premium
+                </Link>
               </div>
-              <button 
-                onClick={submitRequest}
-                className="bg-nani-dark text-white px-6 py-2 rounded-lg hover:bg-nani-accent transition-colors"
-              >
-                Submit Request
-              </button>
-            </div>
+            )}
           </div>
 
           {/* Request History */}

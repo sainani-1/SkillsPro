@@ -43,8 +43,6 @@ const Layout = () => {
       message.includes('access to fetch')
     );
   };
-  const isTargetUserIdColumnError = (err) =>
-    String(err?.message || '').toLowerCase().includes('target_user_id');
   const extractLegacyTargetUserId = (text) => {
     const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
     return match?.[1] || null;
@@ -160,37 +158,11 @@ const Layout = () => {
         const roleScopedRes = await supabase
           .from('admin_notifications')
           .select('id, content')
-          .in('target_role', ['all', profile.role])
-          .is('target_user_id', null)
+          .or(`target_role.eq.all,target_role.eq.${profile.role}`)
           .order('created_at', { ascending: false });
 
-        let notifications = roleScopedRes.data || [];
-        let notifError = roleScopedRes.error;
-
-        if (notifError && isTargetUserIdColumnError(notifError)) {
-          const legacy = await supabase
-            .from('admin_notifications')
-            .select('id, content')
-            .or(`target_role.eq.all,target_role.eq.${profile.role}`)
-            .order('created_at', { ascending: false });
-          notifications = legacy.data || [];
-          notifError = legacy.error;
-        } else if (!notifError) {
-          const targetedRes = await supabase
-            .from('admin_notifications')
-            .select('id, content')
-            .eq('target_user_id', profile.id)
-            .order('created_at', { ascending: false });
-
-          if (targetedRes.error && !isTargetUserIdColumnError(targetedRes.error)) {
-            notifError = targetedRes.error;
-          } else if (!targetedRes.error && targetedRes.data?.length) {
-            const idSet = new Set(notifications.map((n) => n.id));
-            targetedRes.data.forEach((n) => {
-              if (!idSet.has(n.id)) notifications.push(n);
-            });
-          }
-        }
+        const notifications = roleScopedRes.data || [];
+        const notifError = roleScopedRes.error;
         if (notifError) throw notifError;
         let visibleNotifications = (notifications || []).filter((n) => {
           const legacyTarget = extractLegacyTargetUserId(n.content);

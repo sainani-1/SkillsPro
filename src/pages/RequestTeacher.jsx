@@ -5,7 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import AlertModal from '../components/AlertModal';
 
 const RequestTeacher = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isPremium } = useAuth();
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sendingRequest, setSendingRequest] = useState(false);
@@ -152,6 +152,33 @@ const RequestTeacher = () => {
 
   if (loading) {
     return <LoadingSpinner message="Loading teachers..." />;
+  }
+
+  const isFreeStudent = profile?.role === 'student' && !isPremium(profile);
+
+  if (isFreeStudent) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">Request Teacher Assignment</h1>
+          <p className="text-slate-600">
+            Browse available teachers and send a request, or let admin assign one for you.
+          </p>
+        </div>
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-6">
+          <h2 className="text-xl font-bold text-amber-900 mb-2">Upgrade to Premium</h2>
+          <p className="text-amber-800 mb-4">
+            Teacher assignment requests are available for premium members only.
+          </p>
+          <a
+            href="/app/payment"
+            className="inline-block px-5 py-2.5 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700"
+          >
+            Upgrade Now
+          </a>
+        </div>
+      </div>
+    );
   }
 
   return (

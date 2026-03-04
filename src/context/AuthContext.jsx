@@ -4,6 +4,7 @@ import {
   clearStoredSessionKey,
   heartbeatSingleSession,
   isCurrentDeviceSessionOwner,
+  releaseSingleSession,
   setSingleSessionNotice
 } from '../utils/singleSession';
 
@@ -187,6 +188,12 @@ export const AuthProvider = ({ children }) => {
 
   const signOut = async () => {
     const currentUserId = user?.id || profile?.id;
+    // Best effort: release active-session lock before auth token is cleared.
+    try {
+      await releaseSingleSession(currentUserId);
+    } catch (error) {
+      // Ignore release failures; local sign-out should still proceed.
+    }
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);

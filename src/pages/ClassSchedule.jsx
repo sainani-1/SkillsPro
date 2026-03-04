@@ -6,7 +6,7 @@ import { Calendar, Plus, Clock, Video, ExternalLink, Trash2, X } from 'lucide-re
 import AlertModal from '../components/AlertModal';
 
 const ClassSchedule = () => {
-  const { profile } = useAuth();
+  const { profile, isPremium } = useAuth();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -321,6 +321,34 @@ const ClassSchedule = () => {
     });
     loadSessions();
   };
+
+  const isFreeStudent = profile?.role === 'student' && !isPremium(profile);
+
+  if (isFreeStudent) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Class Schedule</h1>
+            <p className="text-slate-500">Manage daily live sessions (9-10 AM, 5-6 PM)</p>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-6">
+          <h2 className="text-xl font-bold text-amber-900 mb-2">Upgrade to Premium</h2>
+          <p className="text-amber-800 mb-4">
+            Live classes are available for premium members only.
+          </p>
+          <a
+            href="/app/payment"
+            className="inline-block px-5 py-2.5 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700"
+          >
+            Upgrade Now
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

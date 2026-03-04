@@ -23,8 +23,6 @@ export default function Notifications() {
       message.includes('access to fetch')
     );
   };
-  const isTargetUserIdColumnError = (err) =>
-    String(err?.message || '').toLowerCase().includes('target_user_id');
   const extractLegacyTargetUserId = (text) => {
     const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
     return match?.[1] || null;
@@ -110,41 +108,15 @@ export default function Notifications() {
         return;
       }
 
-      // Fetch notifications based on role + direct user targeting.
+      // Fetch notifications using role scope only (schema-safe across deployments).
       const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, target_user_id, created_at')
-        .in('target_role', ['all', user.role])
-        .is('target_user_id', null)
+        .select('id, title, content, type, target_role, created_at')
+        .or(`target_role.eq.all,target_role.eq.${user.role}`)
         .order('created_at', { ascending: false });
 
-      let data = roleScopedRes.data || [];
-      let fetchError = roleScopedRes.error;
-
-      if (fetchError && isTargetUserIdColumnError(fetchError)) {
-        const legacy = await supabase
-          .from('admin_notifications')
-          .select('id, title, content, type, target_role, created_at')
-          .or(`target_role.eq.all,target_role.eq.${user.role}`)
-          .order('created_at', { ascending: false });
-        data = legacy.data || [];
-        fetchError = legacy.error;
-      } else if (!fetchError) {
-        const targetedRes = await supabase
-          .from('admin_notifications')
-          .select('id, title, content, type, target_role, target_user_id, created_at')
-          .eq('target_user_id', user.id)
-          .order('created_at', { ascending: false });
-        if (targetedRes.error && !isTargetUserIdColumnError(targetedRes.error)) {
-          fetchError = targetedRes.error;
-        } else if (!targetedRes.error && targetedRes.data?.length) {
-          const byId = new Map(data.map((n) => [n.id, n]));
-          targetedRes.data.forEach((n) => byId.set(n.id, n));
-          data = Array.from(byId.values()).sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
-        }
-      }
+      const data = roleScopedRes.data || [];
+      const fetchError = roleScopedRes.error;
 
       if (fetchError) throw fetchError;
       const visibleData = (data || [])
