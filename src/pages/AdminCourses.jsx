@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import AlertModal from '../components/AlertModal';
 import { Save, RefreshCw, Edit2, X, Plus, Trash2, Award } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../context/AuthContext';
 
 const CODING_LANGUAGES = ['python', 'java', 'cpp', 'c'];
 const makeDefaultQuestion = (examId, orderIndex = 0) => ({
@@ -31,7 +32,24 @@ function normalizeCases(value) {
   return [];
 }
 
+function extractMissingExamQuestionColumn(error) {
+  const text = [error?.message, error?.details, error?.hint].filter(Boolean).join(' ');
+  const patterns = [
+    /Could not find the ['"]([^'"]+)['"] column/i,
+    /column ['"]([^'"]+)['"]/i,
+    /column "([^"]+)"/i,
+    /missing column[:\s]+([a-zA-Z_][a-zA-Z0-9_]*)/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
 const AdminCourses = () => {
+  const { profile } = useAuth();
+  const isTeacher = profile?.role === 'teacher';
   const [courses, setCourses] = useState([]);
   const [minQuestionsByCourse, setMinQuestionsByCourse] = useState({});
   const [exams, setExams] = useState({});
@@ -99,6 +117,28 @@ const AdminCourses = () => {
   const loadData = async () => {
     setLoading(true);
     setMessage('');
+    let teacherAllowedCourseIds = null;
+
+    if (isTeacher && profile?.id) {
+      const { data: assignedStudents } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'student')
+        .eq('assigned_teacher_id', profile.id);
+
+      const studentIds = (assignedStudents || []).map((s) => s.id).filter(Boolean);
+      if (studentIds.length === 0) {
+        teacherAllowedCourseIds = [];
+      } else {
+        const { data: enrollmentRows } = await supabase
+          .from('enrollments')
+          .select('course_id')
+          .in('student_id', studentIds);
+        teacherAllowedCourseIds = Array.from(
+          new Set((enrollmentRows || []).map((r) => r.course_id).filter(Boolean))
+        );
+      }
+    }
     
     // Load courses
     const { data: coursesData, error: coursesError } = await supabase
@@ -109,10 +149,13 @@ const AdminCourses = () => {
     if (coursesError) {
       setMessage(coursesError.message);
     } else {
-      setCourses(coursesData || []);
+      const scopedCourses = isTeacher
+        ? (coursesData || []).filter((c) => (teacherAllowedCourseIds || []).includes(c.id))
+        : (coursesData || []);
+      setCourses(scopedCourses);
       // Load min_questions for each course
       const minMap = {};
-      coursesData?.forEach(c => {
+      scopedCourses?.forEach(c => {
         minMap[c.id] = c.min_questions || null;
       });
       setMinQuestionsByCourse(minMap);
@@ -124,7 +167,10 @@ const AdminCourses = () => {
       .select('*');
     
     const examsMap = {};
-    examsData?.forEach(exam => {
+    const scopedExams = isTeacher
+      ? (examsData || []).filter((e) => (teacherAllowedCourseIds || []).includes(e.course_id))
+      : (examsData || []);
+    scopedExams?.forEach(exam => {
       examsMap[exam.course_id] = exam;
     });
     setExams(examsMap);
@@ -135,7 +181,9 @@ const AdminCourses = () => {
       .select('*');
     
     const questionsMap = {};
-    questionsData?.forEach(q => {
+    const allowedExamIds = new Set(Object.values(examsMap).map((e) => e.id));
+    const scopedQuestions = (questionsData || []).filter((q) => allowedExamIds.has(q.exam_id));
+    scopedQuestions?.forEach(q => {
       if (!questionsMap[q.exam_id]) questionsMap[q.exam_id] = [];
       questionsMap[q.exam_id].push(q);
     });
@@ -158,8 +206,9 @@ const AdminCourses = () => {
   };
 
   useEffect(() => {
+    if (!profile?.id) return;
     loadData();
-  }, []);
+  }, [profile?.id, profile?.role]);
 
   const handleCourseChange = (id, field, value) => {
     setCourses(prev => prev.map(c => {
@@ -188,6 +237,15 @@ const AdminCourses = () => {
   };
 
   const handleSaveCourse = async (course) => {
+    if (isTeacher) {
+      setAlertModal({
+        show: true,
+        title: 'Access Restricted',
+        message: 'Teachers can conduct/publish tests only. Course editing is admin-only.',
+        type: 'warning'
+      });
+      return;
+    }
     setSavingId(`course-${course.id}`);
     setMessage('');
     const { error } = await supabase
@@ -211,6 +269,15 @@ const AdminCourses = () => {
   };
 
   const handleCreateCourse = async () => {
+    if (isTeacher) {
+      setAlertModal({
+        show: true,
+        title: 'Access Restricted',
+        message: 'Creating courses is admin-only.',
+        type: 'warning'
+      });
+      return;
+    }
     if (!newCourse.title || !newCourse.category) {
       setAlertModal({
         show: true,
@@ -271,6 +338,15 @@ const AdminCourses = () => {
   };
 
   const deleteCourse = async () => {
+    if (isTeacher) {
+      setAlertModal({
+        show: true,
+        title: 'Access Restricted',
+        message: 'Deleting courses is admin-only.',
+        type: 'warning'
+      });
+      return;
+    }
     const courseId = deleteModal.courseId;
     setDeleteModal({ show: false, courseId: null, courseTitle: '' });
 
@@ -508,15 +584,45 @@ const AdminCourses = () => {
         order_index: idx
       }));
 
-      const { error: insertError } = await supabase
-        .from('exam_questions')
-        .insert(questionsToInsert);
+      if (questionsToInsert.length === 0) {
+        throw new Error('Add at least one question before publishing.');
+      }
 
-      if (insertError) throw insertError;
+      let insertPayload = questionsToInsert;
+      for (let i = 0; i < 8; i += 1) {
+        const { error: insertError } = await supabase
+          .from('exam_questions')
+          .insert(insertPayload);
+        if (!insertError) break;
+        const missingCol = extractMissingExamQuestionColumn(insertError);
+        if (!missingCol) throw insertError;
+        insertPayload = insertPayload.map((row) => {
+          const clone = { ...row };
+          delete clone[missingCol];
+          return clone;
+        });
+        if (i === 7) throw insertError;
+      }
       clearDraftQuestions(examId);
+      await supabase
+        .from('exams')
+        .update({ question_set_updated_at: new Date().toISOString() })
+        .eq('id', examId);
       setMessage('✅ Questions published successfully');
+      setAlertModal({
+        show: true,
+        title: 'Published',
+        message: `Questions published successfully (${questionsToInsert.length} question${questionsToInsert.length > 1 ? 's' : ''}).`,
+        type: 'success'
+      });
     } catch (err) {
       setMessage(`Error: ${err.message}`);
+      setAlertModal({
+        show: true,
+        title: 'Publish Failed',
+        message: err.message || 'Failed to publish questions.',
+        type: 'error'
+      });
     }
 
     setSavingId(null);
@@ -608,8 +714,14 @@ const AdminCourses = () => {
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Admin Course Management</h1>
-            <p className="text-slate-500 text-sm">Edit course details, exam duration, and video links</p>
+            <h1 className="text-2xl font-bold text-slate-900">
+              {isTeacher ? 'Conduct Tests' : 'Admin Course Management'}
+            </h1>
+            <p className="text-slate-500 text-sm">
+              {isTeacher
+                ? 'Create and publish exam questions for courses of your assigned students.'
+                : 'Edit course details, exam duration, and video links'}
+            </p>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
             <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-3">
@@ -636,12 +748,14 @@ const AdminCourses = () => {
               >
                 <RefreshCw size={16} /> Refresh
               </button>
-              <button 
-                onClick={() => setShowNewCourseForm(true)} 
-                className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-              >
-                <Plus size={16} /> Add New Course
-              </button>
+              {!isTeacher && (
+                <button 
+                  onClick={() => setShowNewCourseForm(true)} 
+                  className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  <Plus size={16} /> Add New Course
+                </button>
+              )}
             </div>
           </div>
 
@@ -665,7 +779,7 @@ const AdminCourses = () => {
         <LoadingSpinner message="Loading courses and exams..." />
       ) : courses.length === 0 ? (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
-          No courses found
+          {isTeacher ? '0 tests available right now. Once your students are assigned and enrolled, tests will appear here.' : 'No courses found'}
         </div>
       ) : filteredCourses.length === 0 ? (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
@@ -684,15 +798,17 @@ const AdminCourses = () => {
                   <p className="text-sm text-slate-600">ID: {course.id} • Category: {course.category}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();                      setDeleteModal({ show: true, courseId: course.id, courseTitle: course.title });
-                    }}
-                    className="flex items-center gap-1 bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors font-semibold"
-                    title="Delete Course"
-                  >
-                    <Trash2 size={14} /> Delete
-                  </button>
+                  {!isTeacher && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();                      setDeleteModal({ show: true, courseId: course.id, courseTitle: course.title });
+                      }}
+                      className="flex items-center gap-1 bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors font-semibold"
+                      title="Delete Course"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();                      openCourseDetail(course);
@@ -808,14 +924,16 @@ const AdminCourses = () => {
                       />
                       <p className="text-xs text-slate-500 mt-1">Override global minimum for this course.</p>
                     </div>
-                    <button
-                      onClick={() => handleSaveCourse(course)}
-                      disabled={savingId === `course-${course.id}`}
-                      className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 font-semibold"
-                    >
-                      <Save size={18} />
-                      {savingId === `course-${course.id}` ? 'Saving...' : 'Save Course'}
-                    </button>
+                    {!isTeacher && (
+                      <button
+                        onClick={() => handleSaveCourse(course)}
+                        disabled={savingId === `course-${course.id}`}
+                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 font-semibold"
+                      >
+                        <Save size={18} />
+                        {savingId === `course-${course.id}` ? 'Saving...' : 'Save Course'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Exam Settings */}
@@ -976,12 +1094,14 @@ const AdminCourses = () => {
                   />
                 </div>
 
-                <button
-                  onClick={() => handleSaveCourse(selectedCourse)}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold"
-                >
-                  <Save size={16} /> Save Overview
-                </button>
+                {!isTeacher && (
+                  <button
+                    onClick={() => handleSaveCourse(selectedCourse)}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors font-semibold"
+                  >
+                    <Save size={16} /> Save Overview
+                  </button>
+                )}
               </div>
             )}
 
@@ -1110,6 +1230,25 @@ const AdminCourses = () => {
             {activeTab === 'results' && exams[selectedCourse.id] && (
               <div className="space-y-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                 <h3 className="font-semibold text-slate-900">Student Results</h3>
+                {(() => {
+                  const rows = submissions[exams[selectedCourse.id].id] || [];
+                  if (rows.length === 0) return null;
+                  const scores = rows.map((r) => Number(r.score_percent || 0));
+                  const avg = scores.reduce((a, b) => a + b, 0) / Math.max(scores.length, 1);
+                  const best = Math.max(...scores);
+                  return (
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                        <p className="text-slate-500">Average Marks</p>
+                        <p className="font-semibold text-slate-800">{Math.round(avg)}%</p>
+                      </div>
+                      <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                        <p className="text-slate-500">Top Marks</p>
+                        <p className="font-semibold text-slate-800">{Math.round(best)}%</p>
+                      </div>
+                    </div>
+                  );
+                })()}
                 
                 {(submissions[exams[selectedCourse.id].id] || []).length === 0 ? (
                   <p className="text-xs text-slate-600 text-center py-4">No submissions yet</p>
@@ -1293,7 +1432,7 @@ const AdminCourses = () => {
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteModal.show && (
+      {!isTeacher && deleteModal.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-xl font-bold mb-4 text-red-600">Delete Course?</h3>

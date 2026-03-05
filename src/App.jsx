@@ -59,6 +59,7 @@ import AdminExamRetakes from './pages/AdminExamRetakes';
 import AdminActiveCoupons from './pages/AdminActiveCoupons';
 import UserManagementPage from './pages/UserManagementPage';
 import TeacherProgress from './pages/TeacherProgress';
+import TeacherConductTests from './pages/TeacherConductTests';
 import ClearDoubts from './pages/ClearDoubts';
 import AdminUserIds from './pages/AdminUserIds';
 import NotFound from './pages/NotFound';
@@ -81,6 +82,7 @@ import TermsAndConditions from './pages/TermsAndConditions';
 import CompleteGoogleProfile from './pages/CompleteGoogleProfile';
 import AdminSupportContact from './pages/AdminSupportContact';
 import AdminActivityLogs from './pages/AdminActivityLogs';
+import StudentWriteTest from './pages/StudentWriteTest';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -186,6 +188,16 @@ const AdminRoute = ({ children }) => {
   return children;
 };
 
+const TeacherRoute = ({ children }) => {
+  const { profile, loading } = useAuth();
+
+  if (loading) return <LoadingSpinner message="Loading dashboard..." />;
+  if (!profile || profile.role !== "teacher")
+    return <Navigate to="/app" />;
+
+  return children;
+};
+
 function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -213,6 +225,7 @@ function App() {
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
           <Route index element={<Dashboard />} />
           <Route path="courses" element={<CourseList />} />
+          <Route path="write-test" element={<StudentWriteTest />} />
           <Route path="course/:courseId" element={<CourseDetail />} />
           <Route path="profile" element={<Profile />} />
           <Route path="settings" element={<Settings />} />
@@ -247,6 +260,7 @@ function App() {
           <Route path="admin/user-ids" element={<AdminRoute><AdminUserIds /></AdminRoute>} />
           <Route path="admin/teacher-progress" element={<AdminRoute><TeacherProgress /></AdminRoute>} />
           <Route path="admin/courses" element={<AdminRoute><AdminCourses /></AdminRoute>} />
+          <Route path="teacher/tests" element={<TeacherRoute><TeacherConductTests /></TeacherRoute>} />
           <Route path="admin/student-progress" element={<AdminRoute><StudentProgress /></AdminRoute>} />
           <Route path="admin/student/:studentId" element={<AdminRoute><StudentDetail /></AdminRoute>} />
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />

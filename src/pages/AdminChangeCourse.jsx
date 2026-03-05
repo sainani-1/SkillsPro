@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const AdminChangeCourse = () => {
   const [userSearch, setUserSearch] = useState('');
@@ -106,9 +107,23 @@ const AdminChangeCourse = () => {
     if (!selectedUser || !selectedCourse) return;
     setEnrolling(true);
     setMessage(null);
+    const {
+      data: { user: adminUser },
+    } = await supabase.auth.getUser();
     // Check if already enrolled
     const already = enrollments.find(e => e.course_id === selectedCourse.id);
     if (already) {
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: 'Skipped free enroll (already enrolled)',
+        target: selectedUser.id,
+        details: {
+          module: 'admin-change-course',
+          course_id: selectedCourse.id,
+          course_title: selectedCourse.title || null,
+        },
+      });
       setMessage({ type: 'info', text: 'User is already enrolled in this course.' });
       setEnrolling(false);
       return;
@@ -121,18 +136,38 @@ const AdminChangeCourse = () => {
       completed: false
     });
     if (error) {
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: 'Failed free enroll for student',
+        target: selectedUser.id,
+        details: {
+          module: 'admin-change-course',
+          course_id: selectedCourse.id,
+          course_title: selectedCourse.title || null,
+          error: error.message || 'Unknown error',
+        },
+      });
       setMessage({ type: 'error', text: error.message });
     } else {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
       await pushNotification({
         title: 'New Course Added',
         content: `You have been enrolled in "${selectedCourse.title}" by admin.`,
         type: 'success',
         target_role: 'student',
         target_user_id: selectedUser.id,
-        admin_id: user?.id || null,
+        admin_id: adminUser?.id || null,
+      });
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: 'Enrolled student in free course',
+        target: selectedUser.id,
+        details: {
+          module: 'admin-change-course',
+          course_id: selectedCourse.id,
+          course_title: selectedCourse.title || null,
+        },
       });
       setMessage({ type: 'success', text: 'User enrolled in course for free!' });
       // Refresh enrollments
@@ -149,6 +184,9 @@ const AdminChangeCourse = () => {
     if (!selectedGlobalCourse) return;
     setMakingGlobalFree(true);
     setMessage(null);
+    const {
+      data: { user: adminUser },
+    } = await supabase.auth.getUser();
 
     try {
       // 1) Mark as free for upcoming users
@@ -203,7 +241,29 @@ const AdminChangeCourse = () => {
         type: 'success',
         text: `"${selectedGlobalCourse.title}" is now free for all upcoming users, and enrolled for ${missingRows.length} existing students.`,
       });
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: 'Made course free for all users',
+        target: selectedGlobalCourse.id,
+        details: {
+          module: 'admin-change-course',
+          course_title: selectedGlobalCourse.title || null,
+          enrolled_existing_students: missingRows.length,
+        },
+      });
     } catch (err) {
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: 'Failed to make course free for all users',
+        target: selectedGlobalCourse.id,
+        details: {
+          module: 'admin-change-course',
+          course_title: selectedGlobalCourse.title || null,
+          error: err?.message || 'Unknown error',
+        },
+      });
       setMessage({ type: 'error', text: err.message || 'Failed to make course free for all users.' });
     } finally {
       setMakingGlobalFree(false);

@@ -142,7 +142,7 @@ const Login = () => {
   const routeGoogleUser = async (oauthUser) => {
     let { data: profile } = await supabase
       .from('profiles')
-      .select('id, role, is_disabled, terms_accepted, google_profile_completed, auth_provider')
+      .select('id, role, is_disabled, is_locked, locked_until, terms_accepted, google_profile_completed, auth_provider')
       .eq('id', oauthUser.id)
       .maybeSingle();
 
@@ -164,7 +164,7 @@ const Login = () => {
       profile = bootstrapProfile;
     }
 
-      if (profile.is_disabled) {
+    if (profile.is_disabled) {
         await supabase.auth.signOut();
         setAlertModal({
           show: true,
@@ -173,6 +173,20 @@ const Login = () => {
           type: 'error'
         });
         return;
+    }
+
+    if (profile.is_locked && (!profile.locked_until || new Date(profile.locked_until) > new Date())) {
+      await supabase.auth.signOut();
+      const lockText = profile.locked_until
+        ? `Lock expires on ${new Date(profile.locked_until).toLocaleDateString('en-IN')}.`
+        : 'Your account is currently locked.';
+      setAlertModal({
+        show: true,
+        title: 'Account Locked',
+        message: `${lockText} ${getSupportLine()}`,
+        type: 'error'
+      });
+      return;
     }
 
     if (!profile.terms_accepted || !profile.google_profile_completed) {
@@ -286,7 +300,7 @@ const Login = () => {
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, role, is_disabled, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
+        .select('id, role, is_disabled, is_locked, locked_until, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
         .eq('id', signInData.user.id)
         .single();
 
@@ -343,7 +357,7 @@ const Login = () => {
 
         const profileFetchRetry = await supabase
           .from('profiles')
-          .select('id, role, is_disabled')
+          .select('id, role, is_disabled, is_locked, locked_until')
           .eq('id', signInData.user.id)
           .single();
         userProfile = profileFetchRetry.data;
@@ -429,6 +443,20 @@ const Login = () => {
             : `Your account has been disabled by an administrator. ${getSupportLine()}`,
             type: 'error'
           });
+        setLoggingIn(false);
+        return;
+      }
+
+      if (userProfile.is_locked && (!userProfile.locked_until || new Date(userProfile.locked_until) > new Date())) {
+        await supabase.auth.signOut();
+        setAlertModal({
+          show: true,
+          title: 'Account Locked',
+          message: userProfile.locked_until
+            ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
+            : `Your account is locked. ${getSupportLine()}`,
+          type: 'error'
+        });
         setLoggingIn(false);
         return;
       }

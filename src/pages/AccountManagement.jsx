@@ -4,6 +4,7 @@ import { Lock, Unlock, Award, Trash2, Search, Filter, AlertTriangle } from 'luci
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const AccountManagement = () => {
   const [users, setUsers] = useState([]);
@@ -51,6 +52,9 @@ const AccountManagement = () => {
     setLoading(true);
 
     try {
+      const {
+        data: { user: adminUser },
+      } = await supabase.auth.getUser();
       let updatePayload = null;
       let successMsg = '';
 
@@ -103,6 +107,17 @@ const AccountManagement = () => {
             : 'Account cleanup completed.'),
           type: fnData?.deleted ? 'success' : 'warning'
         });
+        await logAdminActivity({
+          adminId: adminUser?.id,
+          eventType: 'action',
+          action: fnData?.deleted ? 'Deleted user account' : 'Attempted user deletion (partial)',
+          target: selectedUser.id,
+          details: {
+            module: 'account-management',
+            user_email: selectedUser.email || null,
+            response_message: fnData?.message || null,
+          },
+        });
         await loadUsers();
         setShowModal(false);
         setDeleteConfirm('');
@@ -133,6 +148,26 @@ const AccountManagement = () => {
         title: 'Success',
         message: successMsg,
         type: 'success'
+      });
+      const actionLabelMap = {
+        unlock: 'Unlocked user account',
+        lock: 'Locked user account',
+        'grant-premium': 'Granted premium via account management',
+        'revoke-premium': 'Revoked premium via account management',
+        disable: 'Disabled user account',
+        enable: 'Enabled user account',
+      };
+      await logAdminActivity({
+        adminId: adminUser?.id,
+        eventType: 'action',
+        action: actionLabelMap[action] || `Updated user account (${action})`,
+        target: selectedUser.id,
+        details: {
+          module: 'account-management',
+          user_email: selectedUser.email || null,
+          role: selectedUser.role || null,
+          payload: updatePayload,
+        },
       });
       setSelectedUser(data);
       await loadUsers();

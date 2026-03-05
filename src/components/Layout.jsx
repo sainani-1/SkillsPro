@@ -94,6 +94,7 @@ const Layout = () => {
 
     const studentTargets = [
       ...common,
+      { label: 'Write Test', path: '/app/write-test' },
       { label: 'My Certificates', path: '/app/my-certificates' },
       { label: 'Live Classes', path: '/app/class-schedule' },
       { label: 'Premium Membership', path: '/app/premium-status' },
@@ -107,6 +108,7 @@ const Layout = () => {
 
     const teacherTargets = [
       ...common,
+      { label: 'Conduct Tests', path: '/app/teacher/tests' },
       { label: 'Clear Doubts', path: '/app/clear-doubts' },
       { label: 'Attendance', path: '/app/attendance' },
       { label: 'My Students', path: '/app/my-students' },

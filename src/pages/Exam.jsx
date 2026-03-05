@@ -121,6 +121,8 @@ export default function Exam() {
 
   const [examId, setExamId] = useState(null);
   const [examPassPercent, setExamPassPercent] = useState(40);
+  const [examGenerateCertificate, setExamGenerateCertificate] = useState(true);
+  const [examQuestionSetUpdatedAt, setExamQuestionSetUpdatedAt] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [studentName, setStudentName] = useState("");
   const [courseName, setCourseName] = useState("");
@@ -193,7 +195,6 @@ export default function Exam() {
       // ignore storage remove errors
     }
   };
-
   const answeredCount = useMemo(
     () => Object.values(answers).filter(isAnswered).length,
     [answers]
@@ -268,7 +269,7 @@ export default function Exam() {
         await Promise.all([
           supabase
             .from("exams")
-            .select("id, pass_percent")
+            .select("id, pass_percent, generate_certificate, question_set_updated_at, test_name")
             .eq("course_id", courseId)
             .maybeSingle(),
           supabase
@@ -297,6 +298,8 @@ export default function Exam() {
       const resolvedExamId = examRow?.id ?? null;
       setExamId(resolvedExamId);
       setExamPassPercent(Number(examRow?.pass_percent) || 40);
+      setExamGenerateCertificate(examRow?.generate_certificate !== false);
+      setExamQuestionSetUpdatedAt(examRow?.question_set_updated_at || null);
 
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user?.id) {
@@ -304,10 +307,36 @@ export default function Exam() {
         return;
       }
       setCurrentUserId(userData.user.id);
+      const { data: lockProfile, error: lockProfileError } = await supabase
+        .from("profiles")
+        .select("is_locked, locked_until")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+      if (lockProfileError) {
+        setErrorMsg("Error loading profile lock status: " + lockProfileError.message);
+        return;
+      }
+      if (
+        lockProfile?.is_locked &&
+        (!lockProfile?.locked_until || new Date(lockProfile.locked_until) > new Date())
+      ) {
+        const lockUntilDate = lockProfile?.locked_until ? new Date(lockProfile.locked_until) : null;
+        setPhase(EXAM_PHASES.TERMINATED);
+        setTerminateReason("Account is already locked for strict proctoring violation.");
+        setErrorMsg(
+          lockUntilDate
+            ? `Account blocked until ${lockUntilDate.toLocaleDateString("en-IN")} due to strict proctoring violation.`
+            : "Account is locked due to strict proctoring violation."
+        );
+        safeSessionRemove(getSessionKey(userData.user.id));
+        safeSessionRemove(getSessionKey());
+        return;
+      }
       const [
         submissionResp,
         overrideResp,
-        questionsResp
+        questionsResp,
+        attemptBlockResp
       ] = await Promise.all([
         supabase
           .from("exam_submissions")
@@ -330,6 +359,12 @@ export default function Exam() {
           .select("*")
           .eq("exam_id", resolvedExamId ?? courseId)
           .order("order_index", { ascending: true }),
+        supabase
+          .from("exam_attempt_blocks")
+          .select("unblock_after_question_update_at")
+          .eq("user_id", userData.user.id)
+          .eq("exam_id", resolvedExamId ?? courseId)
+          .maybeSingle(),
       ]);
 
       const { data: latestSubmission, error: submissionError } = submissionResp;
@@ -341,6 +376,30 @@ export default function Exam() {
       const { data: overrideRow, error: overrideError } = overrideResp;
       if (overrideError) {
         setErrorMsg("Error loading retake override: " + overrideError.message);
+        return;
+      }
+
+      const { data: attemptBlockRow, error: attemptBlockError } = attemptBlockResp;
+      if (attemptBlockError) {
+        setErrorMsg("Error loading proctoring block: " + attemptBlockError.message);
+        return;
+      }
+
+      const examUpdatedAt = examRow?.question_set_updated_at
+        ? new Date(examRow.question_set_updated_at)
+        : null;
+      const blockedUntilQuestionUpdateAt = attemptBlockRow?.unblock_after_question_update_at
+        ? new Date(attemptBlockRow.unblock_after_question_update_at)
+        : null;
+      if (
+        blockedUntilQuestionUpdateAt &&
+        (!examUpdatedAt || examUpdatedAt <= blockedUntilQuestionUpdateAt)
+      ) {
+        setPhase(EXAM_PHASES.TERMINATED);
+        setTerminateReason("Suspicious activity detected in previous attempt.");
+        setErrorMsg("This test is blocked for you until teacher updates questions.");
+        safeSessionRemove(getSessionKey(userData.user.id));
+        safeSessionRemove(getSessionKey());
         return;
       }
 
@@ -485,6 +544,11 @@ export default function Exam() {
 
     return () => {
       mounted = false;
+      try {
+        navigator.keyboard?.unlock?.();
+      } catch {
+        // ignore
+      }
     };
   }, [courseId]);
 
@@ -562,7 +626,7 @@ export default function Exam() {
       setTabSwitchWarnings((prev) => {
         const next = prev + 1;
         if (next >= 2) {
-          void terminateAndBlock("Second app/tab switch detected during exam.");
+          void terminateAndBlockTestUntilQuestionUpdate("Second app/tab switch detected during exam.");
           return next;
         }
         setShowTabWarningModal(true);
@@ -599,7 +663,7 @@ export default function Exam() {
 
         if (warningCount > MAX_FULLSCREEN_WARNINGS) {
           clearFullscreenTimer();
-          void terminateAndBlock("Fullscreen exited more than 3 times.");
+          void terminateAndBlockTestUntilQuestionUpdate("Fullscreen exited more than 3 times.");
           return;
         }
 
@@ -608,7 +672,7 @@ export default function Exam() {
           setFullscreenCountdown((prev) => {
             if (prev <= 1) {
               clearFullscreenTimer();
-              void terminateAndBlock("Did not return to fullscreen within 20 seconds.");
+              void terminateAndBlockTestUntilQuestionUpdate("Did not return to fullscreen within 20 seconds.");
               return 0;
             }
             return prev - 1;
@@ -640,6 +704,20 @@ export default function Exam() {
     const prevent = (event) => event.preventDefault();
     const preventCopyKeys = (event) => {
       const key = String(event.key || "").toLowerCase();
+      const code = String(event.code || "").toLowerCase();
+      const metaPressed =
+        key === "meta" ||
+        key === "os" ||
+        code === "metaleft" ||
+        code === "metaright" ||
+        code === "osleft" ||
+        code === "osright";
+      if (metaPressed || (event.metaKey && key === "g")) {
+        event.preventDefault();
+        event.stopPropagation();
+        // Best-effort: make Windows/Meta shortcuts no-op during exam without blocking account.
+        return;
+      }
       const isModifierOnly = ["control", "ctrl", "alt", "meta", "os", "fn", "function"].includes(key);
       if (isModifierOnly) {
         event.preventDefault();
@@ -678,7 +756,8 @@ export default function Exam() {
     document.addEventListener("selectstart", prevent);
     document.addEventListener("contextmenu", prevent);
     document.addEventListener("dragstart", prevent);
-    document.addEventListener("keydown", preventCopyKeys);
+    document.addEventListener("keydown", preventCopyKeys, true);
+    window.addEventListener("keydown", preventCopyKeys, true);
 
     return () => {
       body.style.userSelect = previousUserSelect;
@@ -689,7 +768,8 @@ export default function Exam() {
       document.removeEventListener("selectstart", prevent);
       document.removeEventListener("contextmenu", prevent);
       document.removeEventListener("dragstart", prevent);
-      document.removeEventListener("keydown", preventCopyKeys);
+      document.removeEventListener("keydown", preventCopyKeys, true);
+      window.removeEventListener("keydown", preventCopyKeys, true);
     };
   }, [phase, needsFullscreenResume]);
 
@@ -753,7 +833,7 @@ export default function Exam() {
             clearInterval(resumeTimerRef.current);
             resumeTimerRef.current = null;
           }
-          void terminateAndBlock("Did not re-enter fullscreen within 20 seconds after refresh.");
+          void terminateAndBlockTestUntilQuestionUpdate("Did not re-enter fullscreen within 20 seconds after refresh.");
           return 0;
         }
         return prev - 1;
@@ -762,12 +842,12 @@ export default function Exam() {
 
     const handleImmediateBlockOnSwitch = () => {
       if (document.hidden) {
-        void terminateAndBlock("Tab/app switch detected on resume fullscreen prompt.");
+        void terminateAndBlockTestUntilQuestionUpdate("Tab/app switch detected on resume fullscreen prompt.");
       }
     };
 
     const handleBlur = () => {
-      void terminateAndBlock("App switch detected on resume fullscreen prompt.");
+      void terminateAndBlockTestUntilQuestionUpdate("App switch detected on resume fullscreen prompt.");
     };
 
     document.addEventListener("visibilitychange", handleImmediateBlockOnSwitch);
@@ -894,6 +974,13 @@ export default function Exam() {
     setNeedsFullscreenResume(false);
     setShowFullscreenPrompt(false);
     setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
+    try {
+      if (navigator.keyboard?.lock) {
+        await navigator.keyboard.lock(["MetaLeft", "MetaRight"]);
+      }
+    } catch {
+      // Best effort only; some browsers/OS combinations do not support this API.
+    }
     setInfoMsg("Strict proctoring is active. Do not switch tabs/apps or exit fullscreen.");
   }
 
@@ -904,44 +991,30 @@ export default function Exam() {
     setShowFullscreenPrompt(false);
     setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
     setResumeCountdown(FULLSCREEN_TIMEOUT_SEC);
+    try {
+      if (navigator.keyboard?.lock) {
+        await navigator.keyboard.lock(["MetaLeft", "MetaRight"]);
+      }
+    } catch {
+      // Best effort only.
+    }
     if (resumeTimerRef.current) {
       clearInterval(resumeTimerRef.current);
       resumeTimerRef.current = null;
     }
   }
 
-  async function lockAccountFor60Days(reason) {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData?.user?.id) {
-      throw new Error("User not authenticated.");
-    }
-
-    const lockedUntil = new Date();
-    lockedUntil.setDate(lockedUntil.getDate() + 60);
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        is_locked: true,
-        locked_until: lockedUntil.toISOString(),
-      })
-      .eq("id", userData.user.id);
-
-    if (error) throw new Error(error.message);
-
-    return {
-      until: lockedUntil,
-      reason,
-    };
-  }
-
-  async function terminateAndBlock(reason) {
+  async function terminateAndBlockTestUntilQuestionUpdate(reason) {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
     setIsBlockingAccount(true);
     setTerminateReason(reason);
 
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user?.id) {
+        throw new Error("User not authenticated.");
+      }
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop());
       }
@@ -950,15 +1023,29 @@ export default function Exam() {
         await document.exitFullscreen().catch(() => {});
       }
 
-      const lockInfo = await lockAccountFor60Days(reason);
+      const blockCheckpoint =
+        examQuestionSetUpdatedAt || new Date().toISOString();
+      const { error: blockErr } = await supabase
+        .from("exam_attempt_blocks")
+        .upsert(
+          [
+            {
+              user_id: userData.user.id,
+              exam_id: examId ?? courseId,
+              unblock_after_question_update_at: blockCheckpoint,
+              reason,
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: "user_id,exam_id" }
+        );
+      if (blockErr) throw new Error(blockErr.message);
       setPhase(EXAM_PHASES.TERMINATED);
       safeSessionRemove(getSessionKey(currentUserId));
       safeSessionRemove(getSessionKey());
-      setErrorMsg(
-        `Account blocked until ${lockInfo.until.toLocaleDateString("en-IN")} due to strict proctoring violation.`
-      );
+      setErrorMsg("Exam terminated. This test is blocked until teacher updates questions.");
     } catch (error) {
-      setErrorMsg("Failed to block account: " + error.message);
+      setErrorMsg("Failed to terminate exam: " + error.message);
       setPhase(EXAM_PHASES.TERMINATED);
     } finally {
       setIsBlockingAccount(false);
@@ -987,6 +1074,11 @@ export default function Exam() {
     if (cameraStream) {
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(null);
+    }
+    try {
+      navigator.keyboard?.unlock?.();
+    } catch {
+      // ignore
     }
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => {});
@@ -1124,6 +1216,11 @@ export default function Exam() {
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(null);
     }
+    try {
+      navigator.keyboard?.unlock?.();
+    } catch {
+      // ignore
+    }
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => {});
     }
@@ -1236,7 +1333,7 @@ export default function Exam() {
       setSubmissionId(rawSubmissionId);
       setDisplaySubmissionId(formatDisplaySubmissionId(rawSubmissionId));
 
-      if (passed && submissionRow?.id) {
+      if (passed && submissionRow?.id && examGenerateCertificate) {
         // Best-effort only: certificate insertion can be blocked by RLS depending on policy.
         // Do not fail exam submission when certificate insert is denied.
         const { error: certError } = await supabase
@@ -1285,12 +1382,12 @@ export default function Exam() {
         <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-red-200 p-8 text-center space-y-4">
           <h1 className="text-2xl font-bold text-red-700">Exam Terminated</h1>
           <p className="text-slate-700">
-            Your account is locked for 60 days due to strict proctoring violation.
+            This test is blocked for you due to suspicious activity.
           </p>
           {terminateReason ? (
             <p className="text-sm text-slate-500">Reason: {terminateReason}</p>
           ) : null}
-          {isBlockingAccount ? <p className="text-sm text-slate-500">Applying account lock...</p> : null}
+          {isBlockingAccount ? <p className="text-sm text-slate-500">Applying test block...</p> : null}
           <button
             onClick={() => navigate("/app")}
             className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
@@ -1600,7 +1697,7 @@ export default function Exam() {
                       <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">No tab/app switching during exam.</div>
                       <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">Stay in fullscreen until submission completes.</div>
                       <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">Camera and microphone must stay allowed.</div>
-                      <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">Violations can lock account for 60 days.</div>
+                      <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">Suspicious activity can terminate this test until teacher updates questions.</div>
                     </div>
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-800 bg-white border border-slate-300 rounded-lg p-3">
                       <input
@@ -1998,7 +2095,7 @@ export default function Exam() {
               <span className="text-2xl font-extrabold text-red-700">{fullscreenCountdown}</span>
             </div>
             <p className="text-sm text-slate-500">
-              Re-enter fullscreen within {fullscreenCountdown} seconds, otherwise your account will be blocked for 60 days.
+              Re-enter fullscreen within {fullscreenCountdown} seconds, otherwise this test will be terminated.
             </p>
             <button
               onClick={reEnterFullscreen}
@@ -2066,7 +2163,7 @@ export default function Exam() {
           <div className="max-w-md w-full bg-white rounded-2xl p-6 border border-amber-200 shadow-xl space-y-4 text-center">
             <h2 className="text-xl font-bold text-amber-700">Proctor Warning</h2>
             <p className="text-sm text-slate-700">
-              App/Tab change detected. Next time your account will be blocked for 60 days.
+              App/Tab change detected. Next violation will terminate this test.
             </p>
             <button
               onClick={() => setShowTabWarningModal(false)}

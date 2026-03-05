@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Award, Users, Calendar, Search } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const ManagePremium = () => {
   const [users, setUsers] = useState([]);
@@ -88,6 +89,18 @@ const ManagePremium = () => {
       target_user_id: selectedUser.id,
       admin_id: user?.id || null,
     });
+    await logAdminActivity({
+      adminId: user?.id,
+      eventType: 'action',
+      action: 'Granted premium access',
+      target: selectedUser?.id || null,
+      details: {
+        module: 'manage-premium',
+        user_email: selectedUser?.email || null,
+        valid_until: validUntil,
+        reason: reason || null,
+      },
+    });
 
     // Show success alert
     setShowModal(false);
@@ -124,6 +137,16 @@ const ManagePremium = () => {
       target_role: 'student',
       target_user_id: userToRevoke.id,
       admin_id: user?.id || null,
+    });
+    await logAdminActivity({
+      adminId: user?.id,
+      eventType: 'action',
+      action: 'Revoked premium access',
+      target: userToRevoke?.id || null,
+      details: {
+        module: 'manage-premium',
+        user_email: userToRevoke?.email || null,
+      },
     });
     setShowRevokeModal(false);
     setUserToRevoke(null);

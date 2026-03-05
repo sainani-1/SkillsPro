@@ -556,6 +556,10 @@ const Sidebar = () => {
         {/* Student Specific */}
         {role === 'student' && (
           <>
+            <NavLink to="/app/write-test" className={navItemClass} title="Write Test">
+              <CheckSquare size={28} />
+              {shouldShowText && <span>Write Test</span>}
+            </NavLink>
             <NavLink to="/app/my-certificates" className={navItemClass} title="My Certificates">
               <GraduationCap size={28} />
               {shouldShowText && <span>My Certificates</span>}
@@ -603,6 +607,10 @@ const Sidebar = () => {
         {/* Teacher Specific */}
         {role === 'teacher' && (
           <>
+            <NavLink to="/app/teacher/tests" className={navItemClass} title="Conduct Tests">
+              <CheckSquare size={28} />
+              {shouldShowText && <span>Conduct Tests</span>}
+            </NavLink>
             <NavLink to="/app/clear-doubts" className={navItemClass} title="Clear Doubts">
               <MessageCircle size={28} />
               {shouldShowText && <span>Clear Doubts</span>}

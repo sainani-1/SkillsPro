@@ -4,6 +4,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { Plus, Users, X } from 'lucide-react';
 import AvatarImage from '../components/AvatarImage';
 import usePopup from '../hooks/usePopup.jsx';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const UserManagementPage = () => {
     const { openPopup, popupNode } = usePopup();
@@ -38,12 +39,27 @@ const UserManagementPage = () => {
       
       setChangingRole(userId);
       try {
+        const previousRole = users.find((u) => u.id === userId)?.role || null;
+        const {
+          data: { user: adminUser },
+        } = await supabase.auth.getUser();
         const { error } = await supabase
           .from('profiles')
           .update({ role: newRole, updated_at: new Date().toISOString() })
           .eq('id', userId);
         
         if (error) throw error;
+        await logAdminActivity({
+          adminId: adminUser?.id,
+          eventType: 'action',
+          action: 'Changed user role',
+          target: userId,
+          details: {
+            module: 'user-management',
+            previous_role: previousRole,
+            new_role: newRole,
+          },
+        });
         
         // Refresh users list
         loadUsers();
@@ -63,11 +79,25 @@ const UserManagementPage = () => {
       const ok = window.confirm(`Remove fake user "${user.full_name || user.email}"?`);
       if (!ok) return;
       try {
+        const {
+          data: { user: adminUser },
+        } = await supabase.auth.getUser();
         const { error } = await supabase
           .from('profiles')
           .delete()
           .eq('id', user.id);
         if (error) throw error;
+        await logAdminActivity({
+          adminId: adminUser?.id,
+          eventType: 'action',
+          action: 'Removed fake user profile',
+          target: user.id,
+          details: {
+            module: 'user-management',
+            user_email: user.email || null,
+            user_name: user.full_name || null,
+          },
+        });
         openPopup('Removed', 'Fake user removed successfully.', 'success');
         loadUsers();
       } catch (error) {
@@ -300,6 +330,20 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                 body: payload
             });
             if (!fnError && fnData?.success) {
+                const {
+                    data: { user: adminUser },
+                } = await supabase.auth.getUser();
+                await logAdminActivity({
+                    adminId: adminUser?.id,
+                    eventType: 'action',
+                    action: 'Created user account',
+                    target: payload.email,
+                    details: {
+                        module: 'user-management',
+                        role: payload.role,
+                        full_name: payload.full_name,
+                    },
+                });
                 setMessage({ text: 'User created successfully. They can login with the provided email/password.', type: 'success' });
                 setTimeout(() => {
                     setForm({ email: '', password: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });
@@ -322,6 +366,20 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                     throw new Error(raw || invokeError || 'Failed to create user');
                 }
 
+                const {
+                    data: { user: adminUser },
+                } = await supabase.auth.getUser();
+                await logAdminActivity({
+                    adminId: adminUser?.id,
+                    eventType: 'action',
+                    action: 'Created user account (custom endpoint)',
+                    target: payload.email,
+                    details: {
+                        module: 'user-management',
+                        role: payload.role,
+                        full_name: payload.full_name,
+                    },
+                });
                 setMessage({ text: 'User created successfully. They can login with the provided email/password.', type: 'success' });
                 setTimeout(() => {
                     setForm({ email: '', password: '', fullName: '', phone: '', role: 'student', coreSubject: 'Computer Science' });

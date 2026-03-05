@@ -18,6 +18,7 @@ export default function AdminActivityLogs() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
+  const [eventFilter, setEventFilter] = useState('action');
   const [missingTable, setMissingTable] = useState(false);
 
   const isMissingTableError = (error) => {
@@ -62,13 +63,18 @@ export default function AdminActivityLogs() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
+    return rows.filter((r) => {
+      const eventType = String(r.event_type || '').toLowerCase();
+      const matchesEvent = eventFilter === 'all' || eventType === eventFilter;
+      if (!matchesEvent) return false;
+      if (!q) return true;
+      return (
       [r.event_type, r.action, r.target, r.admin_id, JSON.stringify(r.details || {})]
         .map((v) => String(v || '').toLowerCase())
         .some((v) => v.includes(q))
-    );
-  }, [rows, search]);
+      );
+    });
+  }, [rows, search, eventFilter]);
 
   return (
     <div className="space-y-6">
@@ -84,6 +90,16 @@ export default function AdminActivityLogs() {
           <span className="font-semibold">Total Logs: {rows.length}</span>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
+          <select
+            value={eventFilter}
+            onChange={(e) => setEventFilter(e.target.value)}
+            className="px-3 py-2 border rounded-lg"
+            title="Filter by event type"
+          >
+            <option value="action">Actions</option>
+            <option value="navigation">Navigation</option>
+            <option value="all">All Events</option>
+          </select>
           <div className="relative flex-1 md:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
