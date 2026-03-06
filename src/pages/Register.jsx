@@ -189,7 +189,7 @@ const Register = () => {
         type: 'signup',
         email: emailToUse,
         options: {
-          emailRedirectTo: `${window.location.origin}/login`
+          emailRedirectTo: `${window.location.origin}/login?confirmed=true`
         }
       });
       if (error) throw error;
@@ -232,7 +232,7 @@ const Register = () => {
         email: formData.email,
         password: formData.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/login`,
+          emailRedirectTo: `${window.location.origin}/login?confirmed=true`,
           data: {
             full_name: formData.fullName.trim(),
             phone: formattedPhone,

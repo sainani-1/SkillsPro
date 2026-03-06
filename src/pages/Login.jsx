@@ -77,7 +77,11 @@ const Login = () => {
       params.get('message') === 'confirmed';
     const confirmedByHash = hashParams.get('type') === 'signup';
     if (confirmedByQuery || confirmedByHash) {
-      setInlineNotice('Confirmation successful. Now you can login.');
+      setToast({
+        show: true,
+        message: 'Email confirmed. Now you can login.',
+        type: 'success'
+      });
       const cleanUrl = `${window.location.origin}/login`;
       window.history.replaceState({}, '', cleanUrl);
     }

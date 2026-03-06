@@ -1,9 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Award, Users, Calendar, Search } from 'lucide-react';
+import { Award, Search, Clock3 } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { logAdminActivity } from '../utils/adminActivityLogger';
+
+const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
 const ManagePremium = () => {
   const [users, setUsers] = useState([]);
@@ -11,15 +13,21 @@ const ManagePremium = () => {
   const [studentQuery, setStudentQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [validUntil, setValidUntil] = useState('');
+  const [grantLifetimePremium, setGrantLifetimePremium] = useState(false);
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showRevokeModal, setShowRevokeModal] = useState(false);
   const [userToRevoke, setUserToRevoke] = useState(null);
+  const [grantHistory, setGrantHistory] = useState([]);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
+
+  const isLifetimePremium = (premiumUntil) =>
+    Boolean(premiumUntil) && new Date(premiumUntil).getUTCFullYear() >= 9999;
 
   useEffect(() => {
     loadUsers();
+    loadGrantHistory();
   }, []);
 
   const pushNotification = async (payload) => {
@@ -50,12 +58,62 @@ const ManagePremium = () => {
     setUsers(data || []);
   };
 
+  const loadGrantHistory = async () => {
+    const { data: grants, error } = await supabase
+      .from('premium_grants')
+      .select('id, user_id, granted_by, valid_until, reason, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error || !grants?.length) {
+      setGrantHistory([]);
+      return;
+    }
+
+    const profileIds = Array.from(
+      new Set(
+        grants.flatMap((g) => [g.user_id, g.granted_by]).filter(Boolean)
+      )
+    );
+
+    let profileMap = new Map();
+    if (profileIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', profileIds);
+      profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+    }
+
+    const mapped = grants.map((g) => {
+      const person = profileMap.get(g.user_id);
+      const admin = profileMap.get(g.granted_by);
+      return {
+        ...g,
+        user_name: person?.full_name || 'Unknown user',
+        user_email: person?.email || '',
+        admin_name: admin?.full_name || 'Admin',
+      };
+    });
+
+    setGrantHistory(mapped);
+  };
+
   const grantPremium = async () => {
-    if (!selectedUser || !validUntil) {
+    if (!selectedUser || (!grantLifetimePremium && !validUntil)) {
       setAlertModal({
         show: true,
         title: 'Missing Information',
-        message: 'Please select a user and set a valid date',
+        message: 'Please select a user and set a valid date or choose lifetime premium',
+        type: 'warning'
+      });
+      return;
+    }
+    if (!reason.trim()) {
+      setAlertModal({
+        show: true,
+        title: 'Missing Reason',
+        message: 'Please provide a reason for granting premium.',
         type: 'warning'
       });
       return;
@@ -65,59 +123,77 @@ const ManagePremium = () => {
 
   const confirmGrant = async () => {
     setLoading(true);
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
 
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+      const effectiveValidUntil = grantLifetimePremium
+        ? LIFETIME_PREMIUM_DATE
+        : new Date(`${validUntil}T23:59:59.000Z`).toISOString();
+      const reasonText = reason.trim();
 
-    await supabase.from('profiles').update({
-      premium_until: validUntil
-    }).eq('id', selectedUser.id);
+      const { error: profileUpdateError } = await supabase.from('profiles').update({
+        premium_until: effectiveValidUntil
+      }).eq('id', selectedUser.id);
+      if (profileUpdateError) throw profileUpdateError;
 
-    await supabase.from('premium_grants').insert({
-      user_id: selectedUser.id,
-      granted_by: user?.id || null,
-      valid_until: validUntil,
-      reason
-    });
+      const { error: grantInsertError } = await supabase.from('premium_grants').insert({
+        user_id: selectedUser.id,
+        granted_by: user?.id || null,
+        valid_until: effectiveValidUntil,
+        reason: reasonText
+      });
+      if (grantInsertError) throw grantInsertError;
 
-    await pushNotification({
-      title: 'Premium Granted',
-      content: `Your premium membership is active until ${new Date(validUntil).toLocaleDateString('en-IN')}.${reason ? ` Reason: ${reason}` : ''}`,
-      type: 'success',
-      target_role: 'student',
-      target_user_id: selectedUser.id,
-      admin_id: user?.id || null,
-    });
-    await logAdminActivity({
-      adminId: user?.id,
-      eventType: 'action',
-      action: 'Granted premium access',
-      target: selectedUser?.id || null,
-      details: {
-        module: 'manage-premium',
-        user_email: selectedUser?.email || null,
-        valid_until: validUntil,
-        reason: reason || null,
-      },
-    });
+      await pushNotification({
+        title: 'Premium Granted',
+        content: grantLifetimePremium
+          ? `Your premium membership now has lifetime access. Reason: ${reasonText}`
+          : `Your premium membership is active until ${new Date(effectiveValidUntil).toLocaleDateString('en-IN')}. Reason: ${reasonText}`,
+        type: 'success',
+        target_role: 'student',
+        target_user_id: selectedUser.id,
+        admin_id: user?.id || null,
+      });
+      await logAdminActivity({
+        adminId: user?.id,
+        eventType: 'action',
+        action: 'Granted premium access',
+        target: selectedUser?.id || null,
+        details: {
+          module: 'manage-premium',
+          user_email: selectedUser?.email || null,
+          valid_until: effectiveValidUntil,
+          reason: reasonText,
+        },
+      });
 
-    // Show success alert
-    setShowModal(false);
-    setAlertModal({
-      show: true,
-      title: 'Success',
-      message: '✅ Premium access granted successfully!',
-      type: 'success'
-    });
-    setSelectedUser(null);
-    setStudentQuery('');
-    setValidUntil('');
-    setReason('');
-    loadUsers();
-    setLoading(false);
+      setShowModal(false);
+      setAlertModal({
+        show: true,
+        title: 'Success',
+        message: 'Premium access granted successfully.',
+        type: 'success'
+      });
+      setSelectedUser(null);
+      setStudentQuery('');
+      setValidUntil('');
+      setGrantLifetimePremium(false);
+      setReason('');
+      await loadUsers();
+      await loadGrantHistory();
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'Error',
+        message: error.message || 'Failed to grant premium access.',
+        type: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
-
   const revokePremium = async (userId) => {
     const user = users.find(u => u.id === userId);
     setUserToRevoke(user);
@@ -156,7 +232,8 @@ const ManagePremium = () => {
       message: '✅ Premium access revoked successfully!',
       type: 'success'
     });
-    loadUsers();
+    await loadUsers();
+    await loadGrantHistory();
   };
 
   const filtered = users.filter(u =>
@@ -223,16 +300,28 @@ const ManagePremium = () => {
           </div>
           <div>
             <label className="block text-sm font-medium mb-2">Valid Until</label>
+            <label className="flex items-center gap-2 mb-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={grantLifetimePremium}
+                onChange={(e) => setGrantLifetimePremium(e.target.checked)}
+              />
+              Grant lifetime premium
+            </label>
             <input 
               type="date"
               value={validUntil}
               onChange={e => setValidUntil(e.target.value)}
               className="w-full border rounded-lg p-2"
+              disabled={grantLifetimePremium}
             />
+            {grantLifetimePremium && (
+              <p className="mt-2 text-xs text-emerald-700">Lifetime premium will be granted (no expiry).</p>
+            )}
           </div>
         </div>
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Reason (optional)</label>
+          <label className="block text-sm font-medium mb-2">Reason</label>
           <textarea 
             value={reason}
             onChange={e => setReason(e.target.value)}
@@ -284,7 +373,9 @@ const ManagePremium = () => {
                   {isPremium ? (
                     <>
                       <span className="text-xs bg-gold-100 text-gold-800 px-3 py-1 rounded-full">
-                        Premium until {new Date(user.premium_until).toLocaleDateString()}
+                        {isLifetimePremium(user.premium_until)
+                          ? 'Premium Lifetime'
+                          : `Premium until ${new Date(user.premium_until).toLocaleDateString()}`}
                       </span>
                       <button 
                         onClick={() => revokePremium(user.id)}
@@ -305,6 +396,50 @@ const ManagePremium = () => {
         </div>
       </div>
 
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex items-center gap-2 mb-4">
+          <Clock3 size={18} className="text-slate-600" />
+          <h2 className="text-lg font-bold">Premium Grant History</h2>
+        </div>
+        {grantHistory.length === 0 ? (
+          <p className="text-sm text-slate-500">No premium grant history found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2">Person</th>
+                  <th className="text-left py-2">Reason</th>
+                  <th className="text-left py-2">Valid Until</th>
+                  <th className="text-left py-2">Granted By</th>
+                  <th className="text-left py-2">Granted At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {grantHistory.map((g) => (
+                  <tr key={g.id} className="border-b last:border-b-0">
+                    <td className="py-2">
+                      <p className="font-medium text-slate-800">{g.user_name}</p>
+                      {g.user_email ? <p className="text-xs text-slate-500">{g.user_email}</p> : null}
+                    </td>
+                    <td className="py-2 text-slate-700">{g.reason || 'No reason'}</td>
+                    <td className="py-2 text-slate-700">
+                      {isLifetimePremium(g.valid_until)
+                        ? 'Lifetime'
+                        : (g.valid_until ? new Date(g.valid_until).toLocaleDateString('en-IN') : 'N/A')}
+                    </td>
+                    <td className="py-2 text-slate-700">{g.admin_name}</td>
+                    <td className="py-2 text-slate-500">
+                      {g.created_at ? new Date(g.created_at).toLocaleString('en-IN') : 'N/A'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Confirmation Modal */}
       {showModal && selectedUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -320,7 +455,10 @@ const ManagePremium = () => {
 
             <div className="mb-4 p-3 bg-gold-50 rounded">
               <p className="text-sm">
-                <strong>Valid Until:</strong> {new Date(validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
+                <strong>Valid Until:</strong>{' '}
+                {grantLifetimePremium
+                  ? 'Lifetime'
+                  : new Date(validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
               {reason && (
                 <p className="text-sm mt-2">
@@ -398,3 +536,4 @@ const ManagePremium = () => {
 };
 
 export default ManagePremium;
+

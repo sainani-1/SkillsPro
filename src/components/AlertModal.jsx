@@ -1,7 +1,15 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle, Info, AlertCircle } from 'lucide-react';
 
-const AlertModal = ({ show, title, message, type = 'info', onClose }) => {
+const AlertModal = ({
+  show,
+  title,
+  message,
+  type = 'info',
+  onClose,
+  containerClassName = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50',
+  contentClassName = '',
+}) => {
   if (!show) return null;
 
   const getIcon = () => {
@@ -53,8 +61,10 @@ const AlertModal = ({ show, title, message, type = 'info', onClose }) => {
   const styles = getStyles();
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className={`bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl border-4 ${styles.border}`}>
+    <div className={containerClassName}>
+      <div
+        className={`bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl border-4 ${styles.border} ${contentClassName}`}
+      >
         <div className="flex flex-col items-center text-center space-y-6">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center ${styles.bg}`}>
             {getIcon()}

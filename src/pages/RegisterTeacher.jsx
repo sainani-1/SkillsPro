@@ -61,7 +61,7 @@ const RegisterTeacher = () => {
         email: form.email,
         password: form.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/login`,
+          emailRedirectTo: `${window.location.origin}/login?confirmed=true`,
           data: {
             full_name: form.fullName.trim(),
             phone: form.phone.trim(),

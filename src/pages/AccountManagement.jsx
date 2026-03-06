@@ -6,6 +6,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
 import { logAdminActivity } from '../utils/adminActivityLogger';
 
+const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
+
 const AccountManagement = () => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
@@ -14,9 +16,15 @@ const AccountManagement = () => {
   const [showModal, setShowModal] = useState(false);
   const [action, setAction] = useState(''); // unlock, grant-premium, revoke-premium, disable, delete
   const [premiumDate, setPremiumDate] = useState('');
+  const [premiumReason, setPremiumReason] = useState('');
+  const [grantLifetimePremium, setGrantLifetimePremium] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(''); // For double confirmation of delete
   const [loading, setLoading] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
+
+  const isPremiumActive = (premiumUntil) => premiumUntil && new Date(premiumUntil) > new Date();
+  const isLifetimePremium = (premiumUntil) =>
+    Boolean(premiumUntil) && new Date(premiumUntil).getUTCFullYear() >= 9999;
 
   useEffect(() => {
     loadUsers();
@@ -67,7 +75,7 @@ const AccountManagement = () => {
         updatePayload = { is_locked: true, locked_until: lockedUntil.toISOString() };
         successMsg = '✅ Account locked for 60 days.';
       } else if (action === 'grant-premium') {
-        if (!premiumDate) {
+        if (!grantLifetimePremium && !premiumDate) {
           setAlertModal({
             show: true,
             title: 'Missing Date',
@@ -76,11 +84,24 @@ const AccountManagement = () => {
           });
           return;
         }
-        updatePayload = { premium_until: premiumDate };
-        successMsg = '✅ Premium granted!';
+        if (!premiumReason.trim()) {
+          setAlertModal({
+            show: true,
+            title: 'Missing Reason',
+            message: 'Please enter the reason for granting premium.',
+            type: 'warning'
+          });
+          return;
+        }
+        updatePayload = {
+          premium_until: grantLifetimePremium
+            ? LIFETIME_PREMIUM_DATE
+            : new Date(`${premiumDate}T23:59:59.000Z`).toISOString(),
+        };
+        successMsg = grantLifetimePremium ? 'Premium granted with lifetime access.' : 'Premium granted successfully.';
       } else if (action === 'revoke-premium') {
         updatePayload = { premium_until: null };
-        successMsg = '✅ Premium revoked!';
+        successMsg = 'Premium revoked successfully.';
       } else if (action === 'disable') {
         updatePayload = { is_disabled: true };
         successMsg = '✅ Account disabled! User cannot login.';
@@ -127,8 +148,6 @@ const AccountManagement = () => {
 
       if (!updatePayload) return;
 
-      console.log('Executing action:', action, 'with payload:', updatePayload);
-
       const { data, error } = await supabase
         .from('profiles')
         .update(updatePayload)
@@ -136,9 +155,18 @@ const AccountManagement = () => {
         .select('id, full_name, email, role, is_locked, locked_until, premium_until, avatar_url, is_disabled')
         .single();
 
-      if (error) {
-        console.error('Update error:', error);
-        throw error;
+      if (error) throw error;
+
+      if (action === 'grant-premium') {
+        const { error: grantLogError } = await supabase
+          .from('premium_grants')
+          .insert({
+            user_id: selectedUser.id,
+            granted_by: adminUser?.id || null,
+            valid_until: updatePayload.premium_until,
+            reason: premiumReason.trim(),
+          });
+        if (grantLogError) throw grantLogError;
       }
       if (!data) throw new Error('Update failed — no rows returned');
 
@@ -167,15 +195,17 @@ const AccountManagement = () => {
           user_email: selectedUser.email || null,
           role: selectedUser.role || null,
           payload: updatePayload,
+          reason: action === 'grant-premium' ? premiumReason.trim() : null,
         },
       });
       setSelectedUser(data);
       await loadUsers();
       setShowModal(false);
       setPremiumDate('');
+      setPremiumReason('');
+      setGrantLifetimePremium(false);
       setDeleteConfirm('');
     } catch (error) {
-      console.error('Action failed:', error);
       // Only show error alerts, not success
       setAlertModal({
         show: true,
@@ -191,6 +221,10 @@ const AccountManagement = () => {
   const openModal = (user, actionType) => {
     setSelectedUser(user);
     setAction(actionType);
+    setPremiumDate('');
+    setPremiumReason('');
+    setGrantLifetimePremium(false);
+    setDeleteConfirm('');
     setShowModal(true);
   };
 
@@ -283,11 +317,13 @@ const AccountManagement = () => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    {user.premium_until && new Date(user.premium_until) > new Date() ? (
+                    {isPremiumActive(user.premium_until) ? (
                       <div className="flex items-center gap-2">
                         <Award size={16} className="text-gold-400" />
                         <span className="text-sm font-semibold text-gold-600">
-                          Until {new Date(user.premium_until).toLocaleDateString('en-IN')}
+                          {isLifetimePremium(user.premium_until)
+                            ? 'Lifetime'
+                            : `Until ${new Date(user.premium_until).toLocaleDateString('en-IN')}`}
                         </span>
                       </div>
                     ) : (
@@ -328,7 +364,7 @@ const AccountManagement = () => {
                       >
                         <Award size={14} /> Premium
                       </button>
-                      {user.premium_until && new Date(user.premium_until) > new Date() && (
+                      {isPremiumActive(user.premium_until) && (
                         <button
                           onClick={() => openModal(user, 'revoke-premium')}
                           className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs font-semibold"
@@ -395,12 +431,33 @@ const AccountManagement = () => {
 
             {action === 'grant-premium' && (
               <div className="mb-4">
+                <label className="flex items-center gap-2 mb-3 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={grantLifetimePremium}
+                    onChange={e => setGrantLifetimePremium(e.target.checked)}
+                  />
+                  Grant lifetime premium
+                </label>
                 <label className="block text-sm font-medium mb-2">Valid Until</label>
                 <input
                   type="date"
                   value={premiumDate}
                   onChange={e => setPremiumDate(e.target.value)}
                   className="w-full border rounded-lg p-2"
+                  disabled={grantLifetimePremium}
+                />
+                {grantLifetimePremium && (
+                  <p className="mt-2 text-xs text-emerald-700">
+                    Lifetime premium will be set with no expiry date.
+                  </p>
+                )}
+                <label className="block text-sm font-medium mt-3 mb-2">Reason</label>
+                <textarea
+                  value={premiumReason}
+                  onChange={e => setPremiumReason(e.target.value)}
+                  className="w-full border rounded-lg p-2 min-h-[84px]"
+                  placeholder="Why are you granting premium to this user?"
                 />
               </div>
             )}
@@ -469,6 +526,8 @@ const AccountManagement = () => {
                   setShowModal(false);
                   setDeleteConfirm('');
                   setPremiumDate('');
+                  setPremiumReason('');
+                  setGrantLifetimePremium(false);
                 }}
                 className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
               >
@@ -476,7 +535,7 @@ const AccountManagement = () => {
               </button>
               <button
                 onClick={executeAction}
-                disabled={loading || (action === 'grant-premium' && !premiumDate) || (action === 'delete' && deleteConfirm !== selectedUser.full_name)}
+                disabled={loading || (action === 'grant-premium' && ((!grantLifetimePremium && !premiumDate) || !premiumReason.trim())) || (action === 'delete' && deleteConfirm !== selectedUser.full_name)}
                 className={`flex-1 px-4 py-2 rounded-lg text-white font-medium ${
                   action === 'delete' 
                     ? 'bg-red-600 hover:bg-red-700 disabled:opacity-50' 
@@ -501,4 +560,6 @@ const AccountManagement = () => {
 };
 
 export default AccountManagement;
+
+
 

@@ -39,6 +39,18 @@ const Settings = () => {
   const [showEmail, setShowEmail] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
 
+  const isMissingProfileColumnError = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    const details = String(err?.details || '').toLowerCase();
+    return (
+      message.includes('column') &&
+      (message.includes('bio') || message.includes('location') || message.includes('date_of_birth')) ||
+      details.includes('bio') ||
+      details.includes('location') ||
+      details.includes('date_of_birth')
+    );
+  };
+
   useEffect(() => {
     if (profile) {
       setFullName(profile.full_name || '');
@@ -52,19 +64,36 @@ const Settings = () => {
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
+    if (!profile?.id) {
+      openPopup('Error', 'Profile not loaded. Please refresh and try again.', 'error');
+      return;
+    }
     setLoading(true);
 
     try {
-      const { error } = await supabase
+      const basePayload = {
+        full_name: fullName.trim(),
+        phone: phone.trim()
+      };
+      const extendedPayload = {
+        ...basePayload,
+        bio: bio.trim(),
+        location: location.trim(),
+        date_of_birth: dateOfBirth || null
+      };
+
+      let { error } = await supabase
         .from('profiles')
-        .update({
-          full_name: fullName,
-          phone: phone,
-          bio: bio,
-          location: location,
-          date_of_birth: dateOfBirth
-        })
+        .update(extendedPayload)
         .eq('id', profile.id);
+
+      if (error && isMissingProfileColumnError(error)) {
+        const fallback = await supabase
+          .from('profiles')
+          .update(basePayload)
+          .eq('id', profile.id);
+        error = fallback.error;
+      }
 
       if (error) throw error;
 
