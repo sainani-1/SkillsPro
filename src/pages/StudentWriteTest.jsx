@@ -32,17 +32,28 @@ export default function StudentWriteTest() {
           .select('course_id')
           .eq('student_id', profile.id);
         const courseIds = Array.from(new Set((enrollments || []).map((e) => e.course_id).filter(Boolean)));
-        if (courseIds.length === 0) {
+        if (courseIds.length === 0 || !profile?.assigned_teacher_id) {
           if (mounted) setRows([]);
           return;
         }
 
-        const [{ data: courses }, { data: exams }] = await Promise.all([
+        const [{ data: courses }, { data: exams }, { data: conductedTests }] = await Promise.all([
           supabase.from('courses').select('id, title, category').in('id', courseIds),
           supabase.from('exams').select('id, course_id, test_name').in('course_id', courseIds),
+          supabase
+            .from('teacher_conducted_tests')
+            .select('exam_id')
+            .eq('teacher_id', profile.assigned_teacher_id),
         ]);
 
-        const examIds = (exams || []).map((e) => e.id);
+        const allowedExamIds = new Set((conductedTests || []).map((row) => row.exam_id));
+        const visibleExams = (exams || []).filter((exam) => allowedExamIds.has(exam.id));
+        if (visibleExams.length === 0) {
+          if (mounted) setRows([]);
+          return;
+        }
+
+        const examIds = visibleExams.map((e) => e.id);
         const [questionsRes, submissionsRes] = await Promise.all([
           examIds.length ? supabase.from('exam_questions').select('id, exam_id').in('exam_id', examIds) : { data: [] },
           examIds.length
@@ -68,7 +79,7 @@ export default function StudentWriteTest() {
           if (!latestSubmissionByExam[s.exam_id]) latestSubmissionByExam[s.exam_id] = s;
         });
 
-        const list = (exams || []).map((e) => ({
+        const list = visibleExams.map((e) => ({
           exam: e,
           course: courseMap[e.course_id] || null,
           questionCount: questionCountByExam[e.id] || 0,

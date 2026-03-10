@@ -7,6 +7,10 @@ import { supabase } from '../supabaseClient';
 import AvatarImage from './AvatarImage';
 import Toast from './Toast';
 import { logAdminNavigation } from '../utils/adminActivityLogger';
+import {
+  getLocalNotificationReadIds,
+  NOTIFICATION_READS_UPDATED_EVENT
+} from '../utils/notificationReadState';
 
 const Layout = () => {
   const { profile } = useAuth();
@@ -21,17 +25,6 @@ const Layout = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
   const seenRealtimeNotificationIdsRef = useRef(new Set());
   const seenActivityEventKeysRef = useRef(new Set());
-
-  const getLocalReadIds = (userId) => {
-    if (!userId) return new Set();
-    try {
-      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
-      const ids = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(ids) ? ids : []);
-    } catch {
-      return new Set();
-    }
-  };
 
   const isFetchNetworkIssue = (err) => {
     const message = String(err?.message || '').toLowerCase();
@@ -140,7 +133,6 @@ const Layout = () => {
       { label: 'Teacher Requests', path: '/app/admin/teacher-requests' },
       { label: 'Account Management', path: '/app/admin/accounts' },
       { label: 'Post Notifications', path: '/app/admin/notifications' },
-      { label: 'Leave Requests', path: '/app/leaves' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
       { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
       { label: 'Manage Exam Retakes', path: '/app/admin/exam-retakes' },
@@ -230,7 +222,7 @@ const Layout = () => {
         const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
         const readTrackingEnabled =
           localStorage.getItem(readTrackingKey) !== 'false';
-        const localReadIds = getLocalReadIds(profile.id);
+        const localReadIds = getLocalNotificationReadIds(profile.id);
 
         if (!readTrackingEnabled) {
           const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
@@ -272,10 +264,12 @@ const Layout = () => {
     const interval = setInterval(fetchUnreadNotifications, 60000);
     const onFocus = () => fetchUnreadNotifications();
     window.addEventListener('focus', onFocus);
+    window.addEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
     };
   }, [profile?.id, profile?.role, notificationPollingEnabled]);
 

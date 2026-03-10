@@ -7,6 +7,7 @@ import {
   releaseSingleSession,
   setSingleSessionNotice
 } from '../utils/singleSession';
+import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySession';
 
 const AuthContext = createContext();
 
@@ -190,6 +191,12 @@ export const AuthProvider = ({ children }) => {
       
       setProfile(data);
       writeProfileCache({ userId: data.id, profile: data });
+      writeDailyLoginState({
+        userId,
+        email: data.email || '',
+        role: data.role || '',
+        fullName: data.full_name || ''
+      });
     } catch (error) {
       setProfile(null);
     } finally {
@@ -210,6 +217,7 @@ export const AuthProvider = ({ children }) => {
     setProfile(null);
     clearProfileCache();
     clearStoredSessionKey(currentUserId);
+    clearDailyLoginState();
     try {
       sessionStorage.removeItem('admin_mfa_verified');
       sessionStorage.removeItem('admin_mfa_verified_user');

@@ -1,8 +1,20 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { CheckCircle } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../context/AuthContext';
 
 const Home = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner message="Checking session..." />;
+  }
+
+  if (user?.id) {
+    return <Navigate to="/app" replace />;
+  }
+
   return (
     <div className="bg-slate-50 min-h-screen flex flex-col">
       <nav className="p-6 flex justify-between items-center max-w-7xl mx-auto w-full">

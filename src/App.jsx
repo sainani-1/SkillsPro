@@ -116,6 +116,13 @@ const ProtectedRoute = ({ children }) => {
   const googleProfileIncomplete =
     isGoogleAuth && (!profile?.google_profile_completed || !profile?.terms_accepted);
   if (googleProfileIncomplete) return <Navigate to="/complete-profile" />;
+  if (profile?.role === 'admin') {
+    const mfaVerified = sessionStorage.getItem("admin_mfa_verified") === "true";
+    const mfaVerifiedUser = sessionStorage.getItem("admin_mfa_verified_user");
+    if (!mfaVerified || mfaVerifiedUser !== profile?.id) {
+      return <Navigate to="/admin-mfa-verify" replace />;
+    }
+  }
 
   // Check if user is disabled
   if (profile?.is_disabled) {

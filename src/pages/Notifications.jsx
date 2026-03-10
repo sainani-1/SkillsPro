@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Bell, CheckCircle, X } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import {
+  getLocalNotificationReadIds,
+  NOTIFICATION_READS_UPDATED_EVENT,
+  saveLocalNotificationReadIds
+} from '../utils/notificationReadState';
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -43,22 +48,6 @@ export default function Notifications() {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(value || '')
     );
-  const getLocalReadIds = (userId) => {
-    if (!userId) return new Set();
-    try {
-      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
-      const ids = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(ids) ? ids : []);
-    } catch {
-      return new Set();
-    }
-  };
-
-  const saveLocalReadIds = (userId, idsSet) => {
-    if (!userId) return;
-    localStorage.setItem(`localNotificationReads_${userId}`, JSON.stringify(Array.from(idsSet)));
-  };
-
   useEffect(() => {
     fetchUser();
   }, []);
@@ -80,10 +69,12 @@ export default function Notifications() {
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
     };
   }, [user?.id]);
 
@@ -217,7 +208,7 @@ export default function Notifications() {
       const dbNotificationIds = notificationIds.filter(isUuid);
       const readTrackingKey = `notificationReadsEnabled_${user.id}`;
       let readTrackingEnabled = localStorage.getItem(readTrackingKey) !== 'false';
-      const localReadIds = getLocalReadIds(user.id);
+      const localReadIds = getLocalNotificationReadIds(user.id);
 
       // Fetch read receipts for this user only (best-effort)
       let readIds = new Set(localReadIds);
@@ -232,7 +223,7 @@ export default function Notifications() {
           if (!readError) {
             const dbReadIds = reads?.map((r) => r.notification_id) || [];
             readIds = new Set([...readIds, ...dbReadIds]);
-            saveLocalReadIds(user.id, readIds);
+            saveLocalNotificationReadIds(user.id, readIds);
           } else {
             readTrackingEnabled = false;
             localStorage.setItem(readTrackingKey, 'false');
@@ -267,9 +258,9 @@ export default function Notifications() {
     try {
       if (!user?.id) return;
 
-      const localReadIds = getLocalReadIds(user.id);
+      const localReadIds = getLocalNotificationReadIds(user.id);
       localReadIds.add(notificationId);
-      saveLocalReadIds(user.id, localReadIds);
+      saveLocalNotificationReadIds(user.id, localReadIds);
       setNotifications((prev) =>
         prev.map((notif) =>
           notif.id === notificationId ? { ...notif, isRead: true } : notif
@@ -321,9 +312,9 @@ export default function Notifications() {
       const unread = notifications.filter((n) => !n.isRead);
       if (!unread.length) return;
 
-      const localReadIds = getLocalReadIds(user.id);
+      const localReadIds = getLocalNotificationReadIds(user.id);
       unread.forEach((n) => localReadIds.add(n.id));
-      saveLocalReadIds(user.id, localReadIds);
+      saveLocalNotificationReadIds(user.id, localReadIds);
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
 
       const readTrackingKey = `notificationReadsEnabled_${user.id}`;

@@ -114,18 +114,6 @@ const ResetPassword = () => {
     setSending(true);
     setStatus({ type: '', message: '' });
     try {
-      const { data: existingProfile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id')
-        .ilike('email', normalizedEmail)
-        .maybeSingle();
-
-      if (profileError) throw profileError;
-      if (!existingProfile?.id) {
-        setStatus({ type: 'error', message: 'Email not registered. Register first.' });
-        return;
-      }
-
       const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo: `${appBaseUrl}/reset-password-confirm`
       });
@@ -133,7 +121,7 @@ const ResetPassword = () => {
 
       setStatus({
         type: 'success',
-        message: `Reset link sent. Open your email and continue from ${appBaseUrl}/reset-password-confirm`
+        message: `If this email is registered, a reset link has been sent. Continue from ${appBaseUrl}/reset-password-confirm`
       });
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Failed to send reset link.' });

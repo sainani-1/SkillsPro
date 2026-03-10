@@ -45,65 +45,43 @@ const AdminDashboard = ({ initialTab = 'overview' }) => {
       });
     };
 
-    if (activeTab === 'overview') {
-      return (
-        <div className="space-y-6">
-          <div className="bg-gradient-to-r from-purple-600 to-blue-700 p-6 rounded-xl text-white">
-            <div className="flex items-center gap-3 mb-1">
-              <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-10 h-10 rounded-full object-contain mix-blend-multiply" />
-              <h1 className="text-2xl font-bold">Admin Control Panel</h1>
-            </div>
-            <p className="text-purple-100">Manage the entire SkillPro platform</p>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <StatCard icon={<Users className="text-blue-600" />} label="Students" value={stats.totalStudents} bgColor="bg-blue-50" />
-            <StatCard icon={<Award className="text-gold-600" />} label="Premium" value={stats.premiumStudents} bgColor="bg-gold-50" />
-            <StatCard icon={<UserPlus className="text-green-600" />} label="Teachers" value={stats.totalTeachers} bgColor="bg-green-50" />
-            <StatCard icon={<Video className="text-purple-600" />} label="Courses" value={stats.totalCourses} bgColor="bg-purple-50" />
-            <StatCard icon={<TrendingUp className="text-emerald-600" />} label="Certificates" value={stats.certificates} bgColor="bg-emerald-50" />
-            <StatCard icon={<Calendar className="text-orange-600" />} label="Pending Leaves" value={stats.pendingLeaves} bgColor="bg-orange-50" />
-          </div>
-
-          {/* Quick Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Link to="/app/admin/student-progress" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-              <Users className="text-blue-600 mb-3" size={32} />
-              <h3 className="font-bold mb-1">Student Progress</h3>
-              <p className="text-xs text-slate-600">Track all student enrollments and certificates</p>
-            </Link>
-            <Link to="/app/admin/manage-premium" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-              <Award className="text-gold-600 mb-3" size={32} />
-              <h3 className="font-bold mb-1">Manage Premium</h3>
-              <p className="text-xs text-slate-600">Grant or revoke premium access</p>
-            </Link>
-            <Link to="/app/admin/teacher-assignment" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-              <UserPlus className="text-green-600 mb-3" size={32} />
-              <h3 className="font-bold mb-1">Assign Teachers</h3>
-              <p className="text-xs text-slate-600">Assign teachers to students</p>
-            </Link>
-            <Link to="/app/leaves" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-              <Calendar className="text-orange-600 mb-3" size={32} />
-              <h3 className="font-bold mb-1">Leave Requests</h3>
-              <p className="text-xs text-slate-600">Approve or reject teacher leaves</p>
-            </Link>
-          </div>
-        </div>
-      );
-    }
-
     return (
-        <div className="space-y-6">
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-purple-600 to-blue-700 p-6 rounded-xl text-white">
+          <div className="flex items-center gap-3 mb-1">
+            <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-10 h-10 rounded-full object-contain mix-blend-multiply" />
             <h1 className="text-2xl font-bold">Admin Control Panel</h1>
-            <div className="flex space-x-4 border-b">
-                <button onClick={() => setActiveTab('overview')} className={`pb-2 ${activeTab === 'overview' ? 'border-b-2 border-nani-accent font-bold' : ''}`}>Overview</button>
-                <button onClick={() => setActiveTab('leaves')} className={`pb-2 ${activeTab === 'leaves' ? 'border-b-2 border-nani-accent font-bold' : ''}`}>Leave Requests</button>
-                <button onClick={() => setActiveTab('monitor')} className={`pb-2 ${activeTab === 'monitor' ? 'border-b-2 border-nani-accent font-bold' : ''}`}>Class Monitor</button>
-            </div>
-
-            {activeTab === 'leaves' && <LeaveRequests />}
+          </div>
+          <p className="text-purple-100">Manage the entire SkillPro platform</p>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCard icon={<Users className="text-blue-600" />} label="Students" value={stats.totalStudents} bgColor="bg-blue-50" />
+          <StatCard icon={<Award className="text-gold-600" />} label="Premium" value={stats.premiumStudents} bgColor="bg-gold-50" />
+          <StatCard icon={<UserPlus className="text-green-600" />} label="Teachers" value={stats.totalTeachers} bgColor="bg-green-50" />
+          <StatCard icon={<Video className="text-purple-600" />} label="Courses" value={stats.totalCourses} bgColor="bg-purple-50" />
+          <StatCard icon={<TrendingUp className="text-emerald-600" />} label="Certificates" value={stats.certificates} bgColor="bg-emerald-50" />
+          <StatCard icon={<Calendar className="text-orange-600" />} label="Pending Leaves" value={stats.pendingLeaves} bgColor="bg-orange-50" />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Link to="/app/admin/student-progress" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <Users className="text-blue-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Student Progress</h3>
+            <p className="text-xs text-slate-600">Track all student enrollments and certificates</p>
+          </Link>
+          <Link to="/app/admin/manage-premium" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <Award className="text-gold-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Manage Premium</h3>
+            <p className="text-xs text-slate-600">Grant or revoke premium access</p>
+          </Link>
+          <Link to="/app/admin/teacher-assignment" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <UserPlus className="text-green-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Assign Teachers</h3>
+            <p className="text-xs text-slate-600">Assign teachers to students</p>
+          </Link>
+        </div>
+      </div>
     );
 };
 

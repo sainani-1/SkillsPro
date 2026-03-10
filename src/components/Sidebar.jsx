@@ -3,6 +3,10 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
+import {
+  getLocalNotificationReadIds,
+  NOTIFICATION_READS_UPDATED_EVENT
+} from '../utils/notificationReadState';
 
 const Sidebar = () => {
   const { profile, signOut } = useAuth();
@@ -19,17 +23,6 @@ const Sidebar = () => {
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
   const [notificationPollingEnabled, setNotificationPollingEnabled] = useState(true);
-
-  const getLocalReadIds = (userId) => {
-    if (!userId) return new Set();
-    try {
-      const raw = localStorage.getItem(`localNotificationReads_${userId}`);
-      const ids = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(ids) ? ids : []);
-    } catch {
-      return new Set();
-    }
-  };
 
   const isFetchNetworkIssue = (err) => {
     const message = String(err?.message || '').toLowerCase();
@@ -167,7 +160,7 @@ const Sidebar = () => {
         const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
         const readTrackingEnabled =
           localStorage.getItem(readTrackingKey) !== 'false';
-        const localReadIds = getLocalReadIds(profile.id);
+        const localReadIds = getLocalNotificationReadIds(profile.id);
 
         if (!readTrackingEnabled) {
           const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
@@ -214,10 +207,12 @@ const Sidebar = () => {
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
     };
   }, [profile?.id, role, location.pathname]);
 
@@ -744,15 +739,6 @@ const Sidebar = () => {
             <NavLink to="/app/admin/notifications" className={navItemClass} title="Post Notifications">
               <Bell size={28} />
               {shouldShowText && <span>Post Notifications</span>}
-            </NavLink>
-            <NavLink to="/app/leaves" className={navItemClass} title="Leave Requests">
-              <Calendar size={28} />
-              {shouldShowText && <span>Leave Requests</span>}
-              {newLeaveRequests > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                  {newLeaveRequests > 9 ? '9+' : newLeaveRequests}
-                </span>
-              )}
             </NavLink>
             <NavLink to="/app/admin/courses" className={navItemClass} title="Courses">
               <BookOpen size={28} />
