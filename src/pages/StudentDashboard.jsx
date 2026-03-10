@@ -28,6 +28,7 @@ const StudentDashboard = () => {
   const [showOfferCongrats, setShowOfferCongrats] = useState(false);
   const [classAlerts, setClassAlerts] = useState([]);
   const [premiumCost, setPremiumCost] = useState(null);
+  const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
@@ -131,10 +132,16 @@ const StudentDashboard = () => {
       .select('*')
       .eq('applies_to_all', true);
 
+    const { data: redemptions } = await supabase
+      .from('offer_redemptions')
+      .select('offer_id, status')
+      .eq('user_id', profile.id);
+
     // Merge and deduplicate offers
     const allOffers = [...assignedOffers, ...(globalOffers || [])];
     const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex(o => o.id === offer.id) === idx);
     setOffers(uniqueOffers);
+    setRedeemedOfferIds(new Set((redemptions || []).filter(r => r.status === 'redeemed').map(r => r.offer_id)));
     if (uniqueOffers.length > 0) setShowOfferCongrats(true);
   };
 
@@ -249,11 +256,15 @@ const StudentDashboard = () => {
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-pink-700">{offer.title}</span>
                   <span className="ml-2 text-xs text-slate-500">{offer.is_lifetime_free ? 'Lifetime Free' : offer.discount_type === 'percent' ? `${offer.discount_value}% Off` : `Flat ₹${offer.discount_value} Off`}</span>
+                  {redeemedOfferIds.has(offer.id) && <span className="ml-2 text-xs font-semibold text-green-700">Redeemed</span>}
                 </div>
                 <div className="text-xs text-slate-500">{offer.description}</div>
-                <button className="bg-green-500 text-white px-4 py-2 rounded font-semibold mt-2 w-max" onClick={() => window.location.href='/app/payment'}>
-                  Claim Offer
-                </button>
+                <Link
+                  className={`px-4 py-2 rounded font-semibold mt-2 w-max ${redeemedOfferIds.has(offer.id) ? 'bg-slate-300 text-slate-600 pointer-events-none' : 'bg-green-500 text-white'}`}
+                  to={redeemedOfferIds.has(offer.id) ? '#' : `/app/payment?offer=${offer.id}`}
+                >
+                  {redeemedOfferIds.has(offer.id) ? 'Already Used' : 'Claim Offer'}
+                </Link>
               </div>
             ))}
           </div>

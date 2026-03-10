@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Gift } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const Offers = () => {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [popupCoupon, setPopupCoupon] = useState(null);
+  const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
 
   useEffect(() => {
     const fetchOffers = async () => {
@@ -25,10 +27,16 @@ const Offers = () => {
         .select('*')
         .eq('applies_to_all', true);
 
+      const { data: redemptions } = await supabase
+        .from('offer_redemptions')
+        .select('offer_id, status')
+        .eq('user_id', user.id);
+
       // Merge and deduplicate offers
       const allOffers = [...assignedOffers, ...(globalOffers || [])];
       const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex(o => o.id === offer.id) === idx);
       setOffers(uniqueOffers);
+      setRedeemedOfferIds(new Set((redemptions || []).filter(r => r.status === 'redeemed').map(r => r.offer_id)));
       setLoading(false);
     };
     fetchOffers();
@@ -47,6 +55,9 @@ const Offers = () => {
         <div className="space-y-4">
           {offers.map(offer => (
             <div key={offer.id} className="bg-pink-50 border border-pink-200 rounded-lg p-4 flex flex-col gap-2">
+              {redeemedOfferIds.has(offer.id) && (
+                <div className="text-xs font-semibold text-green-700">Redeemed</div>
+              )}
               <div className="flex items-center gap-2 mb-2">
                 <Gift className="text-pink-500" size={24} />
                 <span className="font-semibold text-pink-700 text-lg">{offer.coupon_name || offer.title}</span>
@@ -59,9 +70,12 @@ const Offers = () => {
               </div>
               <div className={`text-xs font-semibold mb-2 ${offer.status === 'expired' || (offer.valid_until && new Date(offer.valid_until) < new Date()) ? 'text-red-600' : 'text-green-600'}`}>Status: {offer.status === 'expired' || (offer.valid_until && new Date(offer.valid_until) < new Date()) ? 'Expired' : 'Active'}</div>
               <div className="flex gap-2 mt-2">
-                <button className="bg-green-500 text-white px-4 py-2 rounded font-semibold" onClick={() => window.location.href='/app/payment'}>
-                  Claim Offer
-                </button>
+                <Link
+                  className={`px-4 py-2 rounded font-semibold text-center ${redeemedOfferIds.has(offer.id) ? 'bg-slate-300 text-slate-600 pointer-events-none' : 'bg-green-500 text-white'}`}
+                  to={redeemedOfferIds.has(offer.id) ? '#' : `/app/payment?offer=${offer.id}`}
+                >
+                  {redeemedOfferIds.has(offer.id) ? 'Already Used' : 'Claim Offer'}
+                </Link>
                 <button className="bg-pink-600 text-white px-4 py-2 rounded font-semibold" onClick={() => setPopupCoupon(offer.coupon_code || offer.title)}>
                   Show Coupon Code
                 </button>

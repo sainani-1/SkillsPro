@@ -234,7 +234,6 @@ function TeacherConductTests() {
   useEffect(() => {
     if (!profile?.id) return;
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id]);
 
   const ensureExamForCourse = async (courseId) => {

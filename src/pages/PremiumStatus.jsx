@@ -28,6 +28,7 @@ const PremiumStatus = () => {
   const [showGiftAnim, setShowGiftAnim] = useState(false);
   const [selectedGift, setSelectedGift] = useState(null);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
   const { popupNode, openPopup } = usePopup();
 
   useEffect(() => {
@@ -75,10 +76,16 @@ const PremiumStatus = () => {
         console.error('Error loading global offers:', globalOffersError);
       }
 
+      const { data: redemptions } = await supabase
+        .from('offer_redemptions')
+        .select('offer_id, status')
+        .eq('user_id', profile.id);
+
       // Merge and deduplicate offers
       const allOffers = [...assignedOffers, ...(globalOffers || [])];
       const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex(o => o.id === offer.id) === idx);
       setGifts(uniqueOffers);
+      setRedeemedOfferIds(new Set((redemptions || []).filter(r => r.status === 'redeemed').map(r => r.offer_id)));
       // Determine premium status
       const isPrem = profile?.premium_until && new Date(profile.premium_until) > new Date();
       if (isPrem) {
@@ -260,7 +267,7 @@ const PremiumStatus = () => {
                 <div className="text-right">
                   <p className="text-sm text-slate-600">Valid until</p>
                   <p className="font-semibold text-slate-900">
-                    {new Date(payment.valid_until).toLocaleDateString()}
+                    {payment.valid_until ? new Date(payment.valid_until).toLocaleDateString() : '—'}
                   </p>
                 </div>
               </div>
@@ -287,7 +294,9 @@ const PremiumStatus = () => {
                 <div className="text-xs text-slate-500">
                   Valid Until: {gift.valid_until ? new Date(gift.valid_until).toLocaleDateString() : '—'}
                 </div>
-                <div className={`text-xs font-semibold ${gift.status === 'expired' || (gift.valid_until && new Date(gift.valid_until) < new Date()) ? 'text-red-600' : 'text-green-600'}`}>Status: {gift.status === 'expired' || (gift.valid_until && new Date(gift.valid_until) < new Date()) ? 'Expired' : 'Active'}</div>
+                <div className={`text-xs font-semibold ${gift.status === 'expired' || (gift.valid_until && new Date(gift.valid_until) < new Date()) ? 'text-red-600' : 'text-green-600'}`}>
+                  Status: {redeemedOfferIds.has(gift.id) ? 'Redeemed' : (gift.status === 'expired' || (gift.valid_until && new Date(gift.valid_until) < new Date()) ? 'Expired' : 'Active')}
+                </div>
                 <button className="mt-2 bg-pink-500 text-white rounded px-3 py-1 font-semibold hover:bg-pink-600 transition-all" onClick={() => { setSelectedGift(gift); setShowGiftAnim(true); }}>Show Animation</button>
               </div>
             ))}
