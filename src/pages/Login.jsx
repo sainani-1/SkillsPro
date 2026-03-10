@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import Toast from '../components/Toast';
 import { claimSingleSession, takeSingleSessionNotice } from '../utils/singleSession';
+import { attachPendingReferral } from '../utils/referrals';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -432,6 +433,12 @@ const Login = () => {
         if (restoredAvatar) {
           userProfile = { ...userProfile, avatar_url: restoredAvatar };
         }
+      }
+
+      try {
+        await attachPendingReferral(signInData.user.id, signInData.user.email || email.trim());
+      } catch (referralError) {
+        console.warn('Referral attach failed after login:', referralError.message || referralError);
       }
 
       // Check if account is disabled
