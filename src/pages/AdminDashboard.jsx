@@ -102,6 +102,16 @@ const AdminDashboard = () => {
             <h3 className="font-bold mb-1">Premium Analytics</h3>
             <p className="text-xs text-slate-600">Track upgrade clicks, leads, pass claims, and referral rewards</p>
           </Link>
+          <Link to="/app/admin/lead-inbox" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <FileText className="text-sky-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Lead Inbox</h3>
+            <p className="text-xs text-slate-600">View homepage leads, respond, and export to Excel CSV</p>
+          </Link>
+          <Link to="/app/admin/growth-analytics" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <TrendingUp className="text-emerald-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Growth Analytics</h3>
+            <p className="text-xs text-slate-600">See referrals, leads, premium events, and trials</p>
+          </Link>
         </div>
       </div>
     );

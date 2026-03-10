@@ -14,7 +14,7 @@ export const trackPremiumEvent = async (eventName, source, metadata = {}, userId
 };
 
 export const submitMarketingLead = async (payload) => {
-  return supabase.from('marketing_leads').insert(payload).select('id').single();
+  return supabase.from('marketing_leads').insert(payload);
 };
 
 export const buildWhatsAppShareUrl = (text) =>

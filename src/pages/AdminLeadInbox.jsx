@@ -20,11 +20,14 @@ const AdminLeadInbox = () => {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [leads, setLeads] = useState([]);
   const [drafts, setDrafts] = useState({});
+  const [errorMessage, setErrorMessage] = useState('');
+  const [supportsResponseFields, setSupportsResponseFields] = useState(true);
 
   const loadLeads = async () => {
     setLoading(true);
+    setErrorMessage('');
     try {
-      const { data } = await supabase
+      const detailedResponse = await supabase
         .from('marketing_leads')
         .select(`
           id,
@@ -42,10 +45,34 @@ const AdminLeadInbox = () => {
           responder:profiles!marketing_leads_responded_by_fkey(full_name, email)
         `)
         .order('created_at', { ascending: false });
-      setLeads(data || []);
+
+      let rows = detailedResponse.data || [];
+      let canRespond = !detailedResponse.error;
+
+      if (detailedResponse.error) {
+        const fallbackResponse = await supabase
+          .from('marketing_leads')
+          .select('id, name, email, phone, interest_type, source, notes, created_at')
+          .order('created_at', { ascending: false });
+
+        if (fallbackResponse.error) {
+          throw fallbackResponse.error;
+        }
+
+        rows = (fallbackResponse.data || []).map((row) => ({
+          ...row,
+          status: 'pending',
+          admin_response: '',
+          responded_at: null,
+          responder: null,
+        }));
+      }
+
+      setSupportsResponseFields(canRespond);
+      setLeads(rows);
       setDrafts(
         Object.fromEntries(
-          (data || []).map((row) => [
+          rows.map((row) => [
             row.id,
             {
               status: row.status || 'pending',
@@ -54,6 +81,10 @@ const AdminLeadInbox = () => {
           ])
         )
       );
+    } catch (error) {
+      console.error('Error loading leads:', error);
+      setErrorMessage(error.message || 'Failed to load leads.');
+      setLeads([]);
     } finally {
       setLoading(false);
     }
@@ -89,6 +120,7 @@ const AdminLeadInbox = () => {
   const saveLeadResponse = async (leadId) => {
     const draft = drafts[leadId];
     if (!draft) return;
+    if (!supportsResponseFields) return;
     setSavingId(leadId);
     try {
       const nextStatus =
@@ -105,7 +137,11 @@ const AdminLeadInbox = () => {
           updated_at: new Date().toISOString(),
         })
         .eq('id', leadId);
+      setErrorMessage('');
       await loadLeads();
+    } catch (error) {
+      console.error('Error saving lead response:', error);
+      setErrorMessage(error.message || 'Failed to save response.');
     } finally {
       setSavingId(null);
     }
@@ -177,6 +213,19 @@ const AdminLeadInbox = () => {
           </button>
         </div>
       </div>
+
+      {!supportsResponseFields ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Lead list is visible, but response/status fields are not available until the migration
+          `20260310_marketing_lead_responses.sql` is applied.
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border bg-white p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -260,6 +309,7 @@ const AdminLeadInbox = () => {
                       <select
                         value={draft.status}
                         onChange={(e) => updateDraft(lead.id, 'status', e.target.value)}
+                        disabled={!supportsResponseFields}
                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="pending">Pending</option>
@@ -274,13 +324,14 @@ const AdminLeadInbox = () => {
                         value={draft.admin_response}
                         onChange={(e) => updateDraft(lead.id, 'admin_response', e.target.value)}
                         placeholder="Write your response or follow-up notes here..."
+                        disabled={!supportsResponseFields}
                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => saveLeadResponse(lead.id)}
-                      disabled={savingId === lead.id}
+                      disabled={savingId === lead.id || !supportsResponseFields}
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                     >
                       <MessageSquare size={16} />
