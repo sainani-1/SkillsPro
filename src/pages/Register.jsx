@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import { prepareAvatarFile } from '../utils/imageUtils';
+import { attachPendingReferral, savePendingReferralCode } from '../utils/referrals';
 
 const Register = () => {
   const [loading, setLoading] = useState(false);
@@ -25,6 +26,7 @@ const Register = () => {
   const [errors, setErrors] = useState({});
   const [registrationPaused, setRegistrationPaused] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [searchParams] = useSearchParams();
 
   // Stream options based on education level
   const streamOptions = {
@@ -63,6 +65,13 @@ const Register = () => {
   };
 
   // Check if registrations are paused
+  useEffect(() => {
+    const referralCode = searchParams.get('ref');
+    if (referralCode) {
+      savePendingReferralCode(referralCode);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     const checkRegistrationStatus = async () => {
       try {
@@ -296,6 +305,12 @@ const Register = () => {
       }], { onConflict: 'id' });
       if (profileError && !String(profileError.message || '').toLowerCase().includes('row-level security')) {
         throw profileError;
+      }
+
+      try {
+        await attachPendingReferral(user.id, formData.email.trim());
+      } catch (referralError) {
+        console.warn('Referral attach failed:', referralError.message || referralError);
       }
 
       setAlertModal({

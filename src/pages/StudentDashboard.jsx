@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
-import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw, FileText } from 'lucide-react';
+import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw, FileText, Copy, Share2 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
+import { ensureReferralCode } from '../utils/referrals';
+import { copyText, trackPremiumEvent } from '../utils/growth';
+import { getPublicAppUrl } from '../utils/appUrl';
 
 // Offer congrats widget
 const OfferCongrats = ({ offer }) => (
@@ -29,6 +32,7 @@ const StudentDashboard = () => {
   const [classAlerts, setClassAlerts] = useState([]);
   const [premiumCost, setPremiumCost] = useState(null);
   const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
+  const [referralCode, setReferralCode] = useState('');
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
@@ -116,6 +120,19 @@ const StudentDashboard = () => {
     };
     loadPremiumCost();
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const loadReferralCode = async () => {
+      try {
+        const code = await ensureReferralCode(profile.id, profile.full_name);
+        setReferralCode(code || '');
+      } catch (error) {
+        console.error('Error loading referral code:', error);
+      }
+    };
+    loadReferralCode();
+  }, [profile?.id, profile?.full_name]);
 
   const fetchOffers = async () => {
     if (!profile?.id) return;
@@ -234,6 +251,20 @@ const StudentDashboard = () => {
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   };
 
+  const referralLink = referralCode ? `${getPublicAppUrl()}/register?ref=${encodeURIComponent(referralCode)}` : '';
+
+  const copyReferralLink = async () => {
+    if (!referralLink) return;
+    await copyText(referralLink);
+    trackPremiumEvent('referral_link_copied', 'student_dashboard', { referralCode }, profile?.id);
+  };
+
+  const shareReferralWhatsApp = () => {
+    if (!referralLink) return;
+    trackPremiumEvent('referral_link_shared_whatsapp', 'student_dashboard', { referralCode }, profile?.id);
+    window.open(`https://wa.me/?text=${encodeURIComponent(`Join SkillPro with my link: ${referralLink}. When you buy premium, I get 7 bonus premium days.`)}`, '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <div className="space-y-8">
       {/* Premium Gift Celebration */}
@@ -347,6 +378,40 @@ const StudentDashboard = () => {
           <Link to="/app/resume-builder" className="inline-flex items-center justify-center rounded-xl bg-nani-dark px-5 py-3 font-semibold text-white hover:bg-nani-accent">
             Open Resume Builder
           </Link>
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-1">
+        <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
+          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
+            <Share2 size={14} />
+            Campus ambassador
+          </p>
+          <h2 className="mt-2 text-xl font-bold text-slate-900">Invite classmates and earn 7 premium days.</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Share your referral link. When a referred user buys premium, your premium validity extends automatically.
+          </p>
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-3 text-sm font-mono text-slate-700 break-all">
+            {referralLink || 'Preparing your referral link...'}
+          </div>
+          <div className="mt-4 flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={copyReferralLink}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700"
+            >
+              <Copy size={16} />
+              Copy Invite Link
+            </button>
+            <button
+              type="button"
+              onClick={shareReferralWhatsApp}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-white px-4 py-3 font-semibold text-emerald-700 hover:bg-emerald-50"
+            >
+              <MessageCircle size={16} />
+              Share on WhatsApp
+            </button>
+          </div>
         </div>
       </div>
 

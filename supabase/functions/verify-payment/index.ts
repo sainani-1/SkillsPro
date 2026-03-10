@@ -31,6 +31,12 @@ const addMonthsFrom = (baseDateIso: string | null | undefined, months: number) =
   return baseDate.toISOString();
 };
 
+const addDaysFrom = (baseDateIso: string | null | undefined, days: number) => {
+  const baseDate = baseDateIso && new Date(baseDateIso) > new Date() ? new Date(baseDateIso) : new Date();
+  baseDate.setDate(baseDate.getDate() + days);
+  return baseDate.toISOString();
+};
+
 const toHex = (buffer: ArrayBuffer) =>
   Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -57,6 +63,43 @@ const verifyRazorpaySignature = async (orderId: string, paymentId: string, signa
 
   const signed = await crypto.subtle.sign("HMAC", key, encoder.encode(`${orderId}|${paymentId}`));
   return toHex(signed) === signature.toLowerCase();
+};
+
+const rewardReferralIfEligible = async (adminClient: ReturnType<typeof createClient>, referredUserId: string, paymentId: string, now: string) => {
+  const { data: referral } = await adminClient
+    .from("referrals")
+    .select("id, referrer_user_id, reward_days, status")
+    .eq("referred_user_id", referredUserId)
+    .in("status", ["joined", "qualified"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!referral?.referrer_user_id) return;
+
+  const { data: referrerProfile } = await adminClient
+    .from("profiles")
+    .select("premium_until")
+    .eq("id", referral.referrer_user_id)
+    .maybeSingle();
+
+  const rewardDays = Number(referral.reward_days || 7);
+  const rewardedPremiumUntil = addDaysFrom(referrerProfile?.premium_until, rewardDays);
+
+  await adminClient
+    .from("profiles")
+    .update({ premium_until: rewardedPremiumUntil })
+    .eq("id", referral.referrer_user_id);
+
+  await adminClient
+    .from("referrals")
+    .update({
+      status: "rewarded",
+      qualified_payment_id: paymentId,
+      rewarded_at: now,
+      updated_at: now,
+    })
+    .eq("id", referral.id);
 };
 
 Deno.serve(async (req: Request) => {
@@ -238,6 +281,8 @@ Deno.serve(async (req: Request) => {
       { onConflict: "offer_id,user_id" },
     );
   }
+
+  await rewardReferralIfEligible(adminClient, user.id, payment.id, now);
 
   return jsonResponse({
     status: "success",

@@ -2070,6 +2070,32 @@ export default function Exam() {
                       View Certificate
                     </button>
                   ) : null}
+                  {resultData.passed ? (
+                    <button
+                      onClick={() => navigate("/app/payment")}
+                      className="px-6 py-2.5 rounded-lg bg-amber-500 text-white font-semibold hover:bg-amber-600"
+                    >
+                      Unlock More Premium Features
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => navigate("/app/payment")}
+                      className="px-6 py-2.5 rounded-lg bg-amber-500 text-white font-semibold hover:bg-amber-600"
+                    >
+                      Get Premium Support
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      const text = resultData.passed
+                        ? `I passed my SkillPro exam. Join here: ${window.location.origin}/register`
+                        : `I’m preparing on SkillPro. Check it out here: ${window.location.origin}/register`;
+                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+                    }}
+                    className="px-6 py-2.5 rounded-lg bg-emerald-500 text-white font-semibold hover:bg-emerald-600"
+                  >
+                    Share on WhatsApp
+                  </button>
                   <button
                     onClick={() => navigate("/app/courses")}
                     className="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800"

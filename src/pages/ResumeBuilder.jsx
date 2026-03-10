@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, Eye, FileText, Sparkles } from 'lucide-react';
+import { Download, Eye, FileText, MessageCircle, Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../supabaseClient';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
 
 const defaultResume = {
   role: 'Frontend Developer',
@@ -35,10 +39,34 @@ const defaultResume = {
 };
 
 const ResumeBuilder = () => {
-  const { profile, user } = useAuth();
+  const { profile, user, isPremium } = useAuth();
   const previewRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
   const [resume, setResume] = useState(defaultResume);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [accessMode, setAccessMode] = useState('premium');
+
+  useEffect(() => {
+    const loadAccessMode = async () => {
+      try {
+        const { data } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'resume_builder_access')
+          .maybeSingle();
+        setAccessMode(data?.value === 'free' ? 'free' : 'premium');
+      } finally {
+        setAccessLoading(false);
+      }
+    };
+
+    loadAccessMode();
+  }, []);
+
+  useEffect(() => {
+    if (!profile?.id && !user?.id) return;
+    trackPremiumEvent('resume_builder_viewed', 'resume_builder', { accessMode }, profile?.id || user?.id || null);
+  }, [profile?.id, user?.id, accessMode]);
 
   useEffect(() => {
     if (!profile && !user) return;
@@ -124,6 +152,81 @@ const ResumeBuilder = () => {
     .map((item) => item.trim())
     .filter(Boolean);
 
+  if (accessLoading) {
+    return <LoadingSpinner message="Loading resume builder..." />;
+  }
+
+  const hasAccess = accessMode === 'free' || isPremium(profile);
+
+  if (!hasAccess) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-3xl bg-gradient-to-r from-slate-950 via-nani-dark to-amber-900 p-6 md:p-8 text-white shadow-xl">
+          <h1 className="text-3xl md:text-4xl font-serif font-bold">Resume Builder</h1>
+          <p className="mt-3 text-slate-200">
+            This feature is currently available for premium users only.
+          </p>
+        </div>
+
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-amber-900 space-y-5">
+          <div>
+            <p className="text-lg font-semibold">Premium access required</p>
+            <p className="mt-2 text-sm">
+              Admin has set Resume Builder to premium-only mode. Upgrade to premium to create and download resumes.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-amber-200 bg-white p-4">
+              <p className="text-sm font-semibold uppercase tracking-[0.2em]">Preview</p>
+              <p className="mt-3 text-sm">Live resume preview, polished layout, and PDF export stay unlocked with premium.</p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-white p-4">
+              <p className="text-sm font-semibold uppercase tracking-[0.2em]">Why upgrade</p>
+              <p className="mt-3 text-sm">Get direct teacher support + resume builder + premium certificates in one plan.</p>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-3xl border border-amber-200 bg-white">
+            <div className="grid grid-cols-3 bg-slate-900 text-white text-sm font-semibold">
+              <div className="px-4 py-3">Feature</div>
+              <div className="px-4 py-3">Free</div>
+              <div className="px-4 py-3">Premium</div>
+            </div>
+            {[
+              ['Resume builder access', 'Preview only', 'Full access'],
+              ['PDF download', 'No', 'Yes'],
+              ['Mentorship sessions', 'No', 'Yes'],
+              ['Verified exams + certs', 'Limited', 'Yes'],
+            ].map(([feature, free, premium]) => (
+              <div key={feature} className="grid grid-cols-3 border-t border-slate-200 text-sm">
+                <div className="px-4 py-3 font-medium text-slate-900">{feature}</div>
+                <div className="px-4 py-3 text-slate-600">{free}</div>
+                <div className="px-4 py-3 font-semibold text-emerald-700">{premium}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Link
+              to="/app/payment"
+              onClick={() => trackPremiumEvent('upgrade_click', 'resume_builder_gate', { accessMode }, profile?.id || user?.id || null)}
+              className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-5 py-3 font-bold text-white hover:bg-amber-600"
+            >
+              Upgrade to Premium
+            </Link>
+            <Link
+              to="/app/premium-status"
+              className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-white px-5 py-3 font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              Compare Premium Benefits
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const resumeShareText = `I built my resume on SkillPro. Create yours here: ${window.location.origin}/register`;
+  const resumeWhatsAppUrl = buildWhatsAppShareUrl(resumeShareText);
+
   return (
     <div className="space-y-6">
       <div className="rounded-3xl bg-gradient-to-r from-slate-950 via-nani-dark to-amber-900 p-6 md:p-8 text-white shadow-xl">
@@ -156,6 +259,16 @@ const ResumeBuilder = () => {
               <Download size={18} />
               {downloading ? 'Preparing PDF...' : 'Download'}
             </button>
+            <a
+              href={resumeWhatsAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackPremiumEvent('whatsapp_share', 'resume_builder', {}, profile?.id || user?.id || null)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-5 py-3 font-semibold text-white hover:bg-white/15"
+            >
+              <MessageCircle size={18} />
+              Share
+            </a>
           </div>
         </div>
       </div>

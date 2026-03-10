@@ -18,6 +18,7 @@ const AdminSettings = () => {
   const [examDuration, setExamDuration] = useState(60);
   const [minQuestions, setMinQuestions] = useState(25);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [resumeBuilderAccess, setResumeBuilderAccess] = useState('premium');
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const [registrationPaused, setRegistrationPaused] = useState(false);
   const [plans, setPlans] = useState([]);
@@ -52,7 +53,7 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['exam_duration', 'premium_cost', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email']);
+        .in('key', ['exam_duration', 'premium_cost', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
 
       if (error) throw error;
 
@@ -63,6 +64,7 @@ const AdminSettings = () => {
         if (setting.key === 'min_questions') setMinQuestions(parseInt(setting.value, 10) || 25);
         if (setting.key === 'public_plans') setPlans(parsePlans(setting.value));
         if (setting.key === 'support_contact_email') setSupportContactEmail(setting.value || '');
+        if (setting.key === 'resume_builder_access') setResumeBuilderAccess(setting.value === 'free' ? 'free' : 'premium');
       });
     } catch (error) {
       openPopup('Error', `Failed to load settings: ${error.message}`, 'error');
@@ -86,6 +88,7 @@ const AdminSettings = () => {
       await saveSetting('registration_paused', registrationPaused);
       await saveSetting('min_questions', minQuestions);
       await saveSetting('support_contact_email', supportContactEmail.trim());
+      await saveSetting('resume_builder_access', resumeBuilderAccess);
       openPopup('Success', 'General settings saved successfully.', 'success');
     } catch (error) {
       openPopup('Error', `Failed to save settings: ${error.message}`, 'error');
@@ -218,6 +221,36 @@ const AdminSettings = () => {
               />
               Pause New Registrations
             </label>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Resume Builder Access</label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setResumeBuilderAccess('free')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  resumeBuilderAccess === 'free'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                Free For Everyone
+              </button>
+              <button
+                type="button"
+                onClick={() => setResumeBuilderAccess('premium')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  resumeBuilderAccess === 'premium'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                Premium Only
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              If set to free, every logged-in user can use Resume Builder. If set to premium, only premium users can access it.
+            </p>
           </div>
         </div>
         <button

@@ -17,7 +17,11 @@ const AdminDashboard = () => {
       totalTeachers: 0,
       totalCourses: 0,
       certificates: 0,
-      pendingLeaves: 0
+      pendingLeaves: 0,
+      referralRewards: 0,
+      leadsCaptured: 0,
+      premiumClicks: 0,
+      premiumPassClaims: 0
     });
 
     useEffect(() => {
@@ -30,6 +34,13 @@ const AdminDashboard = () => {
       const { data: courses } = await supabase.from('courses').select('id');
       const { data: certs } = await supabase.from('certificates').select('id');
       const { data: leaves } = await supabase.from('teacher_leaves').select('id').eq('status', 'pending');
+      const { data: referrals } = await supabase.from('referrals').select('id').eq('status', 'rewarded');
+      const { data: leads } = await supabase.from('marketing_leads').select('id');
+      const { data: premiumEvents } = await supabase
+        .from('premium_event_logs')
+        .select('id, event_name')
+        .in('event_name', ['upgrade_click', 'payment_attempt_started']);
+      const { data: passClaims } = await supabase.from('premium_pass_claims').select('id');
       
       const premiumCount = students?.filter(s => s.premium_until && new Date(s.premium_until) > new Date()).length || 0;
       
@@ -39,7 +50,11 @@ const AdminDashboard = () => {
         totalTeachers: teachers?.length || 0,
         totalCourses: courses?.length || 0,
         certificates: certs?.length || 0,
-        pendingLeaves: leaves?.length || 0
+        pendingLeaves: leaves?.length || 0,
+        referralRewards: referrals?.length || 0,
+        leadsCaptured: leads?.length || 0,
+        premiumClicks: premiumEvents?.length || 0,
+        premiumPassClaims: passClaims?.length || 0
       });
     };
 
@@ -53,13 +68,17 @@ const AdminDashboard = () => {
           <p className="text-purple-100">Manage the entire SkillPro platform</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-4">
           <StatCard icon={<Users className="text-blue-600" />} label="Students" value={stats.totalStudents} bgColor="bg-blue-50" />
           <StatCard icon={<Award className="text-gold-600" />} label="Premium" value={stats.premiumStudents} bgColor="bg-gold-50" />
           <StatCard icon={<UserPlus className="text-green-600" />} label="Teachers" value={stats.totalTeachers} bgColor="bg-green-50" />
           <StatCard icon={<Video className="text-purple-600" />} label="Courses" value={stats.totalCourses} bgColor="bg-purple-50" />
           <StatCard icon={<TrendingUp className="text-emerald-600" />} label="Certificates" value={stats.certificates} bgColor="bg-emerald-50" />
           <StatCard icon={<Calendar className="text-orange-600" />} label="Pending Leaves" value={stats.pendingLeaves} bgColor="bg-orange-50" />
+          <StatCard icon={<TrendingUp className="text-teal-600" />} label="Referrals" value={stats.referralRewards} bgColor="bg-teal-50" />
+          <StatCard icon={<Users className="text-pink-600" />} label="Leads" value={stats.leadsCaptured} bgColor="bg-pink-50" />
+          <StatCard icon={<Award className="text-indigo-600" />} label="Upgrade Clicks" value={stats.premiumClicks} bgColor="bg-indigo-50" />
+          <StatCard icon={<Check className="text-amber-600" />} label="Pass Claims" value={stats.premiumPassClaims} bgColor="bg-amber-50" />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -77,6 +96,11 @@ const AdminDashboard = () => {
             <UserPlus className="text-green-600 mb-3" size={32} />
             <h3 className="font-bold mb-1">Assign Teachers</h3>
             <p className="text-xs text-slate-600">Assign teachers to students</p>
+          </Link>
+          <Link to="/app/admin/manage-premium" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <TrendingUp className="text-indigo-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Premium Analytics</h3>
+            <p className="text-xs text-slate-600">Track upgrade clicks, leads, pass claims, and referral rewards</p>
           </Link>
         </div>
       </div>

@@ -85,6 +85,10 @@ import AdminSupportContact from './pages/AdminSupportContact';
 import AdminActivityLogs from './pages/AdminActivityLogs';
 import StudentWriteTest from './pages/StudentWriteTest';
 import ResumeBuilder from './pages/ResumeBuilder';
+import ReportIssue from './pages/ReportIssue';
+import AdminIssueReports from './pages/AdminIssueReports';
+import AdminGrowthAnalytics from './pages/AdminGrowthAnalytics';
+import AdminLeadInbox from './pages/AdminLeadInbox';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -248,6 +252,7 @@ function App() {
           <Route path="leaves" element={<TeacherLeaves />} />
           <Route path="session-reassignments" element={<SessionReassignments />} />
           <Route path="notifications" element={<Notifications />} />
+          <Route path="report-issue" element={<ReportIssue />} />
           <Route path="teacher-chat" element={<TeacherChat />} />
           <Route path="admin/users" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           <Route path="admin/leaves" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
@@ -270,6 +275,9 @@ function App() {
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/support-contact" element={<AdminRoute><AdminSupportContact /></AdminRoute>} />
           <Route path="admin/activity-logs" element={<AdminRoute><AdminActivityLogs /></AdminRoute>} />
+          <Route path="admin/growth-analytics" element={<AdminRoute><AdminGrowthAnalytics /></AdminRoute>} />
+          <Route path="admin/lead-inbox" element={<AdminRoute><AdminLeadInbox /></AdminRoute>} />
+          <Route path="admin/issue-reports" element={<AdminRoute><AdminIssueReports /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
           <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />

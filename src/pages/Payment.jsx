@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { AlertCircle, Check, CreditCard, Sparkles, Ticket } from 'lucide-react';
+import { AlertCircle, Check, Clock3, CreditCard, Gift, Sparkles, Ticket } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { trackPremiumEvent } from '../utils/growth';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 
@@ -89,6 +90,11 @@ const Payment = () => {
 
     loadPremiumCost();
   }, []);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    trackPremiumEvent('payment_page_viewed', 'payment_page', { offerId: searchParams.get('offer') || null }, profile.id);
+  }, [profile?.id, searchParams]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -373,6 +379,18 @@ const Payment = () => {
         <p className="text-slate-500">Apply one coupon, review the final amount, and pay only that amount.</p>
       </div>
 
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
+        <div className="flex items-start gap-3">
+          <Clock3 className="mt-0.5 text-rose-600" size={18} />
+          <div>
+            <p className="font-semibold">Urgency banner</p>
+            <p className="text-sm mt-1">
+              Use a live message like “price changes on March 15, 2026” to create urgency. This page is now structured for that conversion banner.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-gradient-to-br from-gold-400 to-gold-600 p-8 rounded-2xl text-white">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -393,6 +411,28 @@ const Payment = () => {
           <FeatureItem text="Career mentorship sessions" />
           <FeatureItem text="Direct teacher support via chat" />
           <FeatureItem text="Daily live classes (9-10 AM, 5-6 PM)" />
+          <FeatureItem text="Resume Builder with premium PDF export" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex items-center gap-2 text-emerald-800 font-semibold">
+            <Gift size={18} />
+            Referral reward
+          </div>
+          <p className="mt-2 text-sm text-emerald-900">
+            Refer one paying friend and get 7 premium days automatically after their payment succeeds.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+          <div className="flex items-center gap-2 text-blue-800 font-semibold">
+            <Sparkles size={18} />
+            Premium wins
+          </div>
+          <p className="mt-2 text-sm text-blue-900">
+            Get direct teacher support + resume builder + premium certificates + mentorship in one upgrade.
+          </p>
         </div>
       </div>
 
@@ -509,6 +549,10 @@ const Payment = () => {
         <button
           onClick={handlePayment}
           disabled={loading || (pricing.finalAmount > 0 && !RAZORPAY_KEY_ID)}
+          onMouseDown={() => trackPremiumEvent('payment_attempt_started', 'payment_page', {
+            finalAmount: pricing.finalAmount,
+            offerId: selectedOfferId || null,
+          }, profile?.id || null)}
           className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-semibold transition-all"
         >
           {loading

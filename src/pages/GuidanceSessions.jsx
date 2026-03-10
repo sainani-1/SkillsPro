@@ -6,6 +6,7 @@ import AlertModal from '../components/AlertModal';
 import { Calendar, MessageSquare, Plus, AlertCircle, CheckCircle, Clock, Link as LinkIcon, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import useDialog from '../hooks/useDialog.jsx';
+import { trackPremiumEvent } from '../utils/growth';
 
 const GuidanceSessions = () => {
   const { confirm, dialogNode } = useDialog();
@@ -478,6 +479,16 @@ const GuidanceSessions = () => {
                 <p className="text-sm text-amber-800">
                   Upgrade to Premium for just ₹{premiumCost} and unlock teacher guidance sessions.
                 </p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900">What unlocks</p>
+                    <p className="mt-1">1-on-1 teacher support, live scheduling, and follow-up mentorship flow.</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900">Intent moment</p>
+                    <p className="mt-1">This is a strong upgrade moment because the learner is already asking for help.</p>
+                  </div>
+                </div>
                 {supportContactEmail ? (
                   <p className="text-sm text-amber-900">
                     Need help? Contact: <a className="font-semibold underline" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a>
@@ -487,6 +498,7 @@ const GuidanceSessions = () => {
                 )}
                 <Link
                   to="/app/payment"
+                  onClick={() => trackPremiumEvent('upgrade_click', 'guidance_sessions_gate', { premiumCost }, profile?.id || null)}
                   className="inline-flex items-center justify-center rounded-lg bg-amber-600 text-white px-4 py-2 font-semibold hover:bg-amber-700 transition-colors"
                 >
                   Upgrade to Premium

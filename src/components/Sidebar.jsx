@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -448,6 +448,10 @@ const Sidebar = () => {
               <Users size={28} />
               {shouldShowText && <span>Collaborations</span>}
             </NavLink>
+            <NavLink to="/app/report-issue" className={navItemClass} title="Report Issue">
+              <Wrench size={28} />
+              {shouldShowText && <span>Report Issue</span>}
+            </NavLink>
           </>
         )}
 
@@ -499,6 +503,10 @@ const Sidebar = () => {
                   {newTeacherRequests > 9 ? '9+' : newTeacherRequests}
                 </span>
               )}
+            </NavLink>
+            <NavLink to="/app/report-issue" className={navItemClass} title="Report Issue">
+              <Wrench size={28} />
+              {shouldShowText && <span>Report Issue</span>}
             </NavLink>
           </>
         )}
@@ -619,6 +627,18 @@ const Sidebar = () => {
             <NavLink to="/app/admin/activity-logs" className={navItemClass} title="Activity Logs">
               <ClipboardList size={28} />
               {shouldShowText && <span>Activity Logs</span>}
+            </NavLink>
+            <NavLink to="/app/admin/lead-inbox" className={navItemClass} title="Lead Inbox">
+              <Mail size={28} />
+              {shouldShowText && <span>Lead Inbox</span>}
+            </NavLink>
+            <NavLink to="/app/admin/growth-analytics" className={navItemClass} title="Growth Analytics">
+              <BarChart3 size={28} />
+              {shouldShowText && <span>Growth Analytics</span>}
+            </NavLink>
+            <NavLink to="/app/admin/issue-reports" className={navItemClass} title="Issue Reports">
+              <Wrench size={28} />
+              {shouldShowText && <span>Issue Reports</span>}
             </NavLink>
             <NavLink to="/app/admin/reset-password" className={navItemClass} title="Reset Password">
               <Lock size={28} />

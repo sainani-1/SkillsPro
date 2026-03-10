@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Download, Eye, Linkedin, XCircle } from 'lucide-react';
+import { Award, Download, Eye, Linkedin, MessageCircle, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
 
 /**
  * MyCertificates Component
@@ -383,10 +384,24 @@ const MyCertificates = () => {
       const certId = formatCertificateId(cert);
       const verifyUrl = `${window.location.origin}/verify/${encodeURIComponent(certId)}`;
       const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(verifyUrl)}`;
+      trackPremiumEvent('certificate_share_linkedin', 'my_certificates', { certId }, profile?.id || null);
       window.open(linkedinUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.error('LinkedIn share error:', err);
       openPopup('Share failed', 'Unable to open LinkedIn share.', 'error');
+    }
+  };
+
+  const shareOnWhatsApp = (cert) => {
+    try {
+      const certId = formatCertificateId(cert);
+      const verifyUrl = `${window.location.origin}/verify/${encodeURIComponent(certId)}`;
+      const text = `My SkillPro certificate is verified here: ${verifyUrl}. Join SkillPro to build yours too.`;
+      trackPremiumEvent('certificate_share_whatsapp', 'my_certificates', { certId }, profile?.id || null);
+      window.open(buildWhatsAppShareUrl(text), '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      console.error('WhatsApp share error:', err);
+      openPopup('Share failed', 'Unable to open WhatsApp share.', 'error');
     }
   };
 
@@ -618,12 +633,16 @@ const MyCertificates = () => {
                 <div className="inline-flex items-center w-fit px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
                   Score: {cert.exam.score_percent.toFixed(1)}%
                 </div>
-              ) : (
+              ) : cert._generated ? (
                 <div className="inline-flex items-center w-fit px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700">
                   Admin Generated Certificate
                 </div>
+              ) : (
+                <div className="inline-flex items-center w-fit px-3 py-1 rounded-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700">
+                  Verified Certificate
+                </div>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
                 <a
                   href={`/certificate-preview/${encodeURIComponent(formatCertificateId(cert))}`}
                   target="_blank"
@@ -656,6 +675,16 @@ const MyCertificates = () => {
                     <Linkedin size={19} strokeWidth={2.4} />
                   </span>
                   Share LinkedIn
+                </button>
+                <button
+                  onClick={() => shareOnWhatsApp(cert)}
+                  disabled={!!cert.revoked_at}
+                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 text-[15px] font-semibold text-white shadow-md hover:from-emerald-700 hover:to-emerald-600 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
+                    <MessageCircle size={19} strokeWidth={2.4} />
+                  </span>
+                  WhatsApp
                 </button>
               </div>
             </div>

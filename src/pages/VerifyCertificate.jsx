@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { ShieldCheck, Search, CheckCircle, XCircle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -40,6 +40,18 @@ const formatFallbackCertificateId = (submission) => {
 
 const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
+
+const isPermissionError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  return (
+    message.includes('permission denied') ||
+    message.includes('row-level security') ||
+    message.includes('jwt') ||
+    details.includes('permission denied') ||
+    details.includes('row-level security')
+  );
+};
 
 const VerifyCertificate = () => {
   const { id: routeCertId } = useParams();
@@ -229,6 +241,18 @@ const VerifyCertificate = () => {
           data = resp.data.find((cert) => formatCertificateId(cert).toUpperCase() === trimmedId.toUpperCase()) || null;
         }
 
+        if ((!data || error) && isPermissionError(error)) {
+          const basicResp = await supabase
+            .from('certificates')
+            .select('id, issued_at, revoked_at')
+            .gte('issued_at', start)
+            .lte('issued_at', end);
+          error = basicResp.error;
+          if (!basicResp.error && basicResp.data) {
+            data = basicResp.data.find((cert) => formatCertificateId(cert).toUpperCase() === trimmedId.toUpperCase()) || null;
+          }
+        }
+
         if (!data && !error) {
           const fallbackResp = await supabase
             .from('exam_submissions')
@@ -275,6 +299,16 @@ const VerifyCertificate = () => {
           .single();
         error = resp.error;
         data = resp.data;
+
+        if ((!data || error) && isPermissionError(error)) {
+          const basicResp = await supabase
+            .from('certificates')
+            .select('id, issued_at, revoked_at')
+            .eq('id', trimmedId)
+            .single();
+          error = basicResp.error;
+          data = basicResp.data;
+        }
       }
       
       if (error || !data) {
@@ -294,18 +328,22 @@ const VerifyCertificate = () => {
           data
         });
       } else {
-        const { data: generatedMeta } = await supabase
-          .from('generated_certificates')
-          .select('award_type, award_name, reason, course_name')
-          .eq('certificate_id', data.id)
-          .maybeSingle();
-        if (generatedMeta) {
-          data.generated = generatedMeta;
+        if (!data._fallback) {
+          const { data: generatedMeta } = await supabase
+            .from('generated_certificates')
+            .select('award_type, award_name, reason, course_name')
+            .eq('certificate_id', data.id)
+            .maybeSingle();
+          if (generatedMeta) {
+            data.generated = generatedMeta;
+          }
         }
         setResult({ valid: true, message: 'Certificate is valid and authentic!', data });
-        const formattedId = data._fallback ? certId.trim() : formatCertificateId(data);
-        const dataUrl = await buildCertificateDataUrl(data, formattedId);
-        setPreviewUrl(dataUrl);
+        if (data.user?.full_name && (data.course?.title || data.generated?.award_name || data.generated?.course_name)) {
+          const formattedId = data._fallback ? certId.trim() : formatCertificateId(data);
+          const dataUrl = await buildCertificateDataUrl(data, formattedId);
+          setPreviewUrl(dataUrl);
+        }
         if (!data._fallback) {
           await supabase.from('certificate_verifications').insert({ certificate_id: data.id });
         }
@@ -384,6 +422,13 @@ const VerifyCertificate = () => {
                 {result.data.generated?.award_name && <p><strong>Award:</strong> {result.data.generated.award_name}</p>}
                 {result.data.generated?.award_type && <p><strong>Type:</strong> {result.data.generated.award_type}</p>}
                 {result.data.generated?.reason && <p><strong>Reason:</strong> {result.data.generated.reason}</p>}
+                <div className="mt-4 rounded-xl border border-green-200 bg-white p-4">
+                  <p className="font-semibold text-slate-900">Build yours on SkillPro</p>
+                  <p className="mt-1 text-sm text-slate-600">Courses, mentorship, verified exams, resume builder, and shareable certificates are available from one account.</p>
+                  <Link to="/register" className="mt-3 inline-flex items-center rounded-lg bg-green-600 px-4 py-2 font-semibold text-white hover:bg-green-700">
+                    Join SkillPro
+                  </Link>
+                </div>
               </div>
             )}
             {result.data && !result.valid && result.data.revoked_at && (

@@ -61,6 +61,7 @@ const Layout = () => {
       { label: 'Profile', path: '/app/profile' },
       { label: 'Mentorship Sessions', path: '/app/guidance-sessions' },
       { label: 'Notifications', path: '/app/notifications' },
+      { label: 'Report Issue', path: '/app/report-issue' },
       { label: 'Settings', path: '/app/settings' },
     ];
 
@@ -77,6 +78,7 @@ const Layout = () => {
       { label: 'Request Teacher', path: '/app/request-teacher' },
       { label: 'Startup Ideas', path: '/app/startup-ideas' },
       { label: 'Startup Collaborations', path: '/app/startup-collaborations' },
+      { label: 'Report Issue', path: '/app/report-issue' },
     ];
 
     const teacherTargets = [
@@ -90,6 +92,7 @@ const Layout = () => {
       { label: 'Apply Leave', path: '/app/leaves' },
       { label: 'Session Reassignments', path: '/app/session-reassignments' },
       { label: 'Student Requests', path: '/app/teacher-requests' },
+      { label: 'Report Issue', path: '/app/report-issue' },
     ];
 
     const adminTargets = [
@@ -120,6 +123,9 @@ const Layout = () => {
       { label: 'Admin Settings', path: '/app/admin/settings' },
       { label: 'Reset Password', path: '/app/admin/reset-password' },
       { label: 'Activity Logs', path: '/app/admin/activity-logs' },
+      { label: 'Lead Inbox', path: '/app/admin/lead-inbox' },
+      { label: 'Growth Analytics', path: '/app/admin/growth-analytics' },
+      { label: 'Issue Reports', path: '/app/admin/issue-reports' },
       { label: 'MFA Management', path: '/app/admin/mfa-management' },
       { label: 'Deleted Accounts', path: '/app/admin/deleted-accounts' },
       { label: 'Startup Ideas', path: '/app/admin/startup-ideas' },

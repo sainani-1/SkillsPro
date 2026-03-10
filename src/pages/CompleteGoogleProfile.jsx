@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import AlertModal from '../components/AlertModal';
 import { useAuth } from '../context/AuthContext';
+import { attachPendingReferral } from '../utils/referrals';
 
 const streamOptions = {
   'B.Tech': ['Computer Science', 'Information Technology', 'Electronics', 'Mechanical', 'Civil', 'Others'],
@@ -95,6 +96,12 @@ const CompleteGoogleProfile = () => {
 
       const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
       if (error) throw error;
+
+      try {
+        await attachPendingReferral(currentUser.id, currentUser.email || null);
+      } catch (referralError) {
+        console.warn('Referral attach failed:', referralError.message || referralError);
+      }
 
       await fetchProfile(currentUser.id);
       navigate('/app', { replace: true });
