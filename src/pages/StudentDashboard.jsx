@@ -33,6 +33,8 @@ const StudentDashboard = () => {
   const [premiumCost, setPremiumCost] = useState(null);
   const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
   const [referralCode, setReferralCode] = useState('');
+  const [referralStats, setReferralStats] = useState({ registered: 0, paid: 0 });
+  const [copyFeedback, setCopyFeedback] = useState('');
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
@@ -133,6 +135,31 @@ const StudentDashboard = () => {
     };
     loadReferralCode();
   }, [profile?.id, profile?.full_name]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const loadReferralStats = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('referrals')
+          .select('status, qualified_payment_id')
+          .eq('referrer_user_id', profile.id);
+
+        if (error) throw error;
+
+        const rows = data || [];
+        setReferralStats({
+          registered: rows.length,
+          paid: rows.filter((row) => row.qualified_payment_id || row.status === 'qualified' || row.status === 'rewarded').length
+        });
+      } catch (error) {
+        console.error('Error loading referral stats:', error);
+      }
+    };
+
+    loadReferralStats();
+  }, [profile?.id]);
 
   const fetchOffers = async () => {
     if (!profile?.id) return;
@@ -256,7 +283,9 @@ const StudentDashboard = () => {
   const copyReferralLink = async () => {
     if (!referralLink) return;
     await copyText(referralLink);
+    setCopyFeedback('Referral Link Copied');
     trackPremiumEvent('referral_link_copied', 'student_dashboard', { referralCode }, profile?.id);
+    window.setTimeout(() => setCopyFeedback(''), 2000);
   };
 
   const shareReferralWhatsApp = () => {
@@ -394,6 +423,18 @@ const StudentDashboard = () => {
           <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-3 text-sm font-mono text-slate-700 break-all">
             {referralLink || 'Preparing your referral link...'}
           </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-emerald-100 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Registered</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{referralStats.registered}</p>
+              <p className="text-xs text-slate-500">Joined through your referral link</p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Paid</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{referralStats.paid}</p>
+              <p className="text-xs text-slate-500">Bought premium through referral</p>
+            </div>
+          </div>
           <div className="mt-4 flex flex-col sm:flex-row gap-3">
             <button
               type="button"
@@ -401,7 +442,7 @@ const StudentDashboard = () => {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700"
             >
               <Copy size={16} />
-              Copy Invite Link
+              {copyFeedback || 'Copy Invite Link'}
             </button>
             <button
               type="button"
@@ -412,6 +453,7 @@ const StudentDashboard = () => {
               Share on WhatsApp
             </button>
           </div>
+          {copyFeedback ? <p className="mt-3 text-sm font-medium text-emerald-700">{copyFeedback}</p> : null}
         </div>
       </div>
 

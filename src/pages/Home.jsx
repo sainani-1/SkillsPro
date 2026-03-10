@@ -164,7 +164,7 @@ const Home = () => {
         </div>
         <div className="space-x-4">
           <Link to="/login" className="text-slate-600 hover:text-nani-dark font-medium">Login</Link>
-          <Link to="/register" className="btn-gold">Get Started</Link>
+          <a href="#lead-capture" className="btn-gold">Get Started</a>
         </div>
       </nav>
 
@@ -184,14 +184,14 @@ const Home = () => {
               Access premium courses, guided practice, live support, and certificate-ready assessments from one platform built for serious learners.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-4">
-              <Link
-                to="/register"
+              <a
+                href="#lead-capture"
                 className="btn-primary px-8 py-4 text-lg inline-flex items-center justify-center gap-2"
-                onClick={() => trackPremiumEvent('cta_click', 'home_hero', { cta: 'register' })}
+                onClick={() => trackPremiumEvent('cta_click', 'home_hero', { cta: 'lead_capture' })}
               >
-                Start Learning Now
+                Get Free Access Details
                 <ArrowRight size={18} />
-              </Link>
+              </a>
               <Link
                 to="/plans"
                 className="px-8 py-4 text-lg border border-slate-300 rounded bg-white/80 hover:bg-white transition inline-flex items-center justify-center gap-2"
@@ -271,7 +271,7 @@ const Home = () => {
         <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-[2rem] border border-slate-200 bg-white/80 p-8 shadow-lg">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">How it works</p>
-            <h2 className="mt-3 text-3xl font-serif font-bold text-nani-dark">A simple path from signup to outcomes</h2>
+            <h2 className="mt-3 text-3xl font-serif font-bold text-nani-dark">A simple path from interest to outcomes</h2>
             <div className="mt-8 space-y-5">
               {journey.map((step, index) => (
                 <div key={step.title} className="flex gap-4">
@@ -313,7 +313,7 @@ const Home = () => {
           </div>
         </section>
 
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+        <section id="lead-capture" className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="rounded-[2rem] border border-slate-200 bg-white/85 p-8 shadow-lg">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">Free entry points</p>
             <h2 className="mt-3 text-3xl font-serif font-bold text-nani-dark">Capture intent before asking for payment.</h2>
@@ -435,7 +435,7 @@ const Home = () => {
               <div className="max-w-2xl">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">Start now</p>
                 <h2 className="mt-3 text-3xl md:text-4xl font-serif font-bold">Build a stronger learning routine with one account.</h2>
-                <p className="mt-3 text-slate-200">Create your account, pick a plan, and move into guided learning without switching between scattered tools.</p>
+                <p className="mt-3 text-slate-200">Request a free resource or callback first, then move into guided learning without switching between scattered tools.</p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
                     <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Urgency</p>
@@ -448,10 +448,10 @@ const Home = () => {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
-                <Link to="/register" className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-6 py-3 font-bold text-nani-dark hover:bg-gold-500 transition-colors">
-                  Create Account
+                <a href="#lead-capture" className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-6 py-3 font-bold text-nani-dark hover:bg-gold-500 transition-colors">
+                  Get Free Access Details
                   <ArrowRight size={18} />
-                </Link>
+                </a>
                 <Link to="/login" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-6 py-3 font-semibold text-white hover:bg-white/15 transition-colors">
                   Existing User Login
                 </Link>
