@@ -95,7 +95,21 @@ const Profile = () => {
       return;
     }
 
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    let error = null;
+    if (profile?.role === 'admin') {
+      const response = await supabase.functions.invoke('admin-reset-password', {
+        body: {
+          user_id: profile.id,
+          email: userEmail,
+          new_password: newPassword,
+        }
+      });
+      error = response.error || null;
+    } else {
+      const updateResponse = await supabase.auth.updateUser({ password: newPassword });
+      error = updateResponse.error || null;
+    }
+
     if (error) {
       setAlertModal({
         show: true,
@@ -107,7 +121,9 @@ const Profile = () => {
       setAlertModal({
         show: true,
         title: 'Success',
-        message: 'Password changed successfully!',
+        message: profile?.role === 'admin'
+          ? 'Password changed successfully using admin secure reset.'
+          : 'Password changed successfully!',
         type: 'success'
       });
       setCurrentPassword('');

@@ -80,7 +80,7 @@ const AdminFaceVerify = () => {
       return;
     }
     sessionStorage.setItem('admin_face_verified', 'true');
-    navigate('/app/admin/users', { replace: true });
+    navigate('/app', { replace: true });
   };
 
   return (

@@ -1,41 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
-import {
-  getLocalNotificationReadIds,
-  NOTIFICATION_READS_UPDATED_EVENT
-} from '../utils/notificationReadState';
+import { useNotifications } from '../context/NotificationContext';
 
 const Sidebar = () => {
   const { profile, signOut } = useAuth();
+  const { unreadNotifications } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
   const role = profile?.role || 'student';
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [unreadChats, setUnreadChats] = useState(0);
   const [newUserRegistrations, setNewUserRegistrations] = useState(0);
   const [newTeacherRequests, setNewTeacherRequests] = useState(0);
   const [newLeaveRequests, setNewLeaveRequests] = useState(0);
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
-  const [notificationPollingEnabled, setNotificationPollingEnabled] = useState(true);
-
-  const isFetchNetworkIssue = (err) => {
-    const message = String(err?.message || '').toLowerCase();
-    const details = String(err?.details || '').toLowerCase();
-    return (
-      message.includes('failed to fetch') ||
-      message.includes('networkerror') ||
-      details.includes('failed to fetch') ||
-      details.includes('cors') ||
-      message.includes('err_failed') ||
-      message.includes('525')
-    );
-  };
   const isMissingTargetUserColumn = (err) => {
     const msg = String(err?.message || '').toLowerCase();
     const details = String(err?.details || '').toLowerCase();
@@ -50,10 +33,6 @@ const Sidebar = () => {
     const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
     return match?.[1] || null;
   };
-  const isUuid = (value) =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      String(value || '')
-    );
   // Fetch new guidance session requests (Admin only)
   useEffect(() => {
     if (!profile?.id || role !== 'admin') return;
@@ -93,128 +72,6 @@ const Sidebar = () => {
     `flex items-center ${isCollapsed && !isHovered ? 'justify-center' : 'space-x-3'} px-4 py-4 rounded-lg transition-all duration-600 whitespace-nowrap ${isActive ? 'bg-gold-400 text-nani-dark font-bold' : 'text-slate-300 hover:bg-white/10'}`;
 
   const shouldShowText = !isCollapsed || isHovered;
-
-  // Fetch unread notifications count
-  useEffect(() => {
-    if (!profile?.id) return;
-    if (!notificationPollingEnabled) return;
-
-    const fetchUnreadNotifications = async () => {
-      try {
-        // Get all notifications for the user's role
-        let roleScopedRes = await supabase
-          .from('admin_notifications')
-          .select('id, content, target_user_id, created_at')
-          .or(`target_role.eq.all,target_role.eq.${role},target_user_id.eq.${profile.id}`)
-          .order('created_at', { ascending: false });
-
-        if (roleScopedRes.error && isMissingTargetUserColumn(roleScopedRes.error)) {
-          roleScopedRes = await supabase
-            .from('admin_notifications')
-            .select('id, content, created_at')
-            .or(`target_role.eq.all,target_role.eq.${role}`)
-            .order('created_at', { ascending: false });
-        }
-
-        const notifications = roleScopedRes.data || [];
-        const notifError = roleScopedRes.error;
-        if (notifError) throw notifError;
-
-        let visibleNotifications = (notifications || []).filter((n) => {
-          const accountCreatedAt = profile?.created_at ? new Date(profile.created_at).getTime() : null;
-          const notifCreatedAt = n?.created_at ? new Date(n.created_at).getTime() : null;
-          if (
-            accountCreatedAt &&
-            notifCreatedAt &&
-            Number.isFinite(accountCreatedAt) &&
-            Number.isFinite(notifCreatedAt) &&
-            notifCreatedAt < accountCreatedAt
-          ) {
-            return false;
-          }
-          if (n.target_user_id && String(n.target_user_id) !== String(profile.id)) return false;
-          const legacyTarget = extractLegacyTargetUserId(n.content);
-          return !legacyTarget || String(legacyTarget) === String(profile.id);
-        });
-
-        if (role === 'student') {
-          const { data: classRows, error: classErr } = await supabase
-            .from('class_session_participants')
-            .select('session_id')
-            .eq('student_id', profile.id);
-          if (!classErr && classRows?.length) {
-            const synthetic = classRows.map((r) => ({ id: `class-session-${r.session_id}` }));
-            const byId = new Map(visibleNotifications.map((n) => [n.id, n]));
-            synthetic.forEach((n) => byId.set(n.id, n));
-            visibleNotifications = Array.from(byId.values());
-          }
-        }
-
-        if (!visibleNotifications.length) {
-          setUnreadNotifications(0);
-          return;
-        }
-
-        const notificationIds = visibleNotifications.map(n => n.id);
-        const dbNotificationIds = notificationIds.filter(isUuid);
-        const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
-        const readTrackingEnabled =
-          localStorage.getItem(readTrackingKey) !== 'false';
-        const localReadIds = getLocalNotificationReadIds(profile.id);
-
-        if (!readTrackingEnabled) {
-          const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
-          setUnreadNotifications(unread);
-          return;
-        }
-
-        // Get read notifications
-        let readNotifs = [];
-        let readError = null;
-        if (dbNotificationIds.length > 0) {
-          const readRes = await supabase
-            .from('notification_reads')
-            .select('notification_id')
-            .eq('user_id', profile.id)
-            .in('notification_id', dbNotificationIds);
-          readNotifs = readRes.data || [];
-          readError = readRes.error;
-        }
-
-        if (readError) {
-          localStorage.setItem(readTrackingKey, 'false');
-          const unread = visibleNotifications.filter((n) => !localReadIds.has(n.id)).length;
-          setUnreadNotifications(unread);
-          return;
-        }
-
-        const readIds = new Set([...(readNotifs?.map(r => r.notification_id) || []), ...localReadIds]);
-        const unreadCount = visibleNotifications.filter(n => !readIds.has(n.id)).length;
-        setUnreadNotifications(unreadCount);
-      } catch (err) {
-        setUnreadNotifications(0);
-        if (isFetchNetworkIssue(err)) {
-          setNotificationPollingEnabled(false);
-        }
-      }
-    };
-
-    fetchUnreadNotifications();
-    const interval = setInterval(fetchUnreadNotifications, 60000); // Check every minute
-    const onFocus = () => fetchUnreadNotifications();
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') fetchUnreadNotifications();
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener(NOTIFICATION_READS_UPDATED_EVENT, onFocus);
-    };
-  }, [profile?.id, role, location.pathname]);
 
   // Fetch unread chats count
   useEffect(() => {
@@ -304,7 +161,7 @@ const Sidebar = () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [profile?.id, role, location.pathname, notificationPollingEnabled]);
+  }, [profile?.id, role, location.pathname]);
 
   // Fetch new user registrations count (Admin only)
   useEffect(() => {
@@ -570,6 +427,10 @@ const Sidebar = () => {
             <NavLink to="/app/offers" className={navItemClass} title="Discounts & Offers">
               <Gift size={28} />
               {shouldShowText && <span>Discounts & Offers</span>}
+            </NavLink>
+            <NavLink to="/app/resume-builder" className={navItemClass} title="Resume Builder">
+              <FileText size={28} />
+              {shouldShowText && <span>Resume Builder</span>}
             </NavLink>
             <NavLink to="/app/attendance" className={navItemClass} title="Attendance">
               <ClipboardList size={28} />

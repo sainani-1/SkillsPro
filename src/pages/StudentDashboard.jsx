@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
-import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw } from 'lucide-react';
+import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw, FileText } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
 
@@ -318,6 +318,24 @@ const StudentDashboard = () => {
         <div className="text-right">
           <p className="text-4xl font-bold">{certificates.length}</p>
           <p className="text-slate-200">Certificates Earned</p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-white to-slate-50 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="max-w-2xl">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">
+              <FileText size={14} />
+              New career tool
+            </p>
+            <h2 className="mt-2 text-xl font-bold text-slate-900">Build an attractive resume with live preview and PDF download.</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Open the resume builder, fill in your details, and generate a polished resume designed to make a strong first impression.
+            </p>
+          </div>
+          <Link to="/app/resume-builder" className="inline-flex items-center justify-center rounded-xl bg-nani-dark px-5 py-3 font-semibold text-white hover:bg-nani-accent">
+            Open Resume Builder
+          </Link>
         </div>
       </div>
 

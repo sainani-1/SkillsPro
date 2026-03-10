@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import LoadingSpinner from './components/LoadingSpinner';
+import RequireAdminMFA from './components/RequireAdminMFA';
 import { supabase } from './supabaseClient';
 import AdminMFASetup from "./pages/AdminMFASetup";
 import AdminMFAVerify from "./pages/AdminMFAVerify";
@@ -83,6 +84,7 @@ import CompleteGoogleProfile from './pages/CompleteGoogleProfile';
 import AdminSupportContact from './pages/AdminSupportContact';
 import AdminActivityLogs from './pages/AdminActivityLogs';
 import StudentWriteTest from './pages/StudentWriteTest';
+import ResumeBuilder from './pages/ResumeBuilder';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -116,13 +118,6 @@ const ProtectedRoute = ({ children }) => {
   const googleProfileIncomplete =
     isGoogleAuth && (!profile?.google_profile_completed || !profile?.terms_accepted);
   if (googleProfileIncomplete) return <Navigate to="/complete-profile" />;
-  if (profile?.role === 'admin') {
-    const mfaVerified = sessionStorage.getItem("admin_mfa_verified") === "true";
-    const mfaVerifiedUser = sessionStorage.getItem("admin_mfa_verified_user");
-    if (!mfaVerified || mfaVerifiedUser !== profile?.id) {
-      return <Navigate to="/admin-mfa-verify" replace />;
-    }
-  }
 
   // Check if user is disabled
   if (profile?.is_disabled) {
@@ -184,15 +179,7 @@ const AdminRoute = ({ children }) => {
   if (profile?.role !== "admin")
     return <Navigate to="/app" />;
 
-  // ✅ MFA SESSION CHECK
-  const mfaVerified = sessionStorage.getItem("admin_mfa_verified") === "true";
-  const mfaVerifiedUser = sessionStorage.getItem("admin_mfa_verified_user");
-
-  if (!mfaVerified || mfaVerifiedUser !== profile?.id) {
-    return <Navigate to="/admin-mfa-verify" />;
-  }
-
-  return children;
+  return <RequireAdminMFA>{children}</RequireAdminMFA>;
 };
 
 const TeacherRoute = ({ children }) => {
@@ -226,7 +213,7 @@ function App() {
         <Route path="*" element={<NotFound />} />
 
         {/* Protected Routes */}
-        <Route path="/app" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        <Route path="/app" element={<ProtectedRoute><RequireAdminMFA><Layout /></RequireAdminMFA></ProtectedRoute>}>
                               <Route path="admin/logic-building-setup" element={<AdminRoute><AdminContestSetup /></AdminRoute>} />
                     <Route path="logic-building-contest" element={<LogicBuildingContest />} />
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
@@ -252,6 +239,7 @@ function App() {
           <Route path="interview-prep" element={<InterviewPrep />} />
           <Route path="premium-status" element={<PremiumStatus />} />
           <Route path="offers" element={<Offers />} />
+          <Route path="resume-builder" element={<ResumeBuilder />} />
           <Route path="request-teacher" element={<RequestTeacher />} />
           <Route path="startup-ideas" element={<StartupIdeas />} />
           <Route path="startup-collaborations" element={<StartupCollaborations />} />
@@ -261,8 +249,8 @@ function App() {
           <Route path="session-reassignments" element={<SessionReassignments />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="teacher-chat" element={<TeacherChat />} />
-          <Route path="admin/users" element={<AdminRoute><AdminDashboard initialTab="users" /></AdminRoute>} />
-          <Route path="admin/leaves" element={<AdminRoute><AdminDashboard initialTab="leaves" /></AdminRoute>} />
+          <Route path="admin/users" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+          <Route path="admin/leaves" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           <Route path="admin/user-management" element={<AdminRoute><UserManagementPage /></AdminRoute>} />
           <Route path="admin/user-ids" element={<AdminRoute><AdminUserIds /></AdminRoute>} />
           <Route path="admin/teacher-progress" element={<AdminRoute><TeacherProgress /></AdminRoute>} />
@@ -307,3 +295,5 @@ function App() {
 }
 
 export default App;
+
+

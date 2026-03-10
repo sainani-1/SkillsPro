@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import AlertModal from '../components/AlertModal';
@@ -8,8 +8,7 @@ import AvatarImage from '../components/AvatarImage';
 import usePopup from '../hooks/usePopup.jsx';
 import useDialog from '../hooks/useDialog.jsx';
 
-const AdminDashboard = ({ initialTab = 'overview' }) => {
-    const [activeTab, setActiveTab] = useState(initialTab);
+const AdminDashboard = () => {
     const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
     const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: null });
     const [stats, setStats] = useState({
@@ -22,9 +21,8 @@ const AdminDashboard = ({ initialTab = 'overview' }) => {
     });
 
     useEffect(() => {
-        setActiveTab(initialTab);
         loadStats();
-    }, [initialTab]);
+    }, []);
 
     const loadStats = async () => {
       const { data: students } = await supabase.from('profiles').select('id, premium_until').eq('role', 'student');

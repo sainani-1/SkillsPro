@@ -108,6 +108,11 @@ const Settings = () => {
   const handleChangePassword = async (e) => {
     e.preventDefault();
 
+    if (!currentPassword) {
+      openPopup('Error', 'Current password is required', 'error');
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       openPopup('Error', 'New passwords do not match', 'error');
       return;
@@ -121,16 +126,48 @@ const Settings = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
+      const userEmail = profile?.email || '';
+      if (!userEmail) {
+        throw new Error('Unable to validate current password. Please login again.');
+      }
+
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: currentPassword
       });
+      if (verifyError) {
+        throw new Error('Current password is incorrect.');
+      }
+
+      let error = null;
+      if (profile?.role === 'admin') {
+        const response = await supabase.functions.invoke('admin-reset-password', {
+          body: {
+            user_id: profile.id,
+            email: userEmail,
+            new_password: newPassword
+          }
+        });
+        error = response.error || null;
+      } else {
+        const response = await supabase.auth.updateUser({
+          password: newPassword
+        });
+        error = response.error || null;
+      }
 
       if (error) throw error;
 
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      openPopup('Success', 'Password changed successfully!', 'success');
+      openPopup(
+        'Success',
+        profile?.role === 'admin'
+          ? 'Password changed successfully using admin secure reset.'
+          : 'Password changed successfully!',
+        'success'
+      );
     } catch (error) {
       openPopup('Error', error.message || 'Failed to change password', 'error');
     } finally {

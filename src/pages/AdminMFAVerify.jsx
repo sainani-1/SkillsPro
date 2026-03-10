@@ -91,7 +91,7 @@ export default function AdminMFAVerify() {
         sessionStorage.setItem("admin_mfa_verified_user", userResp.user.id);
       }
       setToast({ show: true, message: "MFA Verified! Redirecting...", type: "success" });
-      setTimeout(() => navigate("/app/admin/users"), 1200);
+      setTimeout(() => navigate("/app"), 1200);
     } catch (err) {
       console.error(err);
       setAlert({ show: true, title: "Verification Failed", message: err.message || "Could not verify MFA code.", type: "error" });
