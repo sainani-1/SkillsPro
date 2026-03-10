@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from './AuthContext';
+import { getChatReadTimes } from '../utils/chatReadState';
 
 const ChatContext = createContext();
 
@@ -46,14 +47,26 @@ export const ChatProvider = ({ children }) => {
 
         const groupIds = memberGroups.map(m => m.group_id);
 
-        // Count all messages as unread initially
-        const { count: totalCount, error: countError } = await supabase
-          .from('chat_messages')
-          .select('*', { count: 'exact', head: true })
-          .in('group_id', groupIds);
+        const chatReadTimes = await getChatReadTimes(profile.id, groupIds);
+        let totalCount = 0;
 
-        if (countError) throw countError;
-        setTotalUnreadCount(totalCount || 0);
+        for (const groupId of groupIds) {
+          const { data: messages, error: messagesError } = await supabase
+            .from('chat_messages')
+            .select('sender_id, created_at')
+            .eq('group_id', groupId);
+
+          if (messagesError) throw messagesError;
+
+          const lastReadAt = chatReadTimes.get(groupId);
+          totalCount += (messages || []).filter((message) => {
+            if (message.sender_id === profile.id) return false;
+            if (!lastReadAt) return true;
+            return new Date(message.created_at) > new Date(lastReadAt);
+          }).length;
+        }
+
+        setTotalUnreadCount(totalCount);
       } catch (error) {
         setTotalUnreadCount(0);
         if (!isFetchNetworkIssue(error)) {

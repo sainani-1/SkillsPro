@@ -4,6 +4,7 @@ import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSqua
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
+import { getChatReadTimes, markChatsAsRead } from '../utils/chatReadState';
 
 const Sidebar = () => {
   const { profile, signOut } = useAuth();
@@ -95,22 +96,12 @@ const Sidebar = () => {
 
         const groupIds = memberGroups.map(m => m.group_id);
 
-        // Load chatReadTimes from localStorage
-        const stored = localStorage.getItem(`chatReadTimes_${profile.id}`);
-        let chatReadTimes = new Map();
-        if (stored) {
-          try {
-            chatReadTimes = new Map(JSON.parse(stored));
-          } catch (e) {
-            chatReadTimes = new Map();
-          }
-        }
+        let chatReadTimes = await getChatReadTimes(profile.id, groupIds);
 
         // If user is on the chat page, mark all chats as read immediately
         if (location.pathname.startsWith('/app/chat')) {
           const now = new Date().toISOString();
-          groupIds.forEach(id => chatReadTimes.set(id, now));
-          localStorage.setItem(`chatReadTimes_${profile.id}`, JSON.stringify(Array.from(chatReadTimes.entries())));
+          chatReadTimes = await markChatsAsRead(profile.id, groupIds, now);
           setUnreadChats(0);
           return;
         }

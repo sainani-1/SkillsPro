@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { MessageCircle, Clock, User, CheckCircle, AlertCircle, Send } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import usePopup from '../hooks/usePopup.jsx';
+import { getChatReadTimes, markChatAsRead } from '../utils/chatReadState';
 
 const ClearDoubts = () => {
   const { openPopup, popupNode } = usePopup();
@@ -45,21 +46,6 @@ const ClearDoubts = () => {
       setTimeout(() => scrollToBottom(), 100);
     }
   }, [selectedChat?.id]);
-
-  // Load read chats from localStorage on mount
-  useEffect(() => {
-    if (profile?.id) {
-      const stored = localStorage.getItem(`chatReadTimes_${profile.id}`);
-      if (stored) {
-        try {
-          const data = JSON.parse(stored);
-          setChatReadTimes(new Map(data));
-        } catch (e) {
-          console.error('Error loading read times:', e);
-        }
-      }
-    }
-  }, [profile?.id]);
 
   useEffect(() => {
     if (profile?.role === 'teacher') {
@@ -128,16 +114,8 @@ const ClearDoubts = () => {
         }
       });
 
-      // Get fresh read times from localStorage
-      const stored = localStorage.getItem(`chatReadTimes_${profile.id}`);
-      let currentReadTimes = chatReadTimes;
-      if (stored) {
-        try {
-          currentReadTimes = new Map(JSON.parse(stored));
-        } catch (e) {
-          console.error('Error loading read times:', e);
-        }
-      }
+      const currentReadTimes = await getChatReadTimes(profile.id, groupIds);
+      setChatReadTimes(currentReadTimes);
 
       // Step 3: Calculate unread count for each group from the messages we already have
       const groupsWithMessages = groups.map(group => {
@@ -192,11 +170,10 @@ const ClearDoubts = () => {
       setTimeout(() => scrollToBottom(), 500);
 
       // Mark this chat as read with current timestamp
-      const now = new Date().toISOString();
+      const now = await markChatAsRead(profile.id, groupId);
       const updatedReadTimes = new Map(chatReadTimes);
       updatedReadTimes.set(groupId, now);
       setChatReadTimes(updatedReadTimes);
-      localStorage.setItem(`chatReadTimes_${profile.id}`, JSON.stringify([...updatedReadTimes]));
 
       // Mark this specific chat as read in local state
       const chatToSelect = chats.find(c => c.id === groupId);

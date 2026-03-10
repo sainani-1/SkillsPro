@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { Send, MessageCircle, CheckCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { markChatAsRead } from '../utils/chatReadState';
 
 const ChatWithTeacher = () => {
   const { profile } = useAuth();
@@ -20,21 +21,8 @@ const ChatWithTeacher = () => {
 
   const [initialLoad, setInitialLoad] = useState(true);
 
-  // Persist last read time per group in localStorage for unread badge clearing
-  const setChatReadTime = (groupId) => {
-    if (!profile?.id || !groupId) return;
-    const key = `chatReadTimes_${profile.id}`;
-    const stored = localStorage.getItem(key);
-    let map = new Map();
-    if (stored) {
-      try {
-        map = new Map(JSON.parse(stored));
-      } catch (e) {
-        console.error('Error parsing chat read times:', e);
-      }
-    }
-    map.set(groupId, new Date().toISOString());
-    localStorage.setItem(key, JSON.stringify(Array.from(map.entries())));
+  const setChatReadTime = async (currentGroupId, readAt = new Date().toISOString()) => {
+    await markChatAsRead(profile?.id, currentGroupId, readAt);
   };
 
   const getChatClearedAt = (gid) => {
@@ -107,7 +95,7 @@ const ChatWithTeacher = () => {
             setMessages(prev => [...prev, payload.new]);
           }
           // Mark chat as read when viewing the page and receiving new messages
-          setChatReadTime(groupId);
+          void setChatReadTime(groupId);
         })
         .subscribe();
 
@@ -119,7 +107,7 @@ const ChatWithTeacher = () => {
   useEffect(() => {
     return () => {
       if (groupId) {
-        setChatReadTime(groupId);
+        void setChatReadTime(groupId);
       }
     };
   }, [groupId]);
@@ -250,7 +238,7 @@ const ChatWithTeacher = () => {
       });
       setMessages(filteredMessages);
       // Mark chat as read on load so sidebar badge clears
-      setChatReadTime(groupId);
+      await setChatReadTime(groupId);
       if (initialLoad) {
         setInitialLoad(false);
       }
