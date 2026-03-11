@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -423,6 +423,14 @@ const Sidebar = () => {
               <FileText size={28} />
               {shouldShowText && <span>Resume Builder</span>}
             </NavLink>
+            <NavLink to="/app/coding-playground" className={navItemClass} title="Coding Playground">
+              <Code2 size={28} />
+              {shouldShowText && <span>Coding Playground</span>}
+            </NavLink>
+            <NavLink to="/app/discussion-forum" className={navItemClass} title="Discussion Forum">
+              <MessageSquare size={28} />
+              {shouldShowText && <span>Discussion Forum</span>}
+            </NavLink>
             <NavLink to="/app/attendance" className={navItemClass} title="Attendance">
               <ClipboardList size={28} />
               {shouldShowText && <span>Attendance</span>}
@@ -608,9 +616,9 @@ const Sidebar = () => {
               <Clock size={28} />
               {shouldShowText && <span>Exam Retake Overrides</span>}
             </NavLink>
-            <NavLink to="/app/admin/exam-retakes" className={navItemClass} title="Manage Exam Retakes">
+            <NavLink to="/app/admin/exam-retakes" className={navItemClass} title="Release Terminated Exams">
               <Unlock size={28} />
-              {shouldShowText && <span>Manage Exam Retakes</span>}
+              {shouldShowText && <span>Release Exams</span>}
             </NavLink>
             <NavLink to="/app/admin/exam-settings" className={navItemClass} title="Exam Settings">
               <CheckSquare size={28} />

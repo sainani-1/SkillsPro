@@ -6,6 +6,8 @@ import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
 
+const ATS_SCORE = 99;
+
 const defaultResume = {
   role: 'Frontend Developer',
   summary:
@@ -275,6 +277,13 @@ const ResumeBuilder = () => {
 
       <div className="grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)] gap-6 items-start">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm space-y-5">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">ATS Score</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <p className="text-4xl font-bold text-emerald-900">{ATS_SCORE}</p>
+              <p className="text-sm font-medium text-emerald-700">Locked to 99 for this resume format</p>
+            </div>
+          </div>
           <h2 className="text-xl font-bold text-slate-900">Resume Details</h2>
           <Field label="Target Role" value={resume.role} onChange={(value) => updateField('role', value)} />
           <Textarea label="Professional Summary" value={resume.summary} onChange={(value) => updateField('summary', value)} rows={4} />

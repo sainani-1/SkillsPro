@@ -177,6 +177,42 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let cancelled = false;
+    let refreshing = false;
+
+    const refreshProfileState = async () => {
+      if (cancelled || refreshing) return;
+      refreshing = true;
+      try {
+        await fetchProfile(user.id, { background: true });
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    refreshProfileState();
+    const interval = setInterval(refreshProfileState, 15000);
+    const onFocus = () => refreshProfileState();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProfileState();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user?.id]);
+
   const fetchProfile = async (userId, options = {}) => {
     const { background = false } = options;
     try {

@@ -423,7 +423,7 @@ function TeacherConductTests() {
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-teal-50 via-white to-cyan-50 p-5">
         <h1 className="text-2xl font-bold text-slate-900">Teacher Test Console</h1>
         <p className="text-sm text-slate-600 mt-1">
-          Add and publish tests only for your assigned students. Published tests are attempted in the strict `Exam.jsx` flow.
+          Add and publish tests only for your assigned students. Published tests are attempted in the separate `TestExam.jsx` flow.
         </p>
       </div>
 
@@ -723,7 +723,7 @@ function TeacherConductTests() {
 
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-start gap-2">
                 <CheckCircle2 size={16} className="mt-0.5" />
-                After publish, students can attempt exam from course page and strict proctoring in `Exam.jsx` is applied.
+                After publish, students can attempt the test from Write Test and strict proctoring in `TestExam.jsx` is applied.
               </div>
             </div>
           )}

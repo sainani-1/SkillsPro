@@ -108,7 +108,7 @@ export default function StudentWriteTest() {
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
           <CheckSquare size={22} /> Write Test
         </h1>
-        <p className="text-sm text-slate-600 mt-1">Choose a course test and start exam with strict proctoring.</p>
+        <p className="text-sm text-slate-600 mt-1">Choose a teacher test and start it in the separate test exam flow.</p>
       </div>
 
       {sortedRows.length === 0 ? (
@@ -130,8 +130,8 @@ export default function StudentWriteTest() {
               )}
               <button
                 type="button"
-                onClick={() => navigate(`/exam/${r.course?.id}`)}
-                disabled={!r.course?.id || r.questionCount === 0}
+                onClick={() => navigate(`/test-exam/${r.exam.id}`)}
+                disabled={!r.exam?.id || r.questionCount === 0}
                 className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 <PlayCircle size={14} /> Start Test

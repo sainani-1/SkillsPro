@@ -28,16 +28,6 @@ export default function Notifications() {
       message.includes('access to fetch')
     );
   };
-  const isMissingTargetUserColumn = (err) => {
-    const msg = String(err?.message || '').toLowerCase();
-    const details = String(err?.details || '').toLowerCase();
-    const hint = String(err?.hint || '').toLowerCase();
-    return (
-      msg.includes('target_user_id') ||
-      details.includes('target_user_id') ||
-      hint.includes('target_user_id')
-    );
-  };
   const extractLegacyTargetUserId = (text) => {
     const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
     return match?.[1] || null;
@@ -110,19 +100,11 @@ export default function Notifications() {
       }
 
       // Fetch notifications using role scope only (schema-safe across deployments).
-      let roleScopedRes = await supabase
+      const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, target_user_id, created_at')
-        .or(`target_role.eq.all,target_role.eq.${user.role},target_user_id.eq.${user.id}`)
+        .select('id, title, content, type, target_role, created_at')
+        .or(`target_role.eq.all,target_role.eq.${user.role}`)
         .order('created_at', { ascending: false });
-
-      if (roleScopedRes.error && isMissingTargetUserColumn(roleScopedRes.error)) {
-        roleScopedRes = await supabase
-          .from('admin_notifications')
-          .select('id, title, content, type, target_role, created_at')
-          .or(`target_role.eq.all,target_role.eq.${user.role}`)
-          .order('created_at', { ascending: false });
-      }
 
       const data = roleScopedRes.data || [];
       if (roleScopedRes.error) throw roleScopedRes.error;
@@ -139,8 +121,6 @@ export default function Notifications() {
           ) {
             return false;
           }
-          const explicitTarget = notif.target_user_id;
-          if (explicitTarget && String(explicitTarget) !== String(user.id)) return false;
           const legacyTarget = extractLegacyTargetUserId(notif.content);
           return !legacyTarget || String(legacyTarget) === String(user.id);
         })
@@ -191,7 +171,6 @@ export default function Notifications() {
               : `You have a class scheduled for ${startText}.`,
             type: 'info',
             target_role: 'student',
-            target_user_id: user.id,
             created_at: row.created_at || session.scheduled_for || new Date().toISOString(),
             isSynthetic: true,
           };

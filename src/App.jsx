@@ -22,6 +22,7 @@ import Dashboard from './pages/Dashboard';
 import CourseList from './pages/CourseList';
 import CourseDetail from './pages/CourseDetail';
 import Exam from './pages/Exam';
+import TestExam from './pages/TestExam';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import VerifyCertificate from './pages/VerifyCertificate';
@@ -89,6 +90,9 @@ import ReportIssue from './pages/ReportIssue';
 import AdminIssueReports from './pages/AdminIssueReports';
 import AdminGrowthAnalytics from './pages/AdminGrowthAnalytics';
 import AdminLeadInbox from './pages/AdminLeadInbox';
+import CodingPlayground from './pages/CodingPlayground';
+import DiscussionForum from './pages/DiscussionForum';
+import SkillBadges from './pages/SkillBadges';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -243,6 +247,9 @@ function App() {
           <Route path="interview-prep" element={<InterviewPrep />} />
           <Route path="premium-status" element={<PremiumStatus />} />
           <Route path="offers" element={<Offers />} />
+          <Route path="coding-playground" element={<CodingPlayground />} />
+          <Route path="discussion-forum" element={<DiscussionForum />} />
+          <Route path="skill-badges" element={<SkillBadges />} />
           <Route path="resume-builder" element={<ResumeBuilder />} />
           <Route path="request-teacher" element={<RequestTeacher />} />
           <Route path="startup-ideas" element={<StartupIdeas />} />
@@ -292,6 +299,7 @@ function App() {
 
         {/* Exam is outside layout for fullscreen enforcement */}
         <Route path="/exam/:courseId" element={<ProtectedRoute><Exam /></ProtectedRoute>} />
+        <Route path="/test-exam/:examId" element={<ProtectedRoute><TestExam /></ProtectedRoute>} />
 
         {/* Live Class is outside layout for fullscreen */}
         <Route path="/live-class/:sessionId" element={<ProtectedRoute><LiveClass /></ProtectedRoute>} />

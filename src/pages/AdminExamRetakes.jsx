@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Unlock, Clock, CheckCircle, XCircle, Search, RefreshCw } from 'lucide-react';
+import { Unlock, Clock, CheckCircle, Search, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -22,6 +22,7 @@ const AdminExamRetakes = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [grantingId, setGrantingId] = useState(null);
+  const [terminatedStudents, setTerminatedStudents] = useState([]);
 
   const loadLockedStudents = async () => {
     try {
@@ -118,6 +119,50 @@ const AdminExamRetakes = () => {
         }
       }
 
+      const { data: attemptBlocks, error: attemptBlocksError } = await supabase
+        .from('exam_attempt_blocks')
+        .select(`
+          user_id,
+          exam_id,
+          reason,
+          unblock_after_question_update_at,
+          updated_at,
+          exam:exams(
+            id,
+            course_id,
+            course:courses(id, title)
+          ),
+          user:profiles(
+            id,
+            full_name,
+            email,
+            is_locked,
+            locked_until
+          )
+        `)
+        .order('updated_at', { ascending: false });
+
+      if (attemptBlocksError) {
+        console.error('Error loading attempt blocks:', attemptBlocksError);
+      } else {
+        const terminated = (attemptBlocks || [])
+          .filter((row) => row.user)
+          .map((row) => ({
+            user_id: row.user.id,
+            full_name: row.user.full_name,
+            email: row.user.email,
+            is_locked: row.user.is_locked,
+            locked_until: row.user.locked_until,
+            exam_id: row.exam_id,
+            course_id: row.exam?.course_id,
+            course_title: row.exam?.course?.title || `Course ${row.exam?.course_id || ''}`,
+            reason: row.reason || 'Strict proctoring block',
+            unblock_after_question_update_at: row.unblock_after_question_update_at,
+            updated_at: row.updated_at,
+          }));
+        setTerminatedStudents(terminated);
+      }
+
       setLockedStudents(Array.from(studentMap.values()));
     } catch (error) {
       console.error('Error loading locked students:', error);
@@ -153,8 +198,20 @@ const AdminExamRetakes = () => {
 
       if (error) throw error;
 
+      setLockedStudents((prev) =>
+        prev.map((student) => {
+          if (student.id !== userId) return student;
+          return {
+            ...student,
+            overridesMap: {
+              ...(student.overridesMap || {}),
+              [`${userId}_${courseId}`]: new Date().toISOString(),
+            },
+          };
+        })
+      );
       openPopup('Permission Granted', 'Student can now retake the exam immediately!', 'success');
-      loadLockedStudents(); // Refresh list
+      await loadLockedStudents();
     } catch (error) {
       console.error('Error granting permission:', error);
       openPopup('Error', `Failed to grant permission: ${error.message}`, 'error');
@@ -176,11 +233,104 @@ const AdminExamRetakes = () => {
 
       if (error) throw error;
 
+      setLockedStudents((prev) =>
+        prev.map((student) => {
+          if (student.id !== userId) return student;
+          const overridesMap = { ...(student.overridesMap || {}) };
+          delete overridesMap[`${userId}_${courseId}`];
+          return {
+            ...student,
+            overridesMap,
+          };
+        })
+      );
       openPopup('Permission Revoked', 'Retake override has been removed', 'success');
-      loadLockedStudents(); // Refresh list
+      await loadLockedStudents();
     } catch (error) {
       console.error('Error revoking permission:', error);
       openPopup('Error', 'Failed to revoke permission', 'error');
+    } finally {
+      setGrantingId(null);
+    }
+  };
+
+  const releaseTerminatedExam = async (student) => {
+    try {
+      const actionKey = `terminated_${student.user_id}_${student.exam_id}`;
+      setGrantingId(actionKey);
+
+      const { data: releaseRows, error: releaseError } = await supabase.rpc(
+        'admin_release_terminated_exam',
+        {
+          target_user_id: student.user_id,
+          target_exam_id: student.exam_id,
+          target_course_id: student.course_id || null,
+        }
+      );
+
+      if (releaseError) throw releaseError;
+
+      const result = Array.isArray(releaseRows) ? releaseRows[0] : releaseRows;
+      if (!result || Number(result.removed_blocks || 0) < 1) {
+        throw new Error('Exam block was not removed. Run the admin release RPC migration in Supabase.');
+      }
+      if (Number(result.unlocked_profiles || 0) < 1) {
+        throw new Error('Student account was not unlocked. Check profile data for this user.');
+      }
+
+      setTerminatedStudents((prev) =>
+        prev.filter(
+          (row) => !(row.user_id === student.user_id && row.exam_id === student.exam_id)
+        )
+      );
+      openPopup('Exam Released', 'Student can write the exam again now.', 'success');
+      await loadLockedStudents();
+    } catch (error) {
+      console.error('Error releasing terminated exam:', error);
+      openPopup('Error', `Failed to release terminated exam: ${error.message}`, 'error');
+    } finally {
+      setGrantingId(null);
+    }
+  };
+
+  const deleteFailedExamRecord = async (student, submission) => {
+    try {
+      const actionKey = `delete_${submission.id}`;
+      setGrantingId(actionKey);
+
+      const { data: deleteRows, error: deleteError } = await supabase.rpc(
+        'admin_delete_failed_exam_submission',
+        {
+          target_submission_id: submission.id,
+          target_user_id: student.id,
+          target_course_id: submission.exam?.course_id || null,
+        }
+      );
+
+      if (deleteError) throw deleteError;
+
+      const result = Array.isArray(deleteRows) ? deleteRows[0] : deleteRows;
+      if (!result || Number(result.deleted_submissions || 0) < 1) {
+        throw new Error('Failed exam record was not deleted. Run the admin delete failed exam RPC migration in Supabase.');
+      }
+
+      setLockedStudents((prev) =>
+        prev
+          .map((row) => {
+            if (row.id !== student.id) return row;
+            return {
+              ...row,
+              failedExams: (row.failedExams || []).filter((entry) => entry.id !== submission.id),
+            };
+          })
+          .filter((row) => (row.failedExams || []).length > 0)
+      );
+
+      openPopup('Deleted', 'Failed exam record has been deleted.', 'success');
+      await loadLockedStudents();
+    } catch (error) {
+      console.error('Error deleting failed exam record:', error);
+      openPopup('Error', `Failed to delete exam record: ${error.message}`, 'error');
     } finally {
       setGrantingId(null);
     }
@@ -209,8 +359,8 @@ const AdminExamRetakes = () => {
       
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Exam Cooldown Management</h1>
-          <p className="text-slate-500 mt-1">Manage students waiting to retake failed exams and grant immediate access</p>
+          <h1 className="text-3xl font-bold text-slate-900">Exam Release Management</h1>
+          <p className="text-slate-500 mt-1">Release students from failed-exam cooldowns and strict-proctoring terminations</p>
         </div>
         <button
           onClick={loadLockedStudents}
@@ -234,6 +384,62 @@ const AdminExamRetakes = () => {
       </div>
 
       {/* Locked Students List - Table View */}
+      {terminatedStudents.length > 0 && (
+        <div className="bg-white border border-red-200 rounded-lg overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between border-b border-red-100 bg-red-50 px-4 py-4">
+            <div>
+              <h2 className="text-lg font-bold text-red-900">Terminated Exams</h2>
+              <p className="text-sm text-red-700">Students blocked by strict-proctoring violations</p>
+            </div>
+            <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+              {terminatedStudents.length} blocked
+            </span>
+          </div>
+          <div className="divide-y divide-slate-200">
+            {terminatedStudents
+              .filter((student) =>
+                student.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                student.email.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .map((student) => {
+                const actionKey = `terminated_${student.user_id}_${student.exam_id}`;
+                return (
+                  <div key={actionKey} className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-slate-50 transition-colors">
+                    <div className="col-span-3">
+                      <p className="font-semibold text-slate-900">{student.full_name}</p>
+                      <p className="text-xs text-slate-500">{student.email}</p>
+                    </div>
+                    <div className="col-span-3">
+                      <p className="font-semibold text-slate-900">{student.course_title}</p>
+                      <p className="text-xs text-slate-500">{student.reason}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-sm font-semibold text-red-600">
+                        {student.locked_until ? `Locked until ${new Date(student.locked_until).toLocaleDateString('en-IN')}` : 'Blocked'}
+                      </p>
+                    </div>
+                    <div className="col-span-2">
+                      <button
+                        onClick={() => releaseTerminatedExam(student)}
+                        disabled={grantingId === actionKey}
+                        className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded text-sm font-semibold transition-colors disabled:opacity-50"
+                      >
+                        <ShieldOff size={14} />
+                        {grantingId === actionKey ? 'Releasing...' : 'Allow Again'}
+                      </button>
+                    </div>
+                    <div className="col-span-2 text-center">
+                      <span className="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full font-semibold">
+                        Terminated
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {filteredStudents.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center">
           <CheckCircle size={48} className="mx-auto text-green-500 mb-4" />
@@ -242,6 +448,12 @@ const AdminExamRetakes = () => {
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+          <div className="border-b border-slate-200 bg-blue-50 px-4 py-4">
+            <h2 className="text-lg font-bold text-slate-900">Failed / Cooldown Exams</h2>
+            <p className="text-sm text-slate-600">
+              Admin can allow failed students to write again immediately by clicking `Allow Again`.
+            </p>
+          </div>
           {/* Table Header */}
           <div className="grid grid-cols-12 gap-4 bg-slate-100 p-4 font-semibold text-slate-700 border-b border-slate-200">
             <div className="col-span-3">Student Name</div>
@@ -297,14 +509,14 @@ const AdminExamRetakes = () => {
                     </div>
 
                     {/* Action Button */}
-                    <div className="col-span-2">
+                    <div className="col-span-2 space-y-2">
                       {overrideExists ? (
                         <button
                           onClick={() => revokeRetakePermission(student.id, courseId)}
                           disabled={grantingId === `${student.id}_${courseId}`}
                           className="w-full bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded text-sm font-semibold transition-colors disabled:opacity-50"
                         >
-                          {grantingId === `${student.id}_${courseId}` ? 'Processing...' : 'Revoke'}
+                          {grantingId === `${student.id}_${courseId}` ? 'Processing...' : 'Remove Allow'}
                         </button>
                       ) : (
                         <button
@@ -313,20 +525,28 @@ const AdminExamRetakes = () => {
                           className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm font-semibold transition-colors disabled:opacity-50"
                         >
                           <Unlock size={14} />
-                          {grantingId === `${student.id}_${courseId}` ? 'Granting...' : 'Release'}
+                          {grantingId === `${student.id}_${courseId}` ? 'Granting...' : 'Allow Again'}
                         </button>
                       )}
+                      <button
+                        onClick={() => deleteFailedExamRecord(student, submission)}
+                        disabled={grantingId === `delete_${submission.id}`}
+                        className="w-full flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 text-red-700 px-3 py-2 rounded text-sm font-semibold transition-colors disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                        {grantingId === `delete_${submission.id}` ? 'Deleting...' : 'Delete'}
+                      </button>
                     </div>
 
                     {/* Status Badge */}
                     <div className="col-span-2 text-center">
                       {overrideExists ? (
                         <span className="bg-green-100 text-green-700 text-xs px-3 py-1 rounded-full font-semibold">
-                          ✓ Released
+                          Allowed Again
                         </span>
                       ) : hasActiveCooldown ? (
                         <span className="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full font-semibold">
-                          ⏱️ Cooldown
+                          Cooldown
                         </span>
                       ) : (
                         <span className="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full font-semibold">
@@ -347,7 +567,7 @@ const AdminExamRetakes = () => {
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-sm text-slate-600">Total Locked Students</p>
-            <p className="text-3xl font-bold text-red-600">{lockedStudents.length}</p>
+            <p className="text-3xl font-bold text-red-600">{lockedStudents.length + terminatedStudents.length}</p>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-slate-600">Failed Exam Attempts</p>
@@ -368,3 +588,4 @@ const AdminExamRetakes = () => {
 };
 
 export default AdminExamRetakes;
+

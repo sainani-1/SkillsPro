@@ -26,17 +26,6 @@ const isFetchNetworkIssue = (err) => {
   );
 };
 
-const isMissingTargetUserColumn = (err) => {
-  const msg = String(err?.message || '').toLowerCase();
-  const details = String(err?.details || '').toLowerCase();
-  const hint = String(err?.hint || '').toLowerCase();
-  return (
-    msg.includes('target_user_id') ||
-    details.includes('target_user_id') ||
-    hint.includes('target_user_id')
-  );
-};
-
 const extractLegacyTargetUserId = (text) => {
   const match = String(text || '').match(/\[target_user_id:([^\]]+)\]/i);
   return match?.[1] || null;
@@ -59,19 +48,11 @@ export const NotificationProvider = ({ children }) => {
     }
 
     try {
-      let roleScopedRes = await supabase
+      const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, content, target_user_id, created_at')
-        .or(`target_role.eq.all,target_role.eq.${profile.role},target_user_id.eq.${profile.id}`)
+        .select('id, content, created_at')
+        .or(`target_role.eq.all,target_role.eq.${profile.role}`)
         .order('created_at', { ascending: false });
-
-      if (roleScopedRes.error && isMissingTargetUserColumn(roleScopedRes.error)) {
-        roleScopedRes = await supabase
-          .from('admin_notifications')
-          .select('id, content, created_at')
-          .or(`target_role.eq.all,target_role.eq.${profile.role}`)
-          .order('created_at', { ascending: false });
-      }
 
       const notifications = roleScopedRes.data || [];
       if (roleScopedRes.error) throw roleScopedRes.error;
@@ -88,7 +69,6 @@ export const NotificationProvider = ({ children }) => {
         ) {
           return false;
         }
-        if (notification.target_user_id && String(notification.target_user_id) !== String(profile.id)) return false;
         const legacyTarget = extractLegacyTargetUserId(notification.content);
         return !legacyTarget || String(legacyTarget) === String(profile.id);
       });

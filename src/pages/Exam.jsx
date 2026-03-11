@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { runCode } from "../logicBuilding/codeRunner";
+import { useAuth } from "../context/AuthContext";
 
 const EXAM_PHASES = {
   RULES: "RULES",
@@ -115,11 +116,15 @@ function formatCertificateId(cert) {
   return `SkillPro-${y}-${m}-${d}-${random}`;
 }
 
-export default function Exam() {
-  const { courseId } = useParams();
+export default function Exam({ examMode = "certification" }) {
+  const { fetchProfile } = useAuth();
+  const { courseId: routeCourseId, examId: routeExamId } = useParams();
   const navigate = useNavigate();
+  const isTeacherTestMode = examMode === "teacher-test";
+  const routeIdentity = isTeacherTestMode ? routeExamId : routeCourseId;
 
   const [examId, setExamId] = useState(null);
+  const [resolvedCourseId, setResolvedCourseId] = useState(routeCourseId || null);
   const [examPassPercent, setExamPassPercent] = useState(40);
   const [examGenerateCertificate, setExamGenerateCertificate] = useState(true);
   const [examQuestionSetUpdatedAt, setExamQuestionSetUpdatedAt] = useState(null);
@@ -173,7 +178,7 @@ export default function Exam() {
   const hasRestoredSessionRef = useRef(false);
   const resumeTimerRef = useRef(null);
   const getSessionKey = (userId = null) =>
-    `${EXAM_SESSION_PREFIX}:${courseId}:${userId || "anon"}`;
+    `${EXAM_SESSION_PREFIX}:${examMode}:${routeIdentity}:${userId || "anon"}`;
   const safeSessionGet = (key) => {
     try {
       return sessionStorage.getItem(key);
@@ -199,6 +204,7 @@ export default function Exam() {
     () => Object.values(answers).filter(isAnswered).length,
     [answers]
   );
+  const activeQuestion = questions[activeQuestionIndex];
 
   const getCodingAnswer = (question) => {
     const answer = answers[question.id];
@@ -264,19 +270,27 @@ export default function Exam() {
       setPassedExamInfo(null);
       setDemoCourseBlocked(false);
 
-      // Final Exam route passes courseId. Questions are stored by exam_id.
+      const examQuery = isTeacherTestMode
+        ? supabase
+            .from("exams")
+            .select("id, course_id, pass_percent, generate_certificate, question_set_updated_at, test_name")
+            .eq("id", routeExamId)
+            .maybeSingle()
+        : supabase
+            .from("exams")
+            .select("id, course_id, pass_percent, generate_certificate, question_set_updated_at, test_name")
+            .eq("course_id", routeCourseId)
+            .maybeSingle();
       const [{ data: examRow, error: examError }, { data: courseRow, error: courseError }] =
         await Promise.all([
-          supabase
-            .from("exams")
-            .select("id, pass_percent, generate_certificate, question_set_updated_at, test_name")
-            .eq("course_id", courseId)
-            .maybeSingle(),
-          supabase
-            .from("courses")
-            .select("id, is_free")
-            .eq("id", courseId)
-            .maybeSingle(),
+          examQuery,
+          isTeacherTestMode
+            ? Promise.resolve({ data: null, error: null })
+            : supabase
+                .from("courses")
+                .select("id, is_free")
+                .eq("id", routeCourseId)
+                .maybeSingle(),
         ]);
 
       if (!mounted) return;
@@ -289,16 +303,18 @@ export default function Exam() {
         setErrorMsg("Error loading course: " + courseError.message);
         return;
       }
-      if (courseRow?.is_free) {
+      if (!isTeacherTestMode && courseRow?.is_free) {
         setDemoCourseBlocked(true);
         safeSessionRemove(getSessionKey());
         return;
       }
 
       const resolvedExamId = examRow?.id ?? null;
+      const targetCourseId = examRow?.course_id ?? routeCourseId ?? null;
       setExamId(resolvedExamId);
+      setResolvedCourseId(targetCourseId);
       setExamPassPercent(Number(examRow?.pass_percent) || 40);
-      setExamGenerateCertificate(examRow?.generate_certificate !== false);
+      setExamGenerateCertificate(isTeacherTestMode ? false : examRow?.generate_certificate !== false);
       setExamQuestionSetUpdatedAt(examRow?.question_set_updated_at || null);
 
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -317,6 +333,7 @@ export default function Exam() {
         return;
       }
       if (
+        !isTeacherTestMode &&
         lockProfile?.is_locked &&
         (!lockProfile?.locked_until || new Date(lockProfile.locked_until) > new Date())
       ) {
@@ -342,7 +359,7 @@ export default function Exam() {
           .from("exam_submissions")
           .select("passed, next_attempt_allowed_at, submitted_at, score_percent")
           .eq("user_id", userData.user.id)
-          .eq("exam_id", resolvedExamId ?? courseId)
+          .eq("exam_id", resolvedExamId ?? routeCourseId)
           .order("submitted_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
@@ -350,20 +367,20 @@ export default function Exam() {
           .from("exam_retake_overrides")
           .select("allow_retake_at")
           .eq("user_id", userData.user.id)
-          .eq("course_id", courseId)
+          .eq("course_id", targetCourseId)
           .order("allow_retake_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
           .from("exam_questions")
           .select("*")
-          .eq("exam_id", resolvedExamId ?? courseId)
+          .eq("exam_id", resolvedExamId ?? routeCourseId)
           .order("order_index", { ascending: true }),
         supabase
           .from("exam_attempt_blocks")
           .select("unblock_after_question_update_at")
           .eq("user_id", userData.user.id)
-          .eq("exam_id", resolvedExamId ?? courseId)
+          .eq("exam_id", resolvedExamId ?? routeCourseId)
           .maybeSingle(),
       ]);
 
@@ -392,6 +409,7 @@ export default function Exam() {
         ? new Date(attemptBlockRow.unblock_after_question_update_at)
         : null;
       if (
+        isTeacherTestMode &&
         blockedUntilQuestionUpdateAt &&
         (!examUpdatedAt || examUpdatedAt <= blockedUntilQuestionUpdateAt)
       ) {
@@ -427,7 +445,7 @@ export default function Exam() {
             .from("certificates")
             .select("id, issued_at")
             .eq("user_id", userData.user.id)
-            .eq("course_id", courseId)
+            .eq("course_id", targetCourseId)
             .is("revoked_at", null)
             .order("issued_at", { ascending: false })
             .limit(1)
@@ -524,7 +542,7 @@ export default function Exam() {
         const { data: legacyData, error: legacyError } = await supabase
           .from("exam_questions")
           .select("*")
-          .eq("exam_id", courseId)
+          .eq("exam_id", routeCourseId)
           .order("order_index", { ascending: true });
 
         if (!mounted) return;
@@ -550,7 +568,7 @@ export default function Exam() {
         // ignore
       }
     };
-  }, [courseId]);
+  }, [routeCourseId, routeExamId, isTeacherTestMode]);
 
   useEffect(() => {
     if (phase === EXAM_PHASES.RESULT || phase === EXAM_PHASES.TERMINATED) return;
@@ -570,7 +588,7 @@ export default function Exam() {
     safeSessionSet(sessionKeyAnon, JSON.stringify(payload));
   }, [
     currentUserId,
-    courseId,
+    routeIdentity,
     answers,
     activeQuestionIndex,
     rulesAccepted,
@@ -626,7 +644,7 @@ export default function Exam() {
       setTabSwitchWarnings((prev) => {
         const next = prev + 1;
         if (next >= 2) {
-          void terminateAndBlockTestUntilQuestionUpdate("Second app/tab switch detected during exam.");
+          void terminateExamForViolation("Second app/tab switch detected during exam.");
           return next;
         }
         setShowTabWarningModal(true);
@@ -663,7 +681,7 @@ export default function Exam() {
 
         if (warningCount > MAX_FULLSCREEN_WARNINGS) {
           clearFullscreenTimer();
-          void terminateAndBlockTestUntilQuestionUpdate("Fullscreen exited more than 3 times.");
+          void terminateExamForViolation("Fullscreen exited more than 3 times.");
           return;
         }
 
@@ -672,7 +690,7 @@ export default function Exam() {
           setFullscreenCountdown((prev) => {
             if (prev <= 1) {
               clearFullscreenTimer();
-              void terminateAndBlockTestUntilQuestionUpdate("Did not return to fullscreen within 20 seconds.");
+              void terminateExamForViolation("Did not return to fullscreen within 20 seconds.");
               return 0;
             }
             return prev - 1;
@@ -700,6 +718,7 @@ export default function Exam() {
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
     if (needsFullscreenResume) return;
+    const isCodingQuestionActive = resolveQuestionType(activeQuestion) === "coding";
 
     const prevent = (event) => event.preventDefault();
     const preventCopyKeys = (event) => {
@@ -715,33 +734,42 @@ export default function Exam() {
       if (metaPressed || (event.metaKey && key === "g")) {
         event.preventDefault();
         event.stopPropagation();
-        // Best-effort: make Windows/Meta shortcuts no-op during exam without blocking account.
         return;
       }
-      const isModifierOnly = ["control", "ctrl", "alt", "meta", "os", "fn", "function"].includes(key);
+      const isCtrlPressed =
+        key === "control" ||
+        key === "ctrl" ||
+        code === "controlleft" ||
+        code === "controlright";
+      if (isCtrlPressed) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const isShiftPressed =
+        key === "shift" ||
+        code === "shiftleft" ||
+        code === "shiftright";
+      if (isShiftPressed && !isCodingQuestionActive) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const isModifierOnly = ["alt", "meta", "os", "fn", "function"].includes(key);
       if (isModifierOnly) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      // Allow Shift for normal typing in coding editor.
       if (event.ctrlKey || event.altKey || event.metaKey) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      const withCtrlOrMeta = event.ctrlKey || event.metaKey;
-      if (withCtrlOrMeta && ["c", "v", "x", "a"].includes(key)) {
-        event.preventDefault();
-        return;
-      }
-      const isDevToolsCombo =
-        key === "f12" ||
-        (withCtrlOrMeta && event.shiftKey && ["i", "j", "c", "k"].includes(key)) ||
-        (withCtrlOrMeta && key === "u") ||
-        (event.metaKey && key === "g");
+      const isDevToolsCombo = key === "f12";
       if (isDevToolsCombo) {
         event.preventDefault();
+        event.stopPropagation();
       }
     };
     const body = document.body;
@@ -771,7 +799,7 @@ export default function Exam() {
       document.removeEventListener("keydown", preventCopyKeys, true);
       window.removeEventListener("keydown", preventCopyKeys, true);
     };
-  }, [phase, needsFullscreenResume]);
+  }, [phase, needsFullscreenResume, activeQuestion]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING) return;
@@ -833,7 +861,7 @@ export default function Exam() {
             clearInterval(resumeTimerRef.current);
             resumeTimerRef.current = null;
           }
-          void terminateAndBlockTestUntilQuestionUpdate("Did not re-enter fullscreen within 20 seconds after refresh.");
+          void terminateExamForViolation("Did not re-enter fullscreen within 20 seconds after refresh.");
           return 0;
         }
         return prev - 1;
@@ -842,12 +870,12 @@ export default function Exam() {
 
     const handleImmediateBlockOnSwitch = () => {
       if (document.hidden) {
-        void terminateAndBlockTestUntilQuestionUpdate("Tab/app switch detected on resume fullscreen prompt.");
+        void terminateExamForViolation("Tab/app switch detected on resume fullscreen prompt.");
       }
     };
 
     const handleBlur = () => {
-      void terminateAndBlockTestUntilQuestionUpdate("App switch detected on resume fullscreen prompt.");
+      void terminateExamForViolation("App switch detected on resume fullscreen prompt.");
     };
 
     document.addEventListener("visibilitychange", handleImmediateBlockOnSwitch);
@@ -976,7 +1004,7 @@ export default function Exam() {
     setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
     try {
       if (navigator.keyboard?.lock) {
-        await navigator.keyboard.lock(["MetaLeft", "MetaRight"]);
+        await navigator.keyboard.lock(["MetaLeft", "MetaRight", "ControlLeft", "ControlRight"]);
       }
     } catch {
       // Best effort only; some browsers/OS combinations do not support this API.
@@ -993,7 +1021,7 @@ export default function Exam() {
     setResumeCountdown(FULLSCREEN_TIMEOUT_SEC);
     try {
       if (navigator.keyboard?.lock) {
-        await navigator.keyboard.lock(["MetaLeft", "MetaRight"]);
+        await navigator.keyboard.lock(["MetaLeft", "MetaRight", "ControlLeft", "ControlRight"]);
       }
     } catch {
       // Best effort only.
@@ -1004,10 +1032,10 @@ export default function Exam() {
     }
   }
 
-  async function terminateAndBlockTestUntilQuestionUpdate(reason) {
+  async function terminateExamForViolation(reason) {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
-    setIsBlockingAccount(true);
+    setIsBlockingAccount(!isTeacherTestMode);
     setTerminateReason(reason);
 
     try {
@@ -1023,27 +1051,46 @@ export default function Exam() {
         await document.exitFullscreen().catch(() => {});
       }
 
-      const blockCheckpoint =
-        examQuestionSetUpdatedAt || new Date().toISOString();
-      const { error: blockErr } = await supabase
-        .from("exam_attempt_blocks")
-        .upsert(
-          [
-            {
-              user_id: userData.user.id,
-              exam_id: examId ?? courseId,
-              unblock_after_question_update_at: blockCheckpoint,
-              reason,
-              updated_at: new Date().toISOString(),
-            },
-          ],
-          { onConflict: "user_id,exam_id" }
-        );
-      if (blockErr) throw new Error(blockErr.message);
+      const lockUntil = new Date(
+        Date.now() + RETAKE_LOCK_DAYS * 24 * 60 * 60 * 1000
+      ).toISOString();
+      if (isTeacherTestMode) {
+        const blockCheckpoint = examQuestionSetUpdatedAt || new Date().toISOString();
+        const { error: blockErr } = await supabase
+          .from("exam_attempt_blocks")
+          .upsert(
+            [
+              {
+                user_id: userData.user.id,
+                exam_id: examId ?? routeCourseId,
+                unblock_after_question_update_at: blockCheckpoint,
+                reason,
+                updated_at: new Date().toISOString(),
+              },
+            ],
+            { onConflict: "user_id,exam_id" }
+          );
+        if (blockErr) throw new Error(blockErr.message);
+      } else {
+        const { error: profileLockError } = await supabase
+          .from("profiles")
+          .update({
+            is_locked: true,
+            locked_until: lockUntil,
+          })
+          .eq("id", userData.user.id);
+        if (profileLockError) throw new Error(profileLockError.message);
+        await fetchProfile(userData.user.id, { background: true });
+      }
       setPhase(EXAM_PHASES.TERMINATED);
       safeSessionRemove(getSessionKey(currentUserId));
       safeSessionRemove(getSessionKey());
-      setErrorMsg("Exam terminated. This test is blocked until teacher updates questions.");
+      setRetakeLockedUntil(isTeacherTestMode ? null : lockUntil);
+      setErrorMsg(
+        isTeacherTestMode
+          ? "Test terminated. You cannot write this test again until the teacher updates the questions."
+          : "Exam terminated. Your account has been locked due to suspicious activity."
+      );
     } catch (error) {
       setErrorMsg("Failed to terminate exam: " + error.message);
       setPhase(EXAM_PHASES.TERMINATED);
@@ -1057,10 +1104,14 @@ export default function Exam() {
     if (userError || !userData?.user?.id) {
       throw new Error("User not authenticated.");
     }
+    if (isTeacherTestMode) {
+      await terminateExamForViolation(reason);
+      return;
+    }
     const lockUntil = new Date(Date.now() + RETAKE_LOCK_DAYS * 24 * 60 * 60 * 1000);
     const payload = {
       user_id: userData.user.id,
-      exam_id: examId ?? courseId,
+      exam_id: examId ?? routeCourseId,
       score_percent: 0,
       passed: false,
       next_attempt_allowed_at: lockUntil.toISOString(),
@@ -1070,6 +1121,15 @@ export default function Exam() {
       .from("exam_submissions")
       .upsert([payload], { onConflict: "exam_id,user_id" });
     if (error) throw new Error(error.message);
+    const { error: profileLockError } = await supabase
+      .from("profiles")
+      .update({
+        is_locked: true,
+        locked_until: lockUntil.toISOString(),
+      })
+      .eq("id", userData.user.id);
+    if (profileLockError) throw new Error(profileLockError.message);
+    await fetchProfile(userData.user.id, { background: true });
 
     if (cameraStream) {
       cameraStream.getTracks().forEach((track) => track.stop());
@@ -1243,7 +1303,7 @@ export default function Exam() {
           supabase
             .from("courses")
             .select("title")
-            .eq("id", courseId)
+            .eq("id", resolvedCourseId)
             .maybeSingle(),
         ]);
         if (profileResp.data?.full_name) setStudentName(profileResp.data.full_name);
@@ -1308,7 +1368,7 @@ export default function Exam() {
 
       const submissionPayload = {
         user_id: userData.user.id,
-        exam_id: examId ?? courseId,
+        exam_id: examId ?? routeCourseId,
         score_percent: percentage,
         passed,
         next_attempt_allowed_at: nextAttemptAllowedAt,
@@ -1325,7 +1385,7 @@ export default function Exam() {
         .from("exam_submissions")
         .select("id")
         .eq("user_id", userData.user.id)
-        .eq("exam_id", examId ?? courseId)
+        .eq("exam_id", examId ?? routeCourseId)
         .order("submitted_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -1333,7 +1393,7 @@ export default function Exam() {
       setSubmissionId(rawSubmissionId);
       setDisplaySubmissionId(formatDisplaySubmissionId(rawSubmissionId));
 
-      if (passed && submissionRow?.id && examGenerateCertificate) {
+      if (passed && submissionRow?.id && examGenerateCertificate && resolvedCourseId) {
         // Best-effort only: certificate insertion can be blocked by RLS depending on policy.
         // Do not fail exam submission when certificate insert is denied.
         const { error: certError } = await supabase
@@ -1341,7 +1401,7 @@ export default function Exam() {
           .insert([
             {
               user_id: userData.user.id,
-              course_id: courseId,
+              course_id: resolvedCourseId,
               exam_submission_id: submissionRow.id,
               issued_at: new Date().toISOString(),
             },
@@ -1372,7 +1432,6 @@ export default function Exam() {
     setPhase(EXAM_PHASES.RESULT);
   }
 
-  const activeQuestion = questions[activeQuestionIndex];
   const isExamWorkspace =
     phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING;
 
@@ -1382,17 +1441,19 @@ export default function Exam() {
         <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-red-200 p-8 text-center space-y-4">
           <h1 className="text-2xl font-bold text-red-700">Exam Terminated</h1>
           <p className="text-slate-700">
-            This test is blocked for you due to suspicious activity.
+            {isTeacherTestMode
+              ? "This teacher test is blocked for you until the teacher updates the questions."
+              : "This exam is blocked for you due to suspicious activity."}
           </p>
           {terminateReason ? (
             <p className="text-sm text-slate-500">Reason: {terminateReason}</p>
           ) : null}
           {isBlockingAccount ? <p className="text-sm text-slate-500">Applying test block...</p> : null}
           <button
-            onClick={() => navigate("/app")}
+            onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app")}
             className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
           >
-            Go to Dashboard
+            {isTeacherTestMode ? "Back to Write Test" : "Go to Dashboard"}
           </button>
         </div>
       </div>
@@ -1434,16 +1495,18 @@ export default function Exam() {
         <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl border border-amber-200 p-8 text-center space-y-4">
           <h1 className="text-2xl font-bold text-amber-700">Exam Locked</h1>
           <p className="text-slate-700">
-            You failed this exam. Retake is locked for 60 days.
+            {isTeacherTestMode
+              ? "You failed this teacher test. Retake is locked for 60 days."
+              : "You failed this exam. Retake is locked for 60 days."}
           </p>
           <p className="text-sm text-slate-600">
             You can retake after: {new Date(retakeLockedUntil).toLocaleString("en-IN")}
           </p>
           <button
-            onClick={() => navigate("/app/courses")}
+            onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app/courses")}
             className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
           >
-            Back to Courses
+            {isTeacherTestMode ? "Back to Write Test" : "Back to Courses"}
           </button>
         </div>
       </div>
@@ -1478,10 +1541,10 @@ export default function Exam() {
             Still questions to be added. Please try again later.
           </p>
           <button
-            onClick={() => navigate("/app/courses")}
+            onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app/courses")}
             className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
           >
-            Back to Courses
+            {isTeacherTestMode ? "Back to Write Test" : "Back to Courses"}
           </button>
         </div>
       </div>
@@ -1495,7 +1558,9 @@ export default function Exam() {
           <div className="px-8 py-7 bg-gradient-to-r from-emerald-600 to-green-500 text-white">
             <h1 className="text-3xl font-extrabold">Exam Completed</h1>
             <p className="mt-1 text-emerald-50">
-              You have already passed this final exam. Re-attempt is not allowed.
+              {isTeacherTestMode
+                ? "You have already passed this teacher test. Re-attempt is not allowed."
+                : "You have already passed this final exam. Re-attempt is not allowed."}
             </p>
           </div>
           <div className="p-8 space-y-5">
@@ -1517,10 +1582,12 @@ export default function Exam() {
               </p>
             ) : null}
             <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-              Exam completed. Click below to view your certificate preview.
+              {isTeacherTestMode
+                ? "Test completed successfully."
+                : "Exam completed. Click below to view your certificate preview."}
             </p>
             <div className="flex flex-wrap gap-3">
-              {passedExamInfo.certificatePreviewId ? (
+              {!isTeacherTestMode && passedExamInfo.certificatePreviewId ? (
                 <button
                   onClick={() =>
                     navigate(
@@ -1532,17 +1599,19 @@ export default function Exam() {
                   Show Certificate Preview
                 </button>
               ) : null}
+              {!isTeacherTestMode ? (
               <button
                 onClick={() => navigate("/app/my-certificates")}
                 className="px-6 py-2.5 rounded-lg bg-emerald-700 text-white font-semibold hover:bg-emerald-800"
               >
                 View Certificate
               </button>
+              ) : null}
               <button
-                onClick={() => navigate("/app/courses")}
+                onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app/courses")}
                 className="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800"
               >
-                Back to Courses
+                {isTeacherTestMode ? "Back to Write Test" : "Back to Courses"}
               </button>
             </div>
           </div>
@@ -1581,7 +1650,7 @@ export default function Exam() {
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs text-slate-500 font-semibold">Course Name</p>
-              <p className="text-sm font-bold text-slate-900">{courseName || `Course ${courseId}`}</p>
+              <p className="text-sm font-bold text-slate-900">{courseName || `Course ${resolvedCourseId || routeIdentity}`}</p>
             </div>
           </div>
           {pendingResultData ? (
@@ -2062,7 +2131,7 @@ export default function Exam() {
                 ) : null}
 
                 <div className="flex flex-wrap gap-3 justify-center">
-                  {resultData.passed ? (
+                  {resultData.passed && !isTeacherTestMode ? (
                     <button
                       onClick={() => navigate("/app/my-certificates")}
                       className="px-6 py-2.5 rounded-lg bg-emerald-700 text-white font-semibold hover:bg-emerald-800"
@@ -2070,7 +2139,7 @@ export default function Exam() {
                       View Certificate
                     </button>
                   ) : null}
-                  {resultData.passed ? (
+                  {!isTeacherTestMode && resultData.passed ? (
                     <button
                       onClick={() => navigate("/app/payment")}
                       className="px-6 py-2.5 rounded-lg bg-amber-500 text-white font-semibold hover:bg-amber-600"
@@ -2097,10 +2166,10 @@ export default function Exam() {
                     Share on WhatsApp
                   </button>
                   <button
-                    onClick={() => navigate("/app/courses")}
+                    onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app/courses")}
                     className="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800"
                   >
-                    Back to Courses
+                    {isTeacherTestMode ? "Back to Write Test" : "Back to Courses"}
                   </button>
                 </div>
               </div>
@@ -2144,7 +2213,7 @@ export default function Exam() {
               <span className="text-2xl font-extrabold text-blue-700">{resumeCountdown}</span>
             </div>
             <p className="text-sm text-slate-600">
-              Re-enter within {resumeCountdown} seconds. After 0, account will be blocked.
+              Re-enter within {resumeCountdown} seconds. After 0, {isTeacherTestMode ? "this test will be terminated." : "account will be blocked."}
             </p>
             <button
               onClick={reEnterFullscreen}

@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { PlayCircle, Clock, Award, Zap, Calendar, MessageCircle, CheckCircle, AlertCircle, RotateCcw, FileText, Copy, Share2 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
+import StudentExperienceHub from '../components/StudentExperienceHub';
 import { ensureReferralCode } from '../utils/referrals';
 import { copyText, trackPremiumEvent } from '../utils/growth';
 import { getPublicAppUrl } from '../utils/appUrl';
@@ -456,6 +457,15 @@ const StudentDashboard = () => {
           {copyFeedback ? <p className="mt-3 text-sm font-medium text-emerald-700">{copyFeedback}</p> : null}
         </div>
       </div>
+
+      {isPremium(profile) ? (
+        <StudentExperienceHub
+          profile={profile}
+          courses={courses}
+          certificates={certificates}
+          examResults={examResults}
+        />
+      ) : null}
 
       {isPremium(profile) ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
