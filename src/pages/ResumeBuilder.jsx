@@ -7,37 +7,40 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
 
 const ATS_SCORE = 99;
+const PDF_MARGIN = 16;
+const PDF_LINE_HEIGHT = 6;
+const PDF_SECTION_GAP = 10;
 
 const defaultResume = {
   role: 'Frontend Developer',
   summary:
-    'Career-focused learner with strong problem solving, communication, and execution skills. Builds polished user experiences, adapts quickly, and delivers work with ownership.',
+    'Frontend developer with hands-on experience in responsive web applications, reusable UI components, debugging, version control, and cross-functional collaboration. Focused on clean code, performance, accessibility, and delivery.',
   email: '',
   phone: '',
   location: 'India',
   linkedin: 'linkedin.com/in/your-profile',
   portfolio: 'portfolio.example.com',
-  skills: 'React, JavaScript, HTML, CSS, Tailwind CSS, Git, Problem Solving, Communication',
-  experience1Title: 'Academic Projects & Practice Work',
+  skills: 'React, JavaScript, TypeScript, HTML, CSS, Tailwind CSS, Git, REST API Integration, Responsive Design, Debugging, Problem Solving, Communication',
+  experience1Title: 'Frontend Developer Intern',
   experience1Company: 'Self-driven Learning',
   experience1Period: '2025 - Present',
   experience1Description:
-    'Built responsive frontend projects, improved UI structure, and practiced real-world implementation through guided coursework and assignments.',
-  experience2Title: 'Team Collaboration Projects',
+    'Built responsive interfaces, improved page structure, integrated APIs, fixed UI bugs, and delivered assignment-based projects using React and modern frontend workflows.',
+  experience2Title: 'Project Team Member',
   experience2Company: 'Student Initiatives',
   experience2Period: '2024 - Present',
   experience2Description:
-    'Worked with peers on structured mini-projects, presentations, and task delivery with attention to quality and deadlines.',
+    'Collaborated with peers on mini-projects, documentation, presentations, testing, and delivery planning while meeting deadlines and quality expectations.',
   project1Title: 'Portfolio Website',
   project1Description:
-    'Designed an attractive personal portfolio with project showcases, contact details, and clean visual storytelling.',
+    'Developed a personal portfolio website with responsive layouts, project showcases, contact information, and optimized user experience.',
   project2Title: 'Course or Product UI Project',
   project2Description:
-    'Created a polished, mobile-friendly interface with strong layout, branding, and usability decisions.',
+    'Created a mobile-friendly web interface with reusable components, consistent styling, usability improvements, and structured content sections.',
   education:
     'Add your degree, school or college, board/university, and graduation year here.',
   achievements:
-    'Mention certificates, awards, top exam scores, contests, leadership, volunteering, or notable milestones.',
+    'Mention certifications, awards, top exam scores, contests, leadership, volunteering, or notable milestones.',
 };
 
 const ResumeBuilder = () => {
@@ -108,36 +111,134 @@ const ResumeBuilder = () => {
   };
 
   const downloadResume = async () => {
-    if (!previewRef.current) return;
     setDownloading(true);
     try {
-      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf'),
-      ]);
-      const canvas = await html2canvas(previewRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#f8fafc',
-      });
-      const imgData = canvas.toDataURL('image/png');
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const contentWidth = pageWidth - PDF_MARGIN * 2;
+      const fullName = profile?.full_name || user?.email?.split('@')[0] || 'Your Name';
+      const safeEmail = resume.email || profile?.email || user?.email || 'yourname@gmail.com';
+      const safePhone = resume.phone || '+91 98765 43210';
+      const safeLocation = resume.location || 'India';
+      const safeLinkedIn = resume.linkedin || 'linkedin.com/in/your-profile';
+      const safePortfolio = resume.portfolio || 'portfolio.example.com';
 
-      let remainingHeight = imgHeight;
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      remainingHeight -= pageHeight;
+      let y = PDF_MARGIN;
 
-      while (remainingHeight > 0) {
-        position = remainingHeight - imgHeight;
+      const ensureSpace = (heightNeeded = PDF_LINE_HEIGHT) => {
+        if (y + heightNeeded <= pageHeight - PDF_MARGIN) return;
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        remainingHeight -= pageHeight;
-      }
+        y = PDF_MARGIN;
+      };
+
+      const writeWrappedText = (text, options = {}) => {
+        const { fontSize = 11, fontStyle = 'normal', gapAfter = 0, indent = 0 } = options;
+        if (!text) return;
+        pdf.setFont('helvetica', fontStyle);
+        pdf.setFontSize(fontSize);
+        const lines = pdf.splitTextToSize(text, contentWidth - indent);
+        ensureSpace(lines.length * PDF_LINE_HEIGHT);
+        pdf.text(lines, PDF_MARGIN + indent, y);
+        y += lines.length * PDF_LINE_HEIGHT + gapAfter;
+      };
+
+      const writeSection = (title, body) => {
+        if (!body) return;
+        const normalizedBody = Array.isArray(body) ? body.filter(Boolean) : [body];
+        if (!normalizedBody.length) return;
+        ensureSpace(PDF_SECTION_GAP + PDF_LINE_HEIGHT * 2);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(12);
+        pdf.text(title.toUpperCase(), PDF_MARGIN, y);
+        y += PDF_LINE_HEIGHT + 1;
+        normalizedBody.forEach((item) => {
+          writeWrappedText(item, { fontSize: 11, fontStyle: 'normal', gapAfter: 2 });
+        });
+        y += 2;
+      };
+
+      const writeBulletList = (items) => {
+        items.filter(Boolean).forEach((item) => {
+          const bulletLines = pdf.splitTextToSize(item, contentWidth - 6);
+          ensureSpace(bulletLines.length * PDF_LINE_HEIGHT);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(11);
+          pdf.text('•', PDF_MARGIN, y);
+          pdf.text(bulletLines, PDF_MARGIN + 5, y);
+          y += bulletLines.length * PDF_LINE_HEIGHT + 1;
+        });
+      };
+
+      const splitIntoBullets = (text) =>
+        String(text || '')
+          .split(/\r?\n|[.;]\s+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+      const writeRoleSection = (title, roles) => {
+        const filteredRoles = roles.filter((role) => role && [role.title, role.company, role.period, role.description].some(Boolean));
+        if (!filteredRoles.length) return;
+        ensureSpace(PDF_SECTION_GAP + PDF_LINE_HEIGHT * 3);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(12);
+        pdf.text(title.toUpperCase(), PDF_MARGIN, y);
+        y += PDF_LINE_HEIGHT + 1;
+        filteredRoles.forEach((role) => {
+          const heading = [role.title, role.company].filter(Boolean).join(' | ');
+          writeWrappedText(heading, { fontSize: 11, fontStyle: 'bold', gapAfter: 0 });
+          if (role.period) {
+            writeWrappedText(role.period, { fontSize: 10, gapAfter: 1 });
+          }
+          writeBulletList(splitIntoBullets(role.description));
+          y += 2;
+        });
+      };
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(20);
+      pdf.text(fullName, PDF_MARGIN, y);
+      y += 9;
+      writeWrappedText(resume.role, { fontSize: 13, fontStyle: 'bold', gapAfter: 1 });
+      writeWrappedText(`Email: ${safeEmail}`, { fontSize: 10, gapAfter: 0 });
+      writeWrappedText(`Phone: ${safePhone}`, { fontSize: 10, gapAfter: 0 });
+      writeWrappedText(`Location: ${safeLocation}`, { fontSize: 10, gapAfter: 0 });
+      writeWrappedText(`LinkedIn: ${safeLinkedIn}`, { fontSize: 10, gapAfter: 0 });
+      writeWrappedText(`Portfolio: ${safePortfolio}`, { fontSize: 10, gapAfter: 5 });
+
+      writeSection('Professional Summary', resume.summary);
+      writeSection('Skills', skillList.join(' | '));
+      writeRoleSection('Professional Experience', [
+        {
+          title: resume.experience1Title,
+          company: resume.experience1Company,
+          period: resume.experience1Period,
+          description: resume.experience1Description,
+        },
+        {
+          title: resume.experience2Title,
+          company: resume.experience2Company,
+          period: resume.experience2Period,
+          description: resume.experience2Description,
+        },
+      ]);
+      writeRoleSection('Projects', [
+        {
+          title: resume.project1Title,
+          company: '',
+          period: '',
+          description: resume.project1Description,
+        },
+        {
+          title: resume.project2Title,
+          company: '',
+          period: '',
+          description: resume.project2Description,
+        },
+      ]);
+      writeSection('Education', resume.education);
+      writeSection('Certifications And Achievements', resume.achievements);
 
       const safeName = (profile?.full_name || user?.email || 'resume')
         .replace(/[^a-z0-9]+/gi, '-')
@@ -281,7 +382,7 @@ const ResumeBuilder = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">ATS Score</p>
             <div className="mt-2 flex items-end justify-between gap-3">
               <p className="text-4xl font-bold text-emerald-900">{ATS_SCORE}</p>
-              <p className="text-sm font-medium text-emerald-700">Locked to 99 for this resume format</p>
+              <p className="text-sm font-medium text-emerald-700">Text-based PDF export for stronger ATS parsing</p>
             </div>
           </div>
           <h2 className="text-xl font-bold text-slate-900">Resume Details</h2>
