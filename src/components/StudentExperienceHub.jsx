@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, Flame, Medal, MessageSquare, PlayCircle, Sparkles, Trophy } from 'lucide-react';
+import { BarChart3, Flame, Medal, MessageSquare, PlayCircle, Sparkles } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { BADGE_LEVELS, computeCurrentStreak, getBadgeForPoints, getNextBadge } from '../utils/learningActivity';
 
@@ -60,7 +60,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
     nextBadge: null,
     weeklyChart: makeLastSevenDays(),
     recommendations: [],
-    leaderboard: [],
     forumPosts: 0,
     forumAnswers: 0,
     codingRuns: 0,
@@ -85,7 +84,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
         forumPostsResult,
         forumAnswersResult,
         allCoursesResult,
-        leaderboardEventsResult,
       ] = await Promise.all([
         supabase
           .from('learning_activity_events')
@@ -114,11 +112,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
           .eq('user_id', profile.id)
           .order('created_at', { ascending: false }),
         supabase.from('courses').select('id, title, category, description, thumbnail_url').order('created_at', { ascending: false }),
-        supabase
-          .from('learning_activity_events')
-          .select('user_id, points_awarded, participant:profiles(full_name, avatar_url)')
-          .order('created_at', { ascending: false })
-          .limit(500),
       ]);
 
       if (cancelled) return;
@@ -129,7 +122,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
       const postRows = forumPostsResult.data || [];
       const answerRows = forumAnswersResult.data || [];
       const availableCourses = allCoursesResult.data || [];
-      const leaderboardEvents = leaderboardEventsResult.data || [];
 
       const completedCourses = courses.filter((course) => {
         if (course.completed) return true;
@@ -214,31 +206,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
         })
         .slice(0, 3);
 
-      const leaderboardMap = new Map();
-      leaderboardEvents.forEach((row) => {
-        const current = leaderboardMap.get(row.user_id) || {
-          userId: row.user_id,
-          fullName: row.participant?.full_name || 'Student',
-          avatarUrl: row.participant?.avatar_url || '',
-          points: 0,
-        };
-        current.points += Number(row.points_awarded) || 0;
-        leaderboardMap.set(row.user_id, current);
-      });
-
-      if (!leaderboardMap.has(profile.id) && totalPoints > 0) {
-        leaderboardMap.set(profile.id, {
-          userId: profile.id,
-          fullName: profile.full_name || 'You',
-          avatarUrl: profile.avatar_url || '',
-          points: totalPoints,
-        });
-      }
-
-      const leaderboard = [...leaderboardMap.values()]
-        .sort((left, right) => right.points - left.points)
-        .slice(0, 5);
-
       setStats({
         totalPoints,
         currentStreak: computeCurrentStreak(activityDates),
@@ -249,7 +216,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
         nextBadge,
         weeklyChart: weeklyData,
         recommendations,
-        leaderboard,
         forumPosts: postRows.length,
         forumAnswers: answerRows.length,
         codingRuns: codingRows.length,
@@ -362,7 +328,7 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -383,36 +349,6 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
                   <h3 className="mt-2 text-lg font-bold text-slate-900">{course.title}</h3>
                   <p className="mt-2 text-sm text-slate-500">{course.description || 'Sharpen your fundamentals with this recommendation.'}</p>
                 </Link>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Leaderboard</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-900">Top learners</h2>
-            </div>
-            <Trophy size={18} className="text-amber-500" />
-          </div>
-          <div className="mt-5 space-y-3">
-            {stats.leaderboard.length === 0 ? (
-              <p className="text-sm text-slate-500">Leaderboard will populate as students earn points.</p>
-            ) : (
-              stats.leaderboard.map((entry, index) => (
-                <div key={entry.userId} className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-slate-900">{entry.fullName}</p>
-                      <p className="text-xs text-slate-500">{entry.userId === profile?.id ? 'You' : 'Learner'}</p>
-                    </div>
-                  </div>
-                  <p className="font-bold text-emerald-700">{entry.points}</p>
-                </div>
               ))
             )}
           </div>
