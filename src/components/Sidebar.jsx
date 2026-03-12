@@ -628,6 +628,10 @@ const Sidebar = () => {
               <Settings size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Admin Settings</span>}
             </NavLink>
+            <NavLink to="/app/admin/website-protection" className={navItemClass} title="Website Protection">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Website Protection</span>}
+            </NavLink>
             <NavLink to="/app/admin/support-contact" className={navItemClass} title="Support Contact">
               <Mail size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Support Contact</span>}

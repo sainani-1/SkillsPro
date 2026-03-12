@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, Send, Bot, User, Crown, Lock } from 'lucide-react';
-import LoadingSpinner from '../components/LoadingSpinner';
+import { generateAssistantReply } from '../utils/aiAssistant';
 
 const CareerChatbot = () => {
   const { profile } = useAuth();
@@ -11,6 +11,14 @@ const CareerChatbot = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const careerSystemPrompt = `
+You are a career guidance assistant inside an edtech platform.
+Give practical, student-friendly answers for career planning, skills, interviews, resumes, project ideas, roadmaps, and platform-related study guidance.
+Keep answers concise but useful.
+Do not mention the underlying AI provider, model, or vendor.
+If the question is unclear, ask one short follow-up question.
+Use plain text with short paragraphs or simple bullet points when helpful.
+`;
 
   const isPremium = profile?.premium_until && new Date(profile.premium_until) > new Date();
 
@@ -217,16 +225,30 @@ const CareerChatbot = () => {
     setInput('');
     setLoading(true);
 
-    // Simulate AI thinking time
-    setTimeout(() => {
+    try {
+      const assistantText =
+        (await generateAssistantReply({
+          systemInstruction: careerSystemPrompt,
+          history: messages,
+          message: input,
+        })) || getCareerGuidanceResponse(input);
+
+      const aiResponse = {
+        role: 'assistant',
+        content: assistantText,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, aiResponse]);
+    } catch (error) {
       const aiResponse = {
         role: 'assistant',
         content: getCareerGuidanceResponse(input),
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e) => {

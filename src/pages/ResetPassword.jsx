@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, ArrowLeft, Lock, CheckCircle2, Eye, EyeOff, ShieldCheck, KeyRound } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Mail, ArrowLeft, CheckCircle2, Eye, EyeOff, ShieldCheck, KeyRound } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import AuthShell from '../components/AuthShell';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -166,160 +167,150 @@ const ResetPassword = () => {
 
   const statusClass =
     status.type === 'error'
-      ? 'bg-red-500/15 border-red-400/40 text-red-200'
+      ? 'border-red-200 bg-red-50 text-red-700'
       : status.type === 'success'
-      ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
-      : 'bg-blue-500/15 border-blue-400/40 text-blue-200';
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : 'border-blue-200 bg-blue-50 text-blue-700';
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 py-8 relative">
-      <div className="absolute top-5 right-5 md:top-8 md:right-8 z-10">
-        <div className="w-14 h-14 md:w-16 md:h-16 rounded-full shadow-lg flex items-center justify-center overflow-hidden">
-          <img
-            src="/skillpro-logo.png"
-            alt="SkillPro logo"
-            className="w-10 h-10 md:w-12 md:h-12 object-contain rounded-full mix-blend-multiply"
-          />
+    <AuthShell
+      title="Reset your password securely"
+      subtitle={
+        isRecoveryMode
+          ? 'Recovery session verified. Set a strong new password and continue securely.'
+          : 'Enter your email and SkillPro will send a secure reset link to start recovery.'
+      }
+      highlights={[
+        { icon: ShieldCheck, text: 'Secure token-based reset flow with verified recovery sessions.' },
+        { icon: Mail, text: 'Reset links are delivered to your registered email address.' },
+        { icon: KeyRound, text: 'Changing the password signs out old sessions and protects the account.' },
+      ]}
+      footerLabel="Remembered your password?"
+      footerLinkTo="/login"
+      footerLinkText="Back to login"
+      rightTitle={isRecoveryMode ? 'Set New Password' : 'Reset Password'}
+      rightSubtitle={isRecoveryMode ? 'Step 2 of 2' : 'Step 1 of 2'}
+      progress={[!isRecoveryMode, isRecoveryMode]}
+    >
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60 sm:p-6">
+        <div className="mb-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-amber-700 px-4 py-4 text-white">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">Password Recovery</p>
+          <p className="mt-2 text-sm text-slate-100">
+            {isRecoveryMode
+              ? 'Choose a strong password and confirm it before returning to login.'
+              : 'Enter your registered email to receive a secure reset link.'}
+          </p>
         </div>
-      </div>
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1.1fr,1.2fr] rounded-3xl overflow-hidden border border-slate-700/70 shadow-2xl">
-        <aside className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 md:p-10 text-white flex flex-col justify-between">
-          <div>
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gold-400/95 mb-5">
-              <Lock size={28} className="text-slate-900" />
+
+        {status.message ? (
+          <div className={`mb-5 rounded-xl border p-3 text-sm ${statusClass}`}>
+            {status.message}
+          </div>
+        ) : null}
+
+        {!isRecoveryMode ? (
+          <form onSubmit={handleSendResetLink} className="space-y-4">
+            <label className="block text-sm font-medium text-slate-700">Email Address</label>
+            <div className="relative">
+              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-3 text-slate-900 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                required
+              />
             </div>
-            <h1 className="text-3xl md:text-4xl font-extrabold leading-tight">Reset Your Password</h1>
-            <p className="mt-3 text-slate-300 text-sm md:text-base">
-              {isRecoveryMode
-                ? 'Recovery session verified. Set a strong new password.'
-                : 'Enter your email and we will send a secure password reset link.'}
+            <button
+              type="submit"
+              disabled={sending}
+              className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-60"
+            >
+              {sending ? 'Sending Reset Link...' : 'Send Reset Link'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleUpdatePassword} className="space-y-4">
+            <label className="block text-sm font-medium text-slate-700">New Password</label>
+            <div className="relative">
+              <input
+                type={showNewPassword ? 'text' : 'password'}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 pr-11 text-slate-900 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Toggle new password visibility"
+              >
+                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+            <div className="space-y-1">
+              <div className="overflow-hidden rounded bg-slate-200">
+                <div className={`h-2 ${passwordStrength.color} ${passwordStrength.width} transition-all`} />
+              </div>
+              <p className="text-xs text-slate-500">Password strength: {passwordStrength.label}</p>
+            </div>
+
+            <label className="block text-sm font-medium text-slate-700">Confirm New Password</label>
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 pr-11 text-slate-900 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Toggle confirm password visibility"
+              >
+                {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <KeyRound size={14} />
+              Minimum 8+ characters recommended with mixed-case, number and symbol.
             </p>
-          </div>
 
-          <div className="mt-8 space-y-3 text-sm">
-            <div className="flex items-center gap-3 text-slate-200">
-              <ShieldCheck size={16} className="text-emerald-400" />
-              Secure token-based reset flow
-            </div>
-            <div className="flex items-center gap-3 text-slate-200">
-              <Mail size={16} className="text-blue-300" />
-              Link opens in a verified recovery session
-            </div>
-            <div className="flex items-center gap-3 text-slate-200">
-              <KeyRound size={16} className="text-amber-300" />
-              Password update signs out old sessions
-            </div>
-          </div>
-        </aside>
-
-        <section className="bg-white/10 backdrop-blur-lg p-7 md:p-10">
-          <div className="flex items-center gap-2 mb-6">
-            <div className={`h-2 flex-1 rounded-full ${!isRecoveryMode ? 'bg-gold-400' : 'bg-slate-600'}`} />
-            <div className={`h-2 flex-1 rounded-full ${isRecoveryMode ? 'bg-gold-400' : 'bg-slate-600'}`} />
-          </div>
-
-          {status.message ? (
-            <div className={`border rounded-xl p-3 text-sm mb-5 ${statusClass}`}>
-              {status.message}
-            </div>
-          ) : null}
-
-          {!isRecoveryMode ? (
-            <form onSubmit={handleSendResetLink} className="space-y-4">
-              <label className="block text-sm text-slate-200 font-medium">Email Address</label>
-              <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full pl-10 pr-3 py-3 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={sending}
-                className="w-full bg-gold-400 hover:bg-gold-300 text-slate-900 font-extrabold py-3 rounded-xl transition-colors disabled:opacity-60"
-              >
-                {sending ? 'Sending Reset Link...' : 'Send Reset Link'}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleUpdatePassword} className="space-y-4">
-              <label className="block text-sm text-slate-200 font-medium">New Password</label>
-              <div className="relative">
-                <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  className="w-full p-3 pr-11 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                  aria-label="Toggle new password visibility"
-                >
-                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              <div className="space-y-1">
-                <div className="h-2 rounded bg-slate-700 overflow-hidden">
-                  <div className={`h-2 ${passwordStrength.color} ${passwordStrength.width} transition-all`} />
-                </div>
-                <p className="text-xs text-slate-300">Password strength: {passwordStrength.label}</p>
-              </div>
-
-              <label className="block text-sm text-slate-200 font-medium">Confirm New Password</label>
-              <div className="relative">
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm new password"
-                  className="w-full p-3 pr-11 rounded-xl bg-slate-950/70 border border-slate-600 text-white focus:outline-none focus:border-gold-400"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                  aria-label="Toggle confirm password visibility"
-                >
-                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              <p className="text-xs text-slate-300 flex items-center gap-2">
-                <KeyRound size={14} />
-                Minimum 8+ characters recommended with mixed-case, number and symbol.
-              </p>
-
-              <button
-                type="submit"
-                disabled={updating}
-                className="w-full bg-gold-400 hover:bg-gold-300 text-slate-900 font-extrabold py-3 rounded-xl transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 size={18} />
-                {updating ? 'Updating Password...' : 'Set New Password'}
-              </button>
-            </form>
-          )}
-
-          <button
-            type="button"
-            onClick={() => navigate('/login')}
-            className="mt-5 w-full flex items-center justify-center gap-2 text-slate-300 hover:text-white transition"
-          >
-            <ArrowLeft size={18} />
-            Back to Login
-          </button>
-        </section>
+            <button
+              type="submit"
+              disabled={updating}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-60"
+            >
+              <CheckCircle2 size={18} />
+              {updating ? 'Updating Password...' : 'Set New Password'}
+            </button>
+          </form>
+        )}
       </div>
-    </div>
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          onClick={() => navigate('/login')}
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          <ArrowLeft size={18} />
+          Back to Login
+        </button>
+        <Link
+          to="/register"
+          className="inline-flex flex-1 items-center justify-center rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white transition hover:bg-slate-800"
+        >
+          Create Account
+        </Link>
+      </div>
+    </AuthShell>
   );
 };
 

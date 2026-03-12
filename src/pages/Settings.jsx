@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
-import { Settings as SettingsIcon, User, Bell, Lock, Eye, EyeOff, Mail, Phone, MapPin, Briefcase, Calendar, Globe, Shield, Trash2 } from 'lucide-react';
+import { Settings as SettingsIcon, User, Bell, Lock, Eye, EyeOff, Mail, Phone, MapPin, Briefcase, Calendar, Shield } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
-import useDialog from '../hooks/useDialog.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Settings = () => {
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
   const { popupNode, openPopup } = usePopup();
-  const { confirm, prompt, dialogNode } = useDialog();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
 
@@ -175,63 +173,11 @@ const Settings = () => {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    const ok = await confirm('Are you sure you want to delete your account? This action cannot be undone.', 'Delete Account');
-    if (!ok) {
-      return;
-    }
-
-    const confirmText = await prompt('Type "DELETE" to confirm account deletion:', {
-      title: 'Final Confirmation',
-      required: true,
-      placeholder: 'Type DELETE'
-    });
-    if (confirmText !== 'DELETE') {
-      openPopup('Cancelled', 'Account deletion cancelled', 'info');
-      return;
-    }
-
-    const deleteReason = await prompt('Reason for deleting your account:', {
-      title: 'Deletion Reason',
-      required: true,
-      placeholder: 'Write reason here'
-    });
-    if (!deleteReason || !deleteReason.trim()) {
-      openPopup('Cancelled', 'Deletion reason is required.', 'warning');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke('admin-delete-user', {
-        body: {
-          user_id: profile.id,
-          reason: deleteReason.trim()
-        }
-      });
-      if (error) throw error;
-
-      openPopup(
-        'Deleted',
-        data?.message || 'Your account has been deleted. Logging out...',
-        'success'
-      );
-      setTimeout(() => {
-        signOut();
-      }, 2000);
-    } catch (error) {
-      openPopup('Error', error.message || 'Failed to delete account', 'error');
-      setLoading(false);
-    }
-  };
-
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'password', label: 'Password', icon: Lock },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'privacy', label: 'Privacy', icon: Shield },
-    { id: 'danger', label: 'Danger Zone', icon: Trash2 }
   ];
 
   if (loading) return <LoadingSpinner message="Updating settings..." />;
@@ -239,7 +185,6 @@ const Settings = () => {
   return (
     <div className="space-y-6">
       {popupNode}
-      {dialogNode}
       
       <div className="flex items-center justify-between">
         <div>

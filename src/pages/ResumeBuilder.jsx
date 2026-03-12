@@ -271,7 +271,7 @@ const ResumeBuilder = () => {
           </p>
         </div>
 
-        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-amber-900 space-y-5">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-900 space-y-5">
           <div>
             <p className="text-lg font-semibold">Premium access required</p>
             <p className="mt-2 text-sm">
@@ -279,16 +279,16 @@ const ResumeBuilder = () => {
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-amber-200 bg-white p-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-semibold uppercase tracking-[0.2em]">Preview</p>
               <p className="mt-3 text-sm">Live resume preview, polished layout, and PDF export stay unlocked with premium.</p>
             </div>
-            <div className="rounded-2xl border border-amber-200 bg-white p-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-semibold uppercase tracking-[0.2em]">Why upgrade</p>
               <p className="mt-3 text-sm">Get direct teacher support + resume builder + premium certificates in one plan.</p>
             </div>
           </div>
-          <div className="overflow-hidden rounded-3xl border border-amber-200 bg-white">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
             <div className="grid grid-cols-3 bg-slate-900 text-white text-sm font-semibold">
               <div className="px-4 py-3">Feature</div>
               <div className="px-4 py-3">Free</div>
@@ -303,7 +303,7 @@ const ResumeBuilder = () => {
               <div key={feature} className="grid grid-cols-3 border-t border-slate-200 text-sm">
                 <div className="px-4 py-3 font-medium text-slate-900">{feature}</div>
                 <div className="px-4 py-3 text-slate-600">{free}</div>
-                <div className="px-4 py-3 font-semibold text-emerald-700">{premium}</div>
+                <div className="px-4 py-3 font-semibold text-slate-900">{premium}</div>
               </div>
             ))}
           </div>
@@ -311,13 +311,13 @@ const ResumeBuilder = () => {
             <Link
               to="/app/payment"
               onClick={() => trackPremiumEvent('upgrade_click', 'resume_builder_gate', { accessMode }, profile?.id || user?.id || null)}
-              className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-5 py-3 font-bold text-white hover:bg-amber-600"
+              className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800"
             >
               Upgrade to Premium
             </Link>
             <Link
               to="/app/premium-status"
-              className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-white px-5 py-3 font-semibold text-amber-800 hover:bg-amber-100"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
             >
               Compare Premium Benefits
             </Link>
@@ -480,7 +480,7 @@ const ResumeBuilder = () => {
                   <ResumeSection title="Core Skills">
                     <div className="flex flex-wrap gap-2">
                       {skillList.map((skill) => (
-                        <span key={skill} className="rounded-full bg-amber-100 px-3 py-1.5 text-sm font-semibold text-amber-900">
+                        <span key={skill} className="rounded-full bg-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-800">
                           {skill}
                         </span>
                       ))}
@@ -531,7 +531,7 @@ const Textarea = ({ label, value, onChange, rows = 4 }) => (
 
 const ResumeSection = ({ title, children }) => (
   <section>
-    <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-amber-700">{title}</h3>
+    <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-slate-600">{title}</h3>
     <div className="mt-4 space-y-4">{children}</div>
   </section>
 );

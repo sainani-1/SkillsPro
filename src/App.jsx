@@ -17,6 +17,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
+import About from './pages/About';
 import Plans from './pages/Plans';
 import Dashboard from './pages/Dashboard';
 import CourseList from './pages/CourseList';
@@ -93,6 +94,8 @@ import AdminLeadInbox from './pages/AdminLeadInbox';
 import CodingPlayground from './pages/CodingPlayground';
 import DiscussionForum from './pages/DiscussionForum';
 import SkillBadges from './pages/SkillBadges';
+import AdminWebsiteProtection from './pages/AdminWebsiteProtection';
+import UniversalAssistant from './pages/UniversalAssistant';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -206,6 +209,7 @@ function App() {
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Home />} />
+        <Route path="/about" element={<About />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/plans" element={<Plans />} />
@@ -242,6 +246,7 @@ function App() {
           <Route path="my-students" element={<MyStudents />} />
           <Route path="assigned-classes" element={<AssignedClasses />} />
           <Route path="class-schedule" element={<ClassSchedule />} />
+          <Route path="assistant" element={<UniversalAssistant />} />
           <Route path="career-chatbot" element={<CareerChatbot />} />
           <Route path="learning-path" element={<AILearningPath />} />
           <Route path="interview-prep" element={<InterviewPrep />} />
@@ -280,6 +285,7 @@ function App() {
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
+          <Route path="admin/website-protection" element={<AdminRoute><AdminWebsiteProtection /></AdminRoute>} />
           <Route path="admin/support-contact" element={<AdminRoute><AdminSupportContact /></AdminRoute>} />
           <Route path="admin/activity-logs" element={<AdminRoute><AdminActivityLogs /></AdminRoute>} />
           <Route path="admin/growth-analytics" element={<AdminRoute><AdminGrowthAnalytics /></AdminRoute>} />

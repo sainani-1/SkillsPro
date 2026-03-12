@@ -5,6 +5,7 @@ import "./index.css";
 import { AuthProvider } from "./context/AuthContext";
 import { ChatProvider } from "./context/ChatContext";
 import { NotificationProvider } from "./context/NotificationContext";
+import GlobalInteractionGuards from "./components/GlobalInteractionGuards";
 
 const suppressConsoleOutput = () => {
   const noop = () => {};
@@ -32,6 +33,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <AuthProvider>
       <NotificationProvider>
         <ChatProvider>
+          <GlobalInteractionGuards />
           <App />
         </ChatProvider>
       </NotificationProvider>

@@ -642,49 +642,49 @@ const MyCertificates = () => {
                   Verified Certificate
                 </div>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
+              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <a
                   href={`/certificate-preview/${encodeURIComponent(formatCertificateId(cert))}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`h-12 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-[15px] font-semibold text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 hover:shadow transition ${
+                  className={`min-w-0 inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 hover:shadow ${
                     cert.revoked_at ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''
                   }`}
                 >
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700">
                     <Eye size={19} strokeWidth={2.4} />
                   </span>
-                  View Certificate
+                  <span className="truncate">View Certificate</span>
                 </a>
                 <button
                   onClick={() => downloadCertificate(cert)}
                   disabled={downloading === cert.id || !!cert.revoked_at}
-                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 px-4 text-[15px] font-semibold text-white shadow-md hover:from-slate-800 hover:to-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="min-w-0 inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 px-3 py-3 text-sm font-semibold text-white shadow-md transition hover:from-slate-800 hover:to-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
                     <Download size={19} strokeWidth={2.4} />
                   </span>
-                  {downloading === cert.id ? 'Downloading...' : 'Download PDF'}
+                  <span className="truncate">{downloading === cert.id ? 'Downloading...' : 'Download PDF'}</span>
                 </button>
                 <button
                   onClick={() => shareOnLinkedIn(cert)}
                   disabled={!!cert.revoked_at}
-                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-blue-600 px-4 text-[15px] font-semibold text-white shadow-md hover:from-blue-800 hover:to-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="min-w-0 inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-md transition hover:from-blue-800 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
                     <Linkedin size={19} strokeWidth={2.4} />
                   </span>
-                  Share LinkedIn
+                  <span className="truncate">Share LinkedIn</span>
                 </button>
                 <button
                   onClick={() => shareOnWhatsApp(cert)}
                   disabled={!!cert.revoked_at}
-                  className="h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 text-[15px] font-semibold text-white shadow-md hover:from-emerald-700 hover:to-emerald-600 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="min-w-0 inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-3 py-3 text-sm font-semibold text-white shadow-md transition hover:from-emerald-700 hover:to-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-white">
                     <MessageCircle size={19} strokeWidth={2.4} />
                   </span>
-                  WhatsApp
+                  <span className="truncate">WhatsApp</span>
                 </button>
               </div>
             </div>

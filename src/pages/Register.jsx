@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, Navigate } from 'react-router-dom';
+import { BookOpenCheck, FileCheck, GraduationCap } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
+import LoadingSpinner from '../components/LoadingSpinner';
+import AuthShell from '../components/AuthShell';
 import { prepareAvatarFile } from '../utils/imageUtils';
 import { attachPendingReferral, savePendingReferralCode } from '../utils/referrals';
+import { useAuth } from '../context/AuthContext';
 
 const Register = () => {
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState('');
@@ -333,60 +338,51 @@ const Register = () => {
     }
   };
 
+  if (authLoading) {
+    return <LoadingSpinner message="Checking session..." />;
+  }
+
+  if (user?.id) {
+    return <Navigate to="/app" replace />;
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-amber-50/40 p-4 sm:p-6 md:p-8 flex items-center justify-center">
-      <div className="w-full mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10 items-stretch">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900 text-white p-8 md:p-10 shadow-2xl">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.35),transparent_48%),radial-gradient(circle_at_bottom_left,rgba(14,116,144,0.3),transparent_45%)] pointer-events-none" />
-          <div className="relative z-10 h-full flex flex-col">
-            <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-16 h-16 rounded-full object-contain mix-blend-multiply shadow-lg" />
-            <h1 className="mt-6 text-3xl md:text-4xl font-bold leading-tight">Start your SkillPro journey</h1>
-            <p className="mt-3 text-slate-200 text-sm md:text-base max-w-md">
-              Create your account to access classes, exams, certificates, and personalized learning updates.
-            </p>
-            <div className="mt-8 space-y-3 text-sm text-slate-100/90">
-              <p className="flex items-start gap-2"><span className="text-amber-300">*</span> Live class and exam notifications</p>
-              <p className="flex items-start gap-2"><span className="text-amber-300">*</span> Certificate progress and completion tracking</p>
-              <p className="flex items-start gap-2"><span className="text-amber-300">*</span> Education-specific course recommendations</p>
-            </div>
-            <div className="mt-auto pt-8">
-              <p className="text-xs text-slate-300">Already have an account?</p>
-              <Link to="/login" className="inline-flex mt-2 text-sm font-semibold text-amber-300 hover:text-amber-200 transition-colors">
-                Login to continue
-              </Link>
-            </div>
-          </div>
+    <AuthShell
+      title="Start your SkillPro journey"
+      subtitle="Create your account to access classes, exams, certificates, and personalized learning updates."
+      highlights={[
+        { icon: GraduationCap, text: 'Education-specific setup so recommendations and assessments fit the learner profile.' },
+        { icon: FileCheck, text: 'Profile and certificate details are captured during signup to reduce re-entry later.' },
+        { icon: BookOpenCheck, text: 'Use one account for learning, exams, certificate verification, and mentor support.' },
+      ]}
+      footerLabel="Already have an account?"
+      footerLinkTo="/login"
+      footerLinkText="Login to continue"
+      rightTitle="Create Account"
+      rightSubtitle={`Step ${currentStep} of 4`}
+      progress={!registrationPaused ? [1, 2, 3, 4].map((step) => step <= currentStep) : []}
+      panelClassName=""
+    >
+      {registrationPaused ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center">
+          <div className="mb-3 text-4xl">Registration Locked</div>
+          <h3 className="mb-2 text-xl font-bold text-amber-900">Registrations Paused</h3>
+          <p className="mb-5 text-amber-800">Registrations are temporarily paused. Please try again later.</p>
+          <Link to="/login" className="inline-flex rounded-lg bg-amber-600 px-4 py-2 text-white transition-colors hover:bg-amber-700">
+            Go Back to Login
+          </Link>
         </div>
-
-        <div className="relative overflow-hidden bg-white/95 backdrop-blur rounded-3xl shadow-2xl border border-white p-6 sm:p-8 md:p-10">
-          <div className="absolute -top-20 -right-20 h-56 w-56 rounded-full bg-amber-100/70 blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-20 -left-20 h-56 w-56 rounded-full bg-cyan-100/70 blur-3xl pointer-events-none" />
-          <div className="relative z-10">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl md:text-3xl font-bold text-slate-900">Create Account</h2>
-              <p className="text-sm text-slate-500 mt-2">Step {currentStep} of 4</p>
+      ) : (
+        <>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60 sm:p-6">
+            <div className="mb-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-amber-700 px-4 py-4 text-white">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">Registration Flow</p>
+              <p className="mt-2 text-sm text-slate-100">
+                Complete each step to create your SkillPro account with the right education details.
+              </p>
             </div>
 
-            {!registrationPaused && (
-              <div className="mb-6 grid grid-cols-4 gap-2">
-                {[1, 2, 3, 4].map((step) => (
-                  <div key={step} className={`h-2 rounded-full ${step <= currentStep ? 'bg-amber-500' : 'bg-slate-200'}`} />
-                ))}
-              </div>
-            )}
-
-            {registrationPaused ? (
-              <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl p-8">
-                <div className="text-4xl mb-3">Registration Locked</div>
-                <h3 className="text-xl font-bold text-amber-900 mb-2">Registrations Paused</h3>
-                <p className="text-amber-800 mb-5">Registrations are temporarily paused. Please try again later.</p>
-                <Link to="/login" className="inline-flex px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors">
-                  Go Back to Login
-                </Link>
-              </div>
-            ) : (
-              <>
-                <form onSubmit={handleRegister} className="space-y-4">
+            <form onSubmit={handleRegister} className="space-y-4">
                   {currentStep === 1 && (
                     <>
                       <div>
@@ -609,38 +605,35 @@ const Register = () => {
                       </button>
                     )}
                   </div>
-                </form>
-                <p className="text-center mt-6 text-sm text-slate-600">
-                  Already have an account? <Link to="/login" className="text-amber-700 font-bold">Login</Link>
-                </p>
-                {registrationDone && (
-                  <div className="mt-4 p-4 rounded-2xl bg-cyan-50 border border-cyan-200">
-                    <p className="text-xs text-cyan-900 mb-2">
-                      Verification email sent to <span className="font-semibold">{registeredEmail}</span>
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleResendVerification}
-                      disabled={resendingVerification}
-                      className="w-full bg-cyan-700 text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-cyan-800 disabled:opacity-60 transition"
-                    >
-                      {resendingVerification ? 'Sending...' : 'Resend verification email'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/login')}
-                      className="w-full mt-2 border border-slate-300 text-slate-700 text-sm font-semibold py-2.5 rounded-xl hover:bg-slate-50 transition"
-                    >
-                      Go to Login
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
+            </form>
           </div>
-        </div>
-      </div>
-
+          <p className="mt-4 text-center text-sm text-slate-600">
+            Already have an account? <Link to="/login" className="font-bold text-amber-700">Login</Link>
+          </p>
+          {registrationDone && (
+            <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
+              <p className="mb-2 text-xs text-cyan-900">
+                Verification email sent to <span className="font-semibold">{registeredEmail}</span>
+              </p>
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={resendingVerification}
+                className="w-full rounded-xl bg-cyan-700 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:opacity-60"
+              >
+                {resendingVerification ? 'Sending...' : 'Resend verification email'}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="mt-2 w-full rounded-xl border border-slate-300 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Go to Login
+              </button>
+            </div>
+          )}
+        </>
+      )}
       <AlertModal
         show={alertModal.show}
         title={alertModal.title}
@@ -648,7 +641,7 @@ const Register = () => {
         type={alertModal.type}
         onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
       />
-    </div>
+    </AuthShell>
   );
 };
 

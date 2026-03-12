@@ -19,6 +19,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
 import { savePendingReferralCode } from '../utils/referrals';
 import { submitMarketingLead, trackPremiumEvent } from '../utils/growth';
+import { supabase } from '../supabaseClient';
 
 const Home = () => {
   const { user, loading } = useAuth();
@@ -32,6 +33,7 @@ const Home = () => {
   });
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadMessage, setLeadMessage] = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
   const highlights = [
     'Verified Certificates',
     '1-on-1 Mentorship',
@@ -111,6 +113,23 @@ const Home = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const loadSupportEmail = async () => {
+      try {
+        const { data } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'support_contact_email')
+          .maybeSingle();
+        setSupportEmail(data?.value || '');
+      } catch {
+        setSupportEmail('');
+      }
+    };
+
+    loadSupportEmail();
+  }, []);
+
   const handleLeadSubmit = async (event) => {
     event.preventDefault();
     setSubmittingLead(true);
@@ -164,7 +183,7 @@ const Home = () => {
         </div>
         <div className="space-x-4">
           <Link to="/login" className="text-slate-600 hover:text-nani-dark font-medium">Login</Link>
-          <a href="#lead-capture" className="btn-gold">Get Started</a>
+          <Link to="/register" className="btn-gold">Get Started</Link>
         </div>
       </nav>
 
@@ -184,14 +203,14 @@ const Home = () => {
               Access premium courses, guided practice, live support, and certificate-ready assessments from one platform built for serious learners.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-4">
-              <a
-                href="#lead-capture"
+              <Link
+                to="/register"
                 className="btn-primary px-8 py-4 text-lg inline-flex items-center justify-center gap-2"
-                onClick={() => trackPremiumEvent('cta_click', 'home_hero', { cta: 'lead_capture' })}
+                onClick={() => trackPremiumEvent('cta_click', 'home_hero', { cta: 'register' })}
               >
-                Get Free Access Details
+                Get Started
                 <ArrowRight size={18} />
-              </a>
+              </Link>
               <Link
                 to="/plans"
                 className="px-8 py-4 text-lg border border-slate-300 rounded bg-white/80 hover:bg-white transition inline-flex items-center justify-center gap-2"
@@ -303,7 +322,11 @@ const Home = () => {
               <div className="rounded-3xl bg-white p-5 border border-slate-200 sm:col-span-2">
                 <h3 className="text-lg font-bold text-slate-900">Useful public actions</h3>
                 <div className="mt-4 flex flex-col sm:flex-row gap-3">
-                  <Link to="/verify" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50">
+                  <Link
+                    to="/verify"
+                    state={{ fromHome: true }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                  >
                     Verify Certificate
                     <ChevronRight size={16} />
                   </Link>
@@ -448,10 +471,10 @@ const Home = () => {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
-                <a href="#lead-capture" className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-6 py-3 font-bold text-nani-dark hover:bg-gold-500 transition-colors">
-                  Get Free Access Details
+                <Link to="/register" className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-6 py-3 font-bold text-nani-dark hover:bg-gold-500 transition-colors">
+                  Get Started
                   <ArrowRight size={18} />
-                </a>
+                </Link>
                 <Link to="/login" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-6 py-3 font-semibold text-white hover:bg-white/15 transition-colors">
                   Existing User Login
                 </Link>
@@ -460,6 +483,67 @@ const Home = () => {
           </div>
         </section>
       </main>
+
+      <footer className="border-t border-slate-200/80 bg-white/75 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+          <div className="grid gap-8 md:grid-cols-[1.2fr_0.8fr_0.8fr_1fr]">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="h-11 w-11 overflow-hidden rounded-full border border-slate-200 bg-white shadow-sm">
+                  <img src="/skillpro-logo.png" alt="SkillPro logo" className="h-full w-full object-contain mix-blend-multiply" />
+                </div>
+                <div>
+                  <p className="font-serif text-2xl font-bold text-nani-dark">SkillPro</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Career-first learning</p>
+                </div>
+              </div>
+              <p className="mt-4 max-w-md text-sm leading-6 text-slate-600">
+                Premium courses, mentor support, trusted assessments, resume tools, and verified certificates from one platform.
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-900">Explore</p>
+              <div className="mt-4 space-y-3 text-sm">
+                <Link to="/about" className="block font-medium text-slate-600 hover:text-nani-dark">About</Link>
+                <Link to="/plans" className="block font-medium text-slate-600 hover:text-nani-dark">Plans</Link>
+                <Link to="/verify" state={{ fromHome: true }} className="block font-medium text-slate-600 hover:text-nani-dark">Verify Certificate</Link>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-900">Account</p>
+              <div className="mt-4 space-y-3 text-sm">
+                <Link to="/login" className="block font-medium text-slate-600 hover:text-nani-dark">Login</Link>
+                <Link to="/register" className="block font-medium text-slate-600 hover:text-nani-dark">Register</Link>
+                <Link to="/reset-password" className="block font-medium text-slate-600 hover:text-nani-dark">Reset Password</Link>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-900">Contact</p>
+              <div className="mt-4 space-y-3 text-sm text-slate-600">
+                <p>Support email set by admin:</p>
+                {supportEmail ? (
+                  <a href={`mailto:${supportEmail}`} className="block font-semibold text-amber-700 hover:text-amber-800">
+                    {supportEmail}
+                  </a>
+                ) : (
+                  <p className="font-medium">Not set yet</p>
+                )}
+                <p className="pt-2 text-xs leading-5 text-slate-500">
+                  Public pages include login, register, reset password, plans, verify certificate, and about.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col gap-3 border-t border-slate-200 pt-5 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
+            <p>SkillPro public website and student access portal.</p>
+            <p>Built for guided learning, assessments, and verified outcomes.</p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };

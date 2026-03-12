@@ -1,17 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
+import { ArrowLeft, KeyRound, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import Toast from '../components/Toast';
+import LoadingSpinner from '../components/LoadingSpinner';
+import AuthShell from '../components/AuthShell';
 import { claimSingleSession, takeSingleSessionNotice } from '../utils/singleSession';
 import { attachPendingReferral } from '../utils/referrals';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
+  const { user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [loggingIn, setLoggingIn] = useState(false);
-  const [googleSigningIn, setGoogleSigningIn] = useState(false);
+  const [, setGoogleSigningIn] = useState(false);
   const [processingOAuth, setProcessingOAuth] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
@@ -556,20 +561,40 @@ const Login = () => {
     }
   };
 
+  if (authLoading) {
+    return <LoadingSpinner message="Checking session..." />;
+  }
+
+  if (processingOAuth) {
+    return <LoadingSpinner message="Finishing Google sign-in..." />;
+  }
+
+  if (user?.id) {
+    return <Navigate to="/app" replace />;
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-100 to-slate-200 p-4">
+    <>
       <Toast
         show={toast.show}
         message={toast.message}
         type={toast.type}
         onClose={() => setToast({ show: false, message: '', type: 'success' })}
       />
-      <div className="relative overflow-hidden bg-white/95 backdrop-blur p-8 rounded-2xl shadow-xl border border-slate-100 w-full max-w-md">
-        <div className="text-center mb-6">
-          <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-14 h-14 rounded-full mx-auto mb-3 object-contain mix-blend-multiply" />
-          <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>
-          <p className="text-sm text-slate-500 mt-1">Login to continue learning</p>
-        </div>
+      <AuthShell
+        title="Continue your SkillPro learning"
+        subtitle="Sign in to access courses, exams, certificates, mentor support, and your full student dashboard."
+        highlights={[
+          { icon: UserRoundCheck, text: 'Resume your learning from the same account across courses and assessments.' },
+          { icon: ShieldCheck, text: 'Protected login flow with session checks and account safety controls.' },
+          { icon: KeyRound, text: 'Reset your password anytime if you lose access to your email login.' },
+        ]}
+        footerLabel="New to SkillPro?"
+        footerLinkTo="/register"
+        footerLinkText="Create your account"
+        rightTitle="Welcome Back"
+        rightSubtitle="Use your registered email and password to continue."
+      >
         <AlertModal
           show={alertModal.show}
           title={alertModal.title}
@@ -577,54 +602,80 @@ const Login = () => {
           type={alertModal.type}
           onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
         />
-        <form onSubmit={handleLogin} className="space-y-4">
-          {inlineNotice ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
-              {inlineNotice}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60 sm:p-6">
+          <div className="mb-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-amber-700 px-4 py-4 text-white">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">Account Access</p>
+            <p className="mt-2 text-sm text-slate-100">Use the same email you used during registration to open your dashboard.</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            {inlineNotice ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {inlineNotice}
+              </div>
+            ) : null}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
+              <input
+                type="email"
+                placeholder="Enter your email"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+              />
             </div>
-          ) : null}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
-            <input
-              type="email"
-              placeholder="Enter your email"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-gold-300 focus:border-gold-400"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-            <input
-              type="password"
-              placeholder="Enter your password"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-gold-300 focus:border-gold-400"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <button type="submit" className="w-full btn-gold py-3 rounded-lg" disabled={loggingIn}>
-            {loggingIn ? 'Logging in...' : 'Sign In'}
-          </button>
-        </form>
-        {/* Google sign-in temporarily disabled */}
-        <p className="text-center mt-6 text-sm">
-          New here? <Link to="/register" className="text-blue-600 font-bold">Create Account</Link>
-        </p>
-        <p className="text-center mt-2 text-sm">
-          Forgot password? <Link to="/reset-password" className="text-gold-600 font-bold">Reset here</Link>
-        </p>
+            <div>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <label className="block text-xs font-semibold text-slate-600">Password</label>
+                <Link to="/reset-password" className="text-xs font-semibold text-amber-700 hover:text-amber-800">
+                  Forgot password?
+                </Link>
+              </div>
+              <input
+                type="password"
+                placeholder="Enter your password"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-60"
+              disabled={loggingIn}
+            >
+              {loggingIn ? 'Logging in...' : 'Sign In'}
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <Link
+            to="/register"
+            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white transition hover:bg-slate-800"
+          >
+            Create Account
+          </Link>
+          <Link
+            to="/reset-password"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Reset Password
+          </Link>
+        </div>
+
         <div className="mt-4">
           <Link
             to="/"
-            className="w-full inline-flex items-center justify-center py-3 rounded-xl bg-gold-400 text-nani-dark text-base font-bold shadow-md hover:bg-gold-500 transition"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
           >
+            <ArrowLeft size={18} />
             Back to Home Page
           </Link>
         </div>
-      </div>
+      </AuthShell>
 
       {takeoverModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -666,7 +717,7 @@ const Login = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 

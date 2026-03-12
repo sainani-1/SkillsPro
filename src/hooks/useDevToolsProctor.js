@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { isLikelyDevToolsOpen } from '../utils/devtoolsDetection';
 
 /**
  * Strict DevTools proctoring hook.
@@ -16,11 +17,7 @@ export function useDevToolsProctor({ isActive, onTerminate }) {
   useEffect(() => {
     if (!isActive) return;
     function detectDevTools() {
-      const threshold = 160;
-      if (
-        window.outerWidth - window.innerWidth > threshold ||
-        window.outerHeight - window.innerHeight > threshold
-      ) {
+      if (isLikelyDevToolsOpen()) {
         onTerminate?.('devtools_open');
       }
     }

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ShieldCheck, Search, CheckCircle, XCircle } from 'lucide-react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ShieldCheck, Search, CheckCircle, XCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../context/AuthContext';
 
 const generateDeterministicCode = (seed) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -55,10 +55,15 @@ const isPermissionError = (error) => {
 
 const VerifyCertificate = () => {
   const { id: routeCertId } = useParams();
+  const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [certId, setCertId] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const shouldShowPublicActions = !user?.id && location.state?.fromHome === true;
+  const shouldShowAboutBack = location.state?.fromAbout === true;
 
   const buildCertificateDataUrl = async (cert, formattedId) => {
     const canvas = document.createElement('canvas');
@@ -370,6 +375,35 @@ const VerifyCertificate = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-8 space-y-6">
+        {shouldShowPublicActions ? (
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <ArrowLeft size={16} />
+              Back to Home
+            </button>
+            <Link to="/register" className="text-sm font-semibold text-amber-700 hover:text-amber-800">
+              Create Account
+            </Link>
+          </div>
+        ) : null}
+
+        {shouldShowAboutBack ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => navigate('/about')}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <ArrowLeft size={16} />
+              Back to About
+            </button>
+          </div>
+        ) : null}
+
         <div className="text-center">
           <div className="w-16 h-16 mx-auto bg-gold-400 rounded-full flex items-center justify-center mb-4">
             <ShieldCheck size={32} className="text-nani-dark" />

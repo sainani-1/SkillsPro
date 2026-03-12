@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { MessageCircle, Send, Bot, User, Crown, Lock, BookOpen, Lightbulb, ArrowRight, Brain } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { generateAssistantReply } from '../utils/aiAssistant';
 
 const AILearningPath = () => {
   const { profile } = useAuth();
@@ -141,18 +142,39 @@ const AILearningPath = () => {
     setInput('');
     setLoading(true);
 
-    // Simulate processing time
-    setTimeout(() => {
-      const aiResponse = generateAIResponse(input, selectedCourse.title);
+    try {
+      const assistantText =
+        (await generateAssistantReply({
+          systemInstruction: `
+You are a subject learning assistant inside an edtech platform.
+The current subject is "${selectedCourse.title}".
+Help the student understand concepts, study plans, exam preparation, examples, practice direction, and learning strategies for this subject.
+Keep responses clear, accurate, and student-friendly.
+Do not mention the underlying AI provider, model, or vendor.
+Prefer short sections or bullet points when useful.
+`,
+          history: messages,
+          message: input,
+        })) || generateAIResponse(input, selectedCourse.title);
+
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: aiResponse,
+        content: assistantText,
         timestamp: new Date(),
         courseId: selectedCourse.id,
         courseName: selectedCourse.title
       }]);
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: generateAIResponse(input, selectedCourse.title),
+        timestamp: new Date(),
+        courseId: selectedCourse.id,
+        courseName: selectedCourse.title
+      }]);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const changeCourse = () => {
