@@ -35,7 +35,8 @@ const LANGUAGE_CONFIG = {
 };
 
 const CodingPlayground = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const actorId = profile?.id || user?.id || null;
   const [language, setLanguage] = useState('python');
   const [sourceCode, setSourceCode] = useState(LANGUAGE_CONFIG.python.template);
   const [stdin, setStdin] = useState('Student');
@@ -44,19 +45,24 @@ const CodingPlayground = () => {
   const [history, setHistory] = useState([]);
 
   const loadHistory = async () => {
-    if (!profile?.id) return;
-    const { data } = await supabase
+    if (!actorId) return;
+    const { data, error } = await supabase
       .from('coding_playground_runs')
       .select('id, language, status, stdout, stderr, created_at, execution_time, memory')
-      .eq('user_id', profile.id)
+      .eq('user_id', actorId)
       .order('created_at', { ascending: false })
       .limit(6);
+    if (error) {
+      throw error;
+    }
     setHistory(data || []);
   };
 
   useEffect(() => {
-    loadHistory();
-  }, [profile?.id]);
+    loadHistory().catch(() => {
+      setHistory([]);
+    });
+  }, [actorId]);
 
   const handleLanguageChange = (nextLanguage) => {
     setLanguage(nextLanguage);
@@ -83,25 +89,32 @@ const CodingPlayground = () => {
         memory: execution.memory,
       };
 
-      if (profile?.id) {
-        await supabase.from('coding_playground_runs').insert({
-          user_id: profile.id,
+      if (actorId) {
+        const { error: runInsertError } = await supabase.from('coding_playground_runs').insert({
+          user_id: actorId,
           ...payload,
         });
+        if (runInsertError) {
+          throw runInsertError;
+        }
+
         await trackLearningActivity({
-          userId: profile.id,
+          userId: actorId,
           eventType: 'playground_run',
           pointsAwarded: 15,
           durationMinutes: 15,
           metadata: { language, status: execution.status },
         });
+        window.dispatchEvent(new CustomEvent('student-experience-refresh', {
+          detail: { source: 'coding-playground', language },
+        }));
       }
 
       setResult({
         ...execution,
         success: !execution.stderr && !execution.compileOutput && !execution.message,
       });
-      loadHistory();
+      await loadHistory();
     } catch (error) {
       setResult({
         status: 'Execution failed',

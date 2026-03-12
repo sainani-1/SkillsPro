@@ -225,8 +225,14 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
 
     loadExperience();
 
+    const handleRefresh = () => {
+      loadExperience();
+    };
+    window.addEventListener('student-experience-refresh', handleRefresh);
+
     return () => {
       cancelled = true;
+      window.removeEventListener('student-experience-refresh', handleRefresh);
     };
   }, [profile?.id, profile?.core_subject, profile?.study_stream, profile?.full_name, profile?.avatar_url, courses, certificates.length, examResults]);
 
