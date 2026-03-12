@@ -22,6 +22,11 @@ const LANGUAGE_CONFIG = {
     monaco: 'javascript',
     template: `const fs = require("fs");\nconst input = fs.readFileSync(0, "utf8").trim() || "SkillPro";\nconsole.log(\`Welcome, \${input}!\`);\n`,
   },
+  c: {
+    label: 'C',
+    monaco: 'c',
+    template: `#include <stdio.h>\n#include <string.h>\n\nint main() {\n  char name[200];\n  if (!fgets(name, sizeof(name), stdin) || name[0] == '\\n') {\n    strcpy(name, "SkillPro");\n  } else {\n    name[strcspn(name, "\\n")] = 0;\n  }\n  printf("Welcome, %s!\\n", name);\n  return 0;\n}\n`,
+  },
   cpp: {
     label: 'C++',
     monaco: 'cpp',
@@ -117,7 +122,7 @@ const CodingPlayground = () => {
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Coding Practice Playground</p>
         <h1 className="mt-3 text-3xl font-bold">Write, run, and debug code without leaving the platform.</h1>
         <p className="mt-3 max-w-3xl text-sm text-slate-300">
-          Monaco powers the editor and Judge0 executes Python, Java, JavaScript, and C++ with instant output.
+          Monaco powers the editor and Judge0 executes Python, Java, JavaScript, C, and C++ with instant output.
         </p>
       </div>
 

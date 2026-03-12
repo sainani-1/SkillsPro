@@ -59,6 +59,7 @@ async function resolveLanguageId(languageKey) {
       python: (name) => /^python\b/i.test(name),
       java: (name) => /^java\b/i.test(name),
       javascript: (name) => /^javascript\b/i.test(name),
+      c: (name) => /^c\b(?!\+)/i.test(name),
       cpp: (name) => /^c\+\+\b/i.test(name),
     };
 
@@ -127,6 +128,7 @@ async function executeOneCompilerFallback({ language, sourceCode, stdin = '' }) 
     python: { language: 'python', name: 'index.py' },
     java: { language: 'java', name: 'Main.java' },
     javascript: { language: 'javascript', name: 'index.js' },
+    c: { language: 'c', name: 'main.c' },
     cpp: { language: 'cpp', name: 'main.cpp' },
   };
 
