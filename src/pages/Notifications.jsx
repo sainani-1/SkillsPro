@@ -102,7 +102,7 @@ export default function Notifications() {
       // Fetch notifications using role scope only (schema-safe across deployments).
       const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, title, content, type, target_role, created_at')
+        .select('id, title, content, type, target_role, target_user_id, created_at')
         .or(`target_role.eq.all,target_role.eq.${user.role}`)
         .order('created_at', { ascending: false });
 
@@ -122,7 +122,10 @@ export default function Notifications() {
             return false;
           }
           const legacyTarget = extractLegacyTargetUserId(notif.content);
-          return !legacyTarget || String(legacyTarget) === String(user.id);
+          const explicitTarget = notif?.target_user_id;
+          const explicitMatch = !explicitTarget || String(explicitTarget) === String(user.id);
+          const legacyMatch = !legacyTarget || String(legacyTarget) === String(user.id);
+          return explicitMatch && legacyMatch;
         })
         .map((notif) => ({
           ...notif,

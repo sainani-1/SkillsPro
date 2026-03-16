@@ -569,7 +569,7 @@ const Login = () => {
     return <LoadingSpinner message="Finishing Google sign-in..." />;
   }
 
-  if (user?.id) {
+  if (user?.id && !loggingIn && !takeoverModalOpen) {
     return <Navigate to="/app" replace />;
   }
 
@@ -710,7 +710,7 @@ const Login = () => {
                   onClick={() => closeTakeoverModal(true)}
                   className="px-4 py-2.5 rounded-xl bg-amber-600 text-white font-semibold hover:bg-amber-700"
                 >
-                  Logout Other and Continue
+                  Logout There and Login Here
                 </button>
               </div>
             </div>

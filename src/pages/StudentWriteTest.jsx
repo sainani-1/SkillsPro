@@ -14,7 +14,12 @@ export default function StudentWriteTest() {
   const isStudent = profile?.role === 'student';
 
   const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => String(a.course?.title || '').localeCompare(String(b.course?.title || ''))),
+    () =>
+      [...rows].sort((a, b) => {
+        const aLabel = String(a.exam?.test_name || a.course?.title || '');
+        const bLabel = String(b.exam?.test_name || b.course?.title || '');
+        return aLabel.localeCompare(bLabel);
+      }),
     [rows]
   );
 
@@ -27,55 +32,64 @@ export default function StudentWriteTest() {
       }
       setLoading(true);
       try {
-        const { data: enrollments } = await supabase
-          .from('enrollments')
-          .select('course_id')
-          .eq('student_id', profile.id);
-        const courseIds = Array.from(new Set((enrollments || []).map((e) => e.course_id).filter(Boolean)));
-        if (courseIds.length === 0 || !profile?.assigned_teacher_id) {
+        if (!profile?.assigned_teacher_id) {
           if (mounted) setRows([]);
           return;
         }
 
-        const [{ data: courses }, { data: exams }, { data: conductedTests }] = await Promise.all([
-          supabase.from('courses').select('id, title, category').in('id', courseIds),
-          supabase.from('exams').select('id, course_id, test_name').in('course_id', courseIds),
-          supabase
-            .from('teacher_conducted_tests')
-            .select('exam_id')
-            .eq('teacher_id', profile.assigned_teacher_id),
-        ]);
+        const { data: conductedTests } = await supabase
+          .from('teacher_conducted_tests')
+          .select('exam_id, created_at')
+          .eq('teacher_id', profile.assigned_teacher_id);
 
-        const allowedExamIds = new Set((conductedTests || []).map((row) => row.exam_id));
-        const visibleExams = (exams || []).filter((exam) => allowedExamIds.has(exam.id));
+        const examIds = Array.from(new Set((conductedTests || []).map((row) => row.exam_id).filter(Boolean)));
+        if (examIds.length === 0) {
+          if (mounted) setRows([]);
+          return;
+        }
+
+        const { data: exams } = await supabase
+          .from('exams')
+          .select('id, course_id, test_name')
+          .in('id', examIds);
+
+        const courseIds = Array.from(new Set((exams || []).map((exam) => exam.course_id).filter(Boolean)));
+        const { data: courses } = courseIds.length
+          ? await supabase.from('courses').select('id, title, category').in('id', courseIds)
+          : { data: [] };
+
+        const visibleExams = exams || [];
         if (visibleExams.length === 0) {
           if (mounted) setRows([]);
           return;
         }
 
-        const examIds = visibleExams.map((e) => e.id);
-        const [questionsRes, submissionsRes] = await Promise.all([
-          examIds.length ? supabase.from('exam_questions').select('id, exam_id').in('exam_id', examIds) : { data: [] },
-          examIds.length
-            ? supabase
-                .from('exam_submissions')
-                .select('id, exam_id, score_percent, passed, submitted_at')
-                .eq('user_id', profile.id)
-                .in('exam_id', examIds)
-                .order('submitted_at', { ascending: false })
-            : { data: [] },
+        const [{ data: questions }, { data: submissions }] = await Promise.all([
+          supabase.from('exam_questions').select('id, exam_id').in('exam_id', examIds),
+          supabase
+            .from('exam_submissions')
+            .select('id, exam_id, score_percent, passed, submitted_at')
+            .eq('user_id', profile.id)
+            .in('exam_id', examIds)
+            .order('submitted_at', { ascending: false }),
         ]);
 
         const courseMap = {};
         (courses || []).forEach((c) => {
           courseMap[c.id] = c;
         });
+        const publishedAtByExam = {};
+        (conductedTests || []).forEach((row) => {
+          if (!publishedAtByExam[row.exam_id]) {
+            publishedAtByExam[row.exam_id] = row.created_at || null;
+          }
+        });
         const questionCountByExam = {};
-        (questionsRes.data || []).forEach((q) => {
+        (questions || []).forEach((q) => {
           questionCountByExam[q.exam_id] = (questionCountByExam[q.exam_id] || 0) + 1;
         });
         const latestSubmissionByExam = {};
-        (submissionsRes.data || []).forEach((s) => {
+        (submissions || []).forEach((s) => {
           if (!latestSubmissionByExam[s.exam_id]) latestSubmissionByExam[s.exam_id] = s;
         });
 
@@ -84,6 +98,7 @@ export default function StudentWriteTest() {
           course: courseMap[e.course_id] || null,
           questionCount: questionCountByExam[e.id] || 0,
           latestSubmission: latestSubmissionByExam[e.id] || null,
+          publishedAt: publishedAtByExam[e.id] || null,
         }));
         if (mounted) setRows(list);
       } finally {
@@ -108,7 +123,7 @@ export default function StudentWriteTest() {
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
           <CheckSquare size={22} /> Write Test
         </h1>
-        <p className="text-sm text-slate-600 mt-1">Choose a teacher test and start it in the separate test exam flow.</p>
+        <p className="text-sm text-slate-600 mt-1">Choose any test published by your assigned teacher and start it here.</p>
       </div>
 
       {sortedRows.length === 0 ? (
@@ -117,10 +132,12 @@ export default function StudentWriteTest() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sortedRows.map((r) => (
             <div key={r.exam.id} className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
-              <p className="font-semibold text-slate-800">{r.course?.title || 'Untitled Course'}</p>
-              {r.exam?.test_name ? <p className="text-xs text-blue-700 font-semibold">{r.exam.test_name}</p> : null}
-              <p className="text-xs text-slate-500">{r.course?.category || 'General'}</p>
+              <p className="font-semibold text-slate-800">{r.exam?.test_name || 'Teacher Test'}</p>
+              <p className="text-xs text-slate-500">{r.course?.title || r.course?.category || 'General Skill Test'}</p>
               <p className="text-sm text-slate-700">Questions: <span className="font-semibold">{r.questionCount}</span></p>
+              {r.publishedAt ? (
+                <p className="text-xs text-slate-500">Published: {new Date(r.publishedAt).toLocaleString('en-IN')}</p>
+              ) : null}
               {r.latestSubmission ? (
                 <p className="text-xs text-slate-600">
                   Latest: {Math.round(r.latestSubmission.score_percent || 0)}% ({r.latestSubmission.passed ? 'Passed' : 'Failed'})

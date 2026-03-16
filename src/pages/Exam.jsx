@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { runCode } from "../logicBuilding/codeRunner";
+import MonacoCdnEditor from "../components/MonacoCdnEditor";
 import { useAuth } from "../context/AuthContext";
 
 const EXAM_PHASES = {
@@ -15,6 +16,7 @@ const EXAM_PHASES = {
 };
 
 const FULLSCREEN_TIMEOUT_SEC = 20;
+const TAB_SWITCH_GRACE_SEC = 30;
 const MAX_FULLSCREEN_WARNINGS = 3;
 const RETAKE_LOCK_DAYS = 60;
 const EXAM_SESSION_PREFIX = "strict_exam_session";
@@ -116,6 +118,17 @@ function formatCertificateId(cert) {
   return `SkillPro-${y}-${m}-${d}-${random}`;
 }
 
+function formatDurationMinutes(startAt, endAt) {
+  if (!startAt || !endAt) return "Recorded";
+  const diffMs = Math.max(new Date(endAt).getTime() - new Date(startAt).getTime(), 0);
+  const totalMinutes = Math.max(1, Math.round(diffMs / 60000));
+  if (totalMinutes < 60) return `${totalMinutes} Minute${totalMinutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!minutes) return `${hours} Hour${hours === 1 ? "" : "s"}`;
+  return `${hours}h ${minutes}m`;
+}
+
 export default function Exam({ examMode = "certification" }) {
   const { fetchProfile } = useAuth();
   const { courseId: routeCourseId, examId: routeExamId } = useParams();
@@ -137,6 +150,7 @@ export default function Exam({ examMode = "certification" }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [codingRuns, setCodingRuns] = useState({});
+  const [codingMarkers, setCodingMarkers] = useState({});
   const [phase, setPhase] = useState(EXAM_PHASES.RULES);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [rulesAccepted, setRulesAccepted] = useState(false);
@@ -159,6 +173,7 @@ export default function Exam({ examMode = "certification" }) {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [tabSwitchWarnings, setTabSwitchWarnings] = useState(0);
   const [showTabWarningModal, setShowTabWarningModal] = useState(false);
+  const [tabSwitchCountdown, setTabSwitchCountdown] = useState(TAB_SWITCH_GRACE_SEC);
   const [retakeLockedUntil, setRetakeLockedUntil] = useState(null);
   const [passedExamInfo, setPassedExamInfo] = useState(null);
   const [demoCourseBlocked, setDemoCourseBlocked] = useState(false);
@@ -170,13 +185,18 @@ export default function Exam({ examMode = "certification" }) {
   const [backSwipeLocking, setBackSwipeLocking] = useState(false);
   const [submitReady, setSubmitReady] = useState(false);
   const [submitCountdown, setSubmitCountdown] = useState(6);
+  const [submitDelaySeconds, setSubmitDelaySeconds] = useState(6);
   const [submissionFinalized, setSubmissionFinalized] = useState(false);
+  const [examStartedAt, setExamStartedAt] = useState(null);
+  const [submittedAt, setSubmittedAt] = useState(null);
   const [bootstrappingExam, setBootstrappingExam] = useState(true);
   const isTerminatingRef = useRef(false);
   const lastAppSwitchEventRef = useRef(0);
   const fullscreenWarningsRef = useRef(0);
   const hasRestoredSessionRef = useRef(false);
   const resumeTimerRef = useRef(null);
+  const tabSwitchTimerRef = useRef(null);
+  const tabSwitchGraceActiveRef = useRef(false);
   const getSessionKey = (userId = null) =>
     `${EXAM_SESSION_PREFIX}:${examMode}:${routeIdentity}:${userId || "anon"}`;
   const safeSessionGet = (key) => {
@@ -216,6 +236,39 @@ export default function Exam({ examMode = "certification" }) {
     return { code, language };
   };
 
+  const buildCodingMarkers = (errorText) => {
+    const source = String(errorText || "").trim();
+    if (!source) return [];
+
+    const linePatterns = [
+      /line\s+(\d+)(?:[:,]\s*|.*?\bcolumn\s+(\d+))?/i,
+      /:(\d+):(\d+)/,
+      /at\s+line\s+(\d+)/i,
+    ];
+
+    let lineNumber = 1;
+    let column = 1;
+    for (const pattern of linePatterns) {
+      const match = source.match(pattern);
+      if (match) {
+        lineNumber = Number(match[1] || 1);
+        column = Number(match[2] || 1);
+        break;
+      }
+    }
+
+    return [
+      {
+        startLineNumber: Math.max(lineNumber, 1),
+        startColumn: Math.max(column, 1),
+        endLineNumber: Math.max(lineNumber, 1),
+        endColumn: Math.max(column + 1, 2),
+        message: source,
+        severity: 8,
+      },
+    ];
+  };
+
   useEffect(() => {
     // Immediate restore on mount to avoid flashing back to Step 1
     const raw = safeSessionGet(getSessionKey()) || safeSessionGet(getSessionKey(currentUserId));
@@ -230,6 +283,9 @@ export default function Exam({ examMode = "certification" }) {
       }
       if (typeof parsed?.rulesAccepted === "boolean") {
         setRulesAccepted(parsed.rulesAccepted);
+      }
+      if (parsed?.examStartedAt) {
+        setExamStartedAt(parsed.examStartedAt);
       }
       if (Number.isInteger(parsed?.fullscreenWarnings)) {
         fullscreenWarningsRef.current = parsed.fullscreenWarnings;
@@ -579,6 +635,7 @@ export default function Exam({ examMode = "certification" }) {
       answers,
       activeQuestionIndex,
       rulesAccepted,
+      examStartedAt,
       phase,
       fullscreenWarnings,
       tabSwitchWarnings,
@@ -592,6 +649,7 @@ export default function Exam({ examMode = "certification" }) {
     answers,
     activeQuestionIndex,
     rulesAccepted,
+    examStartedAt,
     phase,
     fullscreenWarnings,
     tabSwitchWarnings,
@@ -636,6 +694,39 @@ export default function Exam({ examMode = "certification" }) {
     if (phase !== EXAM_PHASES.RUNNING) return;
     if (needsFullscreenResume) return;
 
+    const clearTabSwitchTimer = () => {
+      if (tabSwitchTimerRef.current) {
+        clearInterval(tabSwitchTimerRef.current);
+        tabSwitchTimerRef.current = null;
+      }
+    };
+
+    const resolveTabSwitchGrace = () => {
+      if (!tabSwitchGraceActiveRef.current) return;
+      tabSwitchGraceActiveRef.current = false;
+      clearTabSwitchTimer();
+      setShowTabWarningModal(false);
+      setTabSwitchCountdown(TAB_SWITCH_GRACE_SEC);
+    };
+
+    const startTabSwitchGrace = () => {
+      tabSwitchGraceActiveRef.current = true;
+      clearTabSwitchTimer();
+      setTabSwitchCountdown(TAB_SWITCH_GRACE_SEC);
+      setShowTabWarningModal(true);
+      tabSwitchTimerRef.current = setInterval(() => {
+        setTabSwitchCountdown((prev) => {
+          if (prev <= 1) {
+            clearTabSwitchTimer();
+            tabSwitchGraceActiveRef.current = false;
+            void terminateExamForViolation("Did not return to the exam within 30 seconds after app/tab switch.");
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    };
+
     const handleAppSwitchAttempt = () => {
       const now = Date.now();
       if (now - lastAppSwitchEventRef.current < 1200) return;
@@ -644,10 +735,12 @@ export default function Exam({ examMode = "certification" }) {
       setTabSwitchWarnings((prev) => {
         const next = prev + 1;
         if (next >= 2) {
+          tabSwitchGraceActiveRef.current = false;
+          clearTabSwitchTimer();
           void terminateExamForViolation("Second app/tab switch detected during exam.");
           return next;
         }
-        setShowTabWarningModal(true);
+        startTabSwitchGrace();
         return next;
       });
     };
@@ -655,11 +748,17 @@ export default function Exam({ examMode = "certification" }) {
     const handleVisibility = () => {
       if (document.hidden) {
         handleAppSwitchAttempt();
+      } else {
+        resolveTabSwitchGrace();
       }
     };
 
     const handleBlur = () => {
       handleAppSwitchAttempt();
+    };
+
+    const handleFocus = () => {
+      resolveTabSwitchGrace();
     };
 
     const clearFullscreenTimer = () => {
@@ -705,12 +804,15 @@ export default function Exam({ examMode = "certification" }) {
 
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      clearTabSwitchTimer();
       clearFullscreenTimer();
     };
   }, [phase, needsFullscreenResume]);
@@ -907,7 +1009,7 @@ export default function Exam({ examMode = "certification" }) {
   useEffect(() => {
     if (phase !== EXAM_PHASES.SUBMITTING || !pendingResultData) return;
     setSubmitReady(false);
-    setSubmitCountdown(6);
+    setSubmitCountdown(submitDelaySeconds);
     const timer = setInterval(() => {
       setSubmitCountdown((prev) => {
         if (prev <= 1) {
@@ -919,7 +1021,7 @@ export default function Exam({ examMode = "certification" }) {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [phase, pendingResultData]);
+  }, [phase, pendingResultData, submitDelaySeconds]);
 
   useEffect(() => {
     return () => {
@@ -999,6 +1101,7 @@ export default function Exam({ examMode = "certification" }) {
     }
 
     setPhase(EXAM_PHASES.RUNNING);
+    setExamStartedAt((prev) => prev || new Date().toISOString());
     setNeedsFullscreenResume(false);
     setShowFullscreenPrompt(false);
     setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
@@ -1157,7 +1260,11 @@ export default function Exam({ examMode = "certification" }) {
       setShowExitGestureConfirm(false);
       setPhase(EXAM_PHASES.RULES);
       setInfoMsg("");
-      setErrorMsg("Exam locked for 60 days due to confirmed exit gesture.");
+      setErrorMsg(
+        isTeacherTestMode
+          ? "Teacher test blocked until the teacher updates and republishes the questions."
+          : "Exam locked for 60 days due to confirmed exit gesture."
+      );
     } catch (error) {
       setErrorMsg("Failed to lock exam: " + error.message);
     } finally {
@@ -1184,6 +1291,7 @@ export default function Exam({ examMode = "certification" }) {
     const { code, language } = getCodingAnswer(activeQuestion);
     const questionId = activeQuestion.id;
     if (!code.trim()) {
+      setCodingMarkers((prev) => ({ ...prev, [questionId]: [] }));
       setCodingRuns((prev) => ({
         ...prev,
         [questionId]: {
@@ -1228,6 +1336,11 @@ export default function Exam({ examMode = "certification" }) {
         return;
       }
       const runResults = await runCode(language, code, mergedCases);
+      const firstError = runResults.find((result) => String(result?.status || "").toLowerCase() === "error" && result.error);
+      setCodingMarkers((prev) => ({
+        ...prev,
+        [questionId]: firstError ? buildCodingMarkers(firstError.error) : [],
+      }));
       const allPassed = runResults.every(
         (result) => String(result?.status || "").toLowerCase() === "accepted"
       );
@@ -1242,12 +1355,16 @@ export default function Exam({ examMode = "certification" }) {
         ...prev,
         [questionId]: {
           running: false,
-          error: "",
+          error: firstError?.error || "",
           shownRows,
           allPassed,
         },
       }));
     } catch (error) {
+      setCodingMarkers((prev) => ({
+        ...prev,
+        [questionId]: buildCodingMarkers(error.message || "Failed to run code."),
+      }));
       setCodingRuns((prev) => ({
         ...prev,
         [questionId]: {
@@ -1266,9 +1383,12 @@ export default function Exam({ examMode = "certification" }) {
     setErrorMsg("");
     setInfoMsg("");
     setSubmitReady(false);
-    setSubmitCountdown(6);
+    const nextSubmitDelay = 6 + Math.floor(Math.random() * 3);
+    setSubmitDelaySeconds(nextSubmitDelay);
+    setSubmitCountdown(nextSubmitDelay);
     setSubmissionFinalized(false);
     setDisplaySubmissionId("");
+    setSubmittedAt(null);
     setPhase(EXAM_PHASES.SUBMITTING);
 
     // Stop proctor media immediately once submission starts.
@@ -1364,7 +1484,9 @@ export default function Exam({ examMode = "certification" }) {
       const passed = total === 0 ? true : percentage >= examPassPercent;
       const nextAttemptAllowedAt = passed
         ? null
-        : new Date(Date.now() + RETAKE_LOCK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        : isTeacherTestMode
+          ? null
+          : new Date(Date.now() + RETAKE_LOCK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
       const submissionPayload = {
         user_id: userData.user.id,
@@ -1381,6 +1503,32 @@ export default function Exam({ examMode = "certification" }) {
           onConflict: "exam_id,user_id",
         });
       if (error) throw new Error(error.message);
+      if (isTeacherTestMode) {
+        if (passed) {
+          await supabase
+            .from("exam_attempt_blocks")
+            .delete()
+            .eq("user_id", userData.user.id)
+            .eq("exam_id", examId ?? routeCourseId);
+        } else {
+          const blockCheckpoint = examQuestionSetUpdatedAt || new Date().toISOString();
+          const { error: blockErr } = await supabase
+            .from("exam_attempt_blocks")
+            .upsert(
+              [
+                {
+                  user_id: userData.user.id,
+                  exam_id: examId ?? routeCourseId,
+                  unblock_after_question_update_at: blockCheckpoint,
+                  reason: "Teacher test requires updated questions before retry.",
+                  updated_at: new Date().toISOString(),
+                },
+              ],
+              { onConflict: "user_id,exam_id" }
+            );
+          if (blockErr) throw new Error(blockErr.message);
+        }
+      }
       const { data: submissionRow } = await supabase
         .from("exam_submissions")
         .select("id")
@@ -1390,6 +1538,7 @@ export default function Exam({ examMode = "certification" }) {
         .limit(1)
         .maybeSingle();
       const rawSubmissionId = submissionRow?.id ? String(submissionRow.id) : "N/A";
+      setSubmittedAt(submissionPayload.submitted_at);
       setSubmissionId(rawSubmissionId);
       setDisplaySubmissionId(formatDisplaySubmissionId(rawSubmissionId));
 
@@ -1496,12 +1645,14 @@ export default function Exam({ examMode = "certification" }) {
           <h1 className="text-2xl font-bold text-amber-700">Exam Locked</h1>
           <p className="text-slate-700">
             {isTeacherTestMode
-              ? "You failed this teacher test. Retake is locked for 60 days."
+              ? "You cannot retry this teacher test until the teacher updates and republishes the questions."
               : "You failed this exam. Retake is locked for 60 days."}
           </p>
-          <p className="text-sm text-slate-600">
-            You can retake after: {new Date(retakeLockedUntil).toLocaleString("en-IN")}
-          </p>
+          {!isTeacherTestMode ? (
+            <p className="text-sm text-slate-600">
+              You can retake after: {new Date(retakeLockedUntil).toLocaleString("en-IN")}
+            </p>
+          ) : null}
           <button
             onClick={() => navigate(isTeacherTestMode ? "/app/write-test" : "/app/courses")}
             className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold"
@@ -1637,7 +1788,7 @@ export default function Exam({ examMode = "certification" }) {
           <p className="text-slate-700">
             {!submitReady
               ? "Please wait while we securely process your submission."
-              : "Submission completed successfully. You can now view results."}
+              : "Results are calculating and will be displayed shortly."}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-left">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1893,42 +2044,49 @@ export default function Exam({ examMode = "certification" }) {
                           </div>
                         ))}
                       </div>
-                      <textarea
-                        className="w-full min-h-[300px] bg-transparent text-slate-100 pl-14 pr-3 py-3 font-mono text-sm leading-6 outline-none"
-                        placeholder="Write your code here..."
-                        disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume}
-                        value={
-                          typeof answers[activeQuestion.id] === "object"
-                            ? answers[activeQuestion.id]?.code || ""
-                            : ""
-                        }
-                        onChange={(event) =>
-                          setAnswers((prev) => {
-                            const prevAnswer =
-                              typeof prev[activeQuestion.id] === "object"
-                                ? prev[activeQuestion.id]
-                                : { code: "", language: activeQuestion.coding_language || "python" };
-                            const trigger = resolveTemplateFromTrigger(event.target.value);
-                            if (trigger) {
+                      <div className="pl-2 pr-2 py-2">
+                        <MonacoCdnEditor
+                          height={300}
+                          language={
+                            typeof answers[activeQuestion.id] === "object" &&
+                            answers[activeQuestion.id]?.language
+                              ? answers[activeQuestion.id].language
+                              : activeQuestion.coding_language || "python"
+                          }
+                          value={
+                            typeof answers[activeQuestion.id] === "object"
+                              ? answers[activeQuestion.id]?.code || ""
+                              : ""
+                          }
+                          markers={codingMarkers[activeQuestion.id] || []}
+                          onChange={(nextValue) =>
+                            setAnswers((prev) => {
+                              const prevAnswer =
+                                typeof prev[activeQuestion.id] === "object"
+                                  ? prev[activeQuestion.id]
+                                  : { code: "", language: activeQuestion.coding_language || "python" };
+                              const trigger = resolveTemplateFromTrigger(nextValue);
+                              if (trigger) {
+                                return {
+                                  ...prev,
+                                  [activeQuestion.id]: {
+                                    ...prevAnswer,
+                                    language: trigger.language,
+                                    code: trigger.code,
+                                  },
+                                };
+                              }
                               return {
                                 ...prev,
                                 [activeQuestion.id]: {
                                   ...prevAnswer,
-                                  language: trigger.language,
-                                  code: trigger.code,
+                                  code: nextValue,
                                 },
                               };
-                            }
-                            return {
-                              ...prev,
-                              [activeQuestion.id]: {
-                                ...prevAnswer,
-                                code: event.target.value,
-                              },
-                            };
-                          })
-                        }
-                      />
+                            })
+                          }
+                        />
+                      </div>
                     </div>
                     {/\bwhile\b/.test(
                       typeof answers[activeQuestion.id] === "object"
@@ -2258,13 +2416,24 @@ export default function Exam({ examMode = "certification" }) {
           <div className="max-w-md w-full bg-white rounded-2xl p-6 border border-amber-200 shadow-xl space-y-4 text-center">
             <h2 className="text-xl font-bold text-amber-700">Proctor Warning</h2>
             <p className="text-sm text-slate-700">
-              App/Tab change detected. Next violation will terminate this test.
+              App/Tab change detected. Return to the exam within {tabSwitchCountdown} seconds. A second violation will block the account as usual.
             </p>
+            <div className="mx-auto w-20 h-20 rounded-full border-4 border-amber-200 bg-amber-50 flex items-center justify-center">
+              <span className="text-2xl font-extrabold text-amber-700">{tabSwitchCountdown}</span>
+            </div>
             <button
-              onClick={() => setShowTabWarningModal(false)}
+              onClick={() => {
+                tabSwitchGraceActiveRef.current = false;
+                if (tabSwitchTimerRef.current) {
+                  clearInterval(tabSwitchTimerRef.current);
+                  tabSwitchTimerRef.current = null;
+                }
+                setTabSwitchCountdown(TAB_SWITCH_GRACE_SEC);
+                setShowTabWarningModal(false);
+              }}
               className="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold"
             >
-              I Understand
+              I Am Back
             </button>
           </div>
         </div>
@@ -2276,7 +2445,9 @@ export default function Exam({ examMode = "certification" }) {
             <h2 className="text-xl font-bold text-red-700">Exit Gesture Detected</h2>
             <p className="text-sm text-slate-700">
               You triggered a multi-touch/gesture that may exit exam mode.
-              If you confirm exit, this exam will be locked for 60 days (same as failed exam lock).
+              {isTeacherTestMode
+                ? ' If you confirm exit, this teacher test will stay blocked until the teacher updates and republishes the questions.'
+                : ' If you confirm exit, this exam will be locked for 60 days (same as failed exam lock).'}
             </p>
             <div className="flex gap-3 justify-center">
               <button
@@ -2303,7 +2474,9 @@ export default function Exam({ examMode = "certification" }) {
           <div className="max-w-md w-full bg-white rounded-2xl p-6 border border-red-200 shadow-xl space-y-4 text-center">
             <h2 className="text-xl font-bold text-red-700">Leave Exam Confirmation</h2>
             <p className="text-sm text-slate-700">
-              Back-swipe/browser back was detected. If you confirm exit, this attempt will be marked failed and exam will be locked for 60 days.
+              {isTeacherTestMode
+                ? 'Back-swipe/browser back was detected. If you confirm exit, this teacher test will stay blocked until the teacher updates and republishes the questions.'
+                : 'Back-swipe/browser back was detected. If you confirm exit, this attempt will be marked failed and exam will be locked for 60 days.'}
             </p>
             <div className="flex gap-3 justify-center">
               <button

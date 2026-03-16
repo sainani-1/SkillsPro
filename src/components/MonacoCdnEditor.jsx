@@ -35,7 +35,7 @@ function loadMonaco() {
   return monacoLoadPromise;
 }
 
-const MonacoCdnEditor = ({ value, language, onChange, height = 420 }) => {
+const MonacoCdnEditor = ({ value, language, onChange, height = 420, markers = [] }) => {
   const containerRef = useRef(null);
   const editorRef = useRef(null);
   const modelRef = useRef(null);
@@ -57,6 +57,14 @@ const MonacoCdnEditor = ({ value, language, onChange, height = 420 }) => {
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           roundedSelection: false,
+          autoClosingBrackets: 'always',
+          autoClosingQuotes: 'always',
+          autoClosingDelete: 'always',
+          autoClosingOvertype: 'always',
+          autoSurround: 'languageDefined',
+          matchBrackets: 'always',
+          bracketPairColorization: { enabled: true },
+          guides: { bracketPairs: true },
           padding: { top: 16, bottom: 16 },
         });
 
@@ -89,6 +97,11 @@ const MonacoCdnEditor = ({ value, language, onChange, height = 420 }) => {
       editorRef.current.setValue(value);
     }
   }, [value]);
+
+  useEffect(() => {
+    if (!window.monaco?.editor || !modelRef.current) return;
+    window.monaco.editor.setModelMarkers(modelRef.current, 'exam-code-markers', markers || []);
+  }, [markers]);
 
   if (failed) {
     return (

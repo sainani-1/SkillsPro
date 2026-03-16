@@ -13,7 +13,7 @@
     "@supabase/supabase-js": "^2.39.0",
     "axios": "^1.13.5",
     "date-fns": "^2.30.0",
-    "face-api.js": "^0.22.2",
+    "face-api.js": "^0.20.0",
     "firebase": "^12.9.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.1.0",
@@ -41,4 +41,3 @@
     "vite": "^7.3.1"
   }
 }
-

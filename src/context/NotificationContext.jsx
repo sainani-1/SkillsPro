@@ -50,7 +50,7 @@ export const NotificationProvider = ({ children }) => {
     try {
       const roleScopedRes = await supabase
         .from('admin_notifications')
-        .select('id, content, created_at')
+        .select('id, content, created_at, target_user_id')
         .or(`target_role.eq.all,target_role.eq.${profile.role}`)
         .order('created_at', { ascending: false });
 
@@ -70,7 +70,10 @@ export const NotificationProvider = ({ children }) => {
           return false;
         }
         const legacyTarget = extractLegacyTargetUserId(notification.content);
-        return !legacyTarget || String(legacyTarget) === String(profile.id);
+        const explicitTarget = notification?.target_user_id;
+        const explicitMatch = !explicitTarget || String(explicitTarget) === String(profile.id);
+        const legacyMatch = !legacyTarget || String(legacyTarget) === String(profile.id);
+        return explicitMatch && legacyMatch;
       });
 
       if (profile.role === 'student') {

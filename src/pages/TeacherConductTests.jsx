@@ -20,6 +20,11 @@ const makeEmptyQuestion = (examId, orderIndex = 0) => ({
 
 const normalizeTestCases = (value) => (Array.isArray(value) ? value : []);
 
+const isTargetUserIdColumnError = (error) => {
+  const text = [error?.message, error?.details, error?.hint].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('target_user_id') && (text.includes('column') || text.includes('schema cache'));
+};
+
 function TeacherConductTests() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -55,11 +60,19 @@ function TeacherConductTests() {
     return out;
   }, [selectedStudentId, enrollments, coursesById]);
 
+  const availableCourses = useMemo(
+    () =>
+      Object.values(coursesById).sort((a, b) =>
+        String(a.title || `Course ${a.id}`).localeCompare(String(b.title || `Course ${b.id}`))
+      ),
+    [coursesById]
+  );
+
   useEffect(() => {
-    if (!selectedCourseId || !studentCourses.find((c) => String(c.id) === String(selectedCourseId))) {
-      setSelectedCourseId(studentCourses[0]?.id ? String(studentCourses[0].id) : '');
+    if (!selectedCourseId || !availableCourses.find((c) => String(c.id) === String(selectedCourseId))) {
+      setSelectedCourseId(availableCourses[0]?.id ? String(availableCourses[0].id) : '');
     }
-  }, [studentCourses, selectedCourseId]);
+  }, [availableCourses, selectedCourseId]);
 
   const selectedExam = selectedCourseId ? examsByCourseId[selectedCourseId] || null : null;
   const selectedExamQuestions = selectedExam ? (questionsByExamId[selectedExam.id] || []) : [];
@@ -83,7 +96,7 @@ function TeacherConductTests() {
       if (latest) {
         rows.push({
           courseId,
-          courseTitle: coursesById[courseId]?.title || `Course ${courseId}`,
+          courseTitle: exam?.test_name || coursesById[courseId]?.title || `Course ${courseId}`,
           score: Number(latest.score_percent || 0),
           passed: !!latest.passed,
           submittedAt: latest.submitted_at,
@@ -395,6 +408,44 @@ function TeacherConductTests() {
       await supabase
         .from('teacher_conducted_tests')
         .upsert([{ teacher_id: profile.id, exam_id: exam.id }], { onConflict: 'teacher_id,exam_id' });
+
+      const { data: assignedStudents } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'student')
+        .eq('assigned_teacher_id', profile.id);
+
+      const studentNotificationRows = (assignedStudents || []).map((student) => ({
+        title: testName?.trim() ? `Test Updated: ${testName.trim()}` : 'Assigned Test Updated',
+        content: testName?.trim()
+          ? `Your teacher updated and republished "${testName.trim()}". You can write the test now.`
+          : 'Your teacher updated and republished a test. You can write the test now.',
+        type: 'info',
+        target_role: 'student',
+        target_user_id: student.id,
+      }));
+
+      if (studentNotificationRows.length > 0) {
+        let { error: notificationError } = await supabase
+          .from('admin_notifications')
+          .insert(studentNotificationRows);
+
+        if (notificationError && isTargetUserIdColumnError(notificationError)) {
+          const fallbackRows = studentNotificationRows.map(({ target_user_id, content, ...rest }) => ({
+            ...rest,
+            content: `[target_user_id:${target_user_id}] ${content}`,
+          }));
+          const fallback = await supabase
+            .from('admin_notifications')
+            .insert(fallbackRows);
+          notificationError = fallback.error;
+        }
+
+        if (notificationError) {
+          console.warn('Teacher test notifications could not be created:', notificationError.message || notificationError);
+        }
+      }
+
       await loadData();
     } catch (err) {
       setAlertModal({
@@ -464,26 +515,18 @@ function TeacherConductTests() {
 
           {!selectedStudent ? (
             <p className="text-sm text-slate-500">Select a student to start creating a test.</p>
-          ) : studentCourses.length === 0 ? (
+          ) : availableCourses.length === 0 ? (
             <p className="text-sm text-slate-500">
-              {selectedStudent.full_name} has no enrolled course yet, so test list is 0.
+              No reusable test bucket is available yet. Enroll any one assigned student in any course once so teacher tests can be published for all assigned students.
             </p>
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Course</label>
-                  <select
-                    className="w-full border border-slate-300 rounded-lg p-2 text-sm"
-                    value={selectedCourseId}
-                    onChange={(e) => setSelectedCourseId(e.target.value)}
-                  >
-                    {studentCourses.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {c.title} {c.category ? `(${c.category})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Test Audience</label>
+                  <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
+                    Published tests will be available to all students assigned to you, even if they are not enrolled in a course.
+                  </div>
                 </div>
                 <div className="text-xs text-slate-600">
                   Questions: <span className="font-semibold">{selectedExamQuestions.length}</span>
@@ -592,6 +635,13 @@ function TeacherConductTests() {
                             value={q.coding_description || ''}
                             onChange={(e) => updateQuestion(selectedExam.id, idx, 'coding_description', e.target.value)}
                           />
+                          <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 space-y-1">
+                            <p className="font-semibold">Array input/output format</p>
+                            <p>Input: write values exactly as the program should read them.</p>
+                            <p>Example input: `5` on first line and `1 2 3 4 5` on second line.</p>
+                            <p>Example output: `15` for sum, or `1 2 3 4 5` for printing the array.</p>
+                            <p>For 2D arrays, use one row per line. Example: `1 2 3` then `4 5 6`.</p>
+                          </div>
 
                           <div className="rounded-lg border border-slate-200 bg-white p-2 space-y-2">
                             <div className="flex items-center justify-between">
