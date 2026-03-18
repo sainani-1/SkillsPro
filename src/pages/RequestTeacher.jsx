@@ -65,7 +65,7 @@ const RequestTeacher = () => {
       setAlertModal({
         show: true,
         title: 'Already Assigned',
-        message: 'You already have a teacher assigned. Contact admin if you need to change.',
+        message: 'You already have a teacher assigned. Contact the SkillPro team if you need to change.',
         type: 'info'
       });
       return;
@@ -76,7 +76,7 @@ const RequestTeacher = () => {
       setAlertModal({
         show: true,
         title: 'Request Pending',
-        message: 'You already have a pending teacher assignment request with admin.',
+        message: 'You already have a pending teacher assignment request with the SkillPro team.',
         type: 'info'
       });
       return;
@@ -104,7 +104,7 @@ const RequestTeacher = () => {
       setAlertModal({
         show: true,
         title: 'Success',
-        message: 'Request sent to admin successfully! You will be assigned a teacher soon.',
+        message: 'Request sent to the SkillPro team successfully. You will be assigned a teacher soon.',
         type: 'success'
       });
 
@@ -133,7 +133,7 @@ const RequestTeacher = () => {
         <div>
           <h1 className="text-3xl font-bold text-slate-800 mb-2">Request Teacher Assignment</h1>
           <p className="text-slate-600">
-            Send a request to admin and they will assign a suitable teacher for you.
+            Send a request to the SkillPro team and they will assign a suitable teacher for you.
           </p>
         </div>
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-6">
@@ -157,14 +157,14 @@ const RequestTeacher = () => {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Request Teacher Assignment</h1>
         <p className="text-slate-600">
-          Send a request to admin and they will assign a suitable teacher for you.
+          Send a request to the SkillPro team and they will assign a suitable teacher for you.
         </p>
       </div>
 
       {profile?.assigned_teacher_id && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
           <p className="text-green-800 font-medium">
-            You already have a teacher assigned. Contact admin if you need to change.
+            You already have a teacher assigned. Contact the SkillPro team if you need to change.
           </p>
         </div>
       )}
@@ -173,14 +173,14 @@ const RequestTeacher = () => {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center justify-between">
           <div>
             <p className="text-blue-800 font-medium mb-1">Need a teacher?</p>
-            <p className="text-blue-600 text-sm">Admin will review your request and assign the right teacher.</p>
+            <p className="text-blue-600 text-sm">The SkillPro team will review your request and assign the right teacher.</p>
           </div>
           <button
             onClick={sendRequest}
             disabled={sendingRequest || myRequests.some((request) => request.status === 'pending' && !request.teacher_id)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
           >
-            Request Admin Assignment
+            Request SkillPro Team Assignment
           </button>
         </div>
       )}
@@ -194,12 +194,12 @@ const RequestTeacher = () => {
                 <div className="flex items-center gap-3">
                   <img
                     src={request.profiles?.avatar_url || 'https://via.placeholder.com/50'}
-                    alt={request.profiles?.full_name || 'Admin Assignment'}
+                    alt={request.profiles?.full_name || 'SkillPro Team Assignment'}
                     className="w-12 h-12 rounded-full object-cover"
                   />
                   <div>
                     <p className="font-semibold">
-                      {request.profiles?.full_name || 'Admin Assignment Request'}
+                      {request.profiles?.full_name || 'SkillPro Team Assignment Request'}
                     </p>
                     <p className="text-sm text-slate-500">
                       Sent {new Date(request.created_at).toLocaleDateString()}
@@ -219,12 +219,12 @@ const RequestTeacher = () => {
                   )}
                   {request.status === 'admin_assigned' && (
                     <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                      Assigned by Admin
+                      Assigned by SkillPro Team
                     </span>
                   )}
                   {request.status === 'rejected' && (
                     <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
-                      Rejected by {request.profiles?.full_name || 'Admin'}
+                      Rejected by {request.profiles?.full_name || 'SkillPro Team'}
                     </span>
                   )}
                 </div>

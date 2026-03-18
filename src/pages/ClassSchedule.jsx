@@ -5,6 +5,19 @@ import { useNavigate } from 'react-router-dom';
 import { Calendar, Plus, Clock, Video, ExternalLink, Trash2, X } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import { sendAdminNotification } from '../utils/adminNotifications';
+import {
+  addMonths,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isBefore,
+  isSameDay,
+  isSameMonth,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
+} from 'date-fns';
 
 const ClassSchedule = () => {
   const { profile, isPremium } = useAuth();
@@ -23,6 +36,116 @@ const ClassSchedule = () => {
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [deleteModal, setDeleteModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
   const [nowTick, setNowTick] = useState(Date.now());
+  const [pickerState, setPickerState] = useState({
+    open: false,
+    field: 'start',
+    monthDate: new Date(),
+    selectedDate: '',
+    hour: '09',
+    minute: '00',
+  });
+
+  const getMinDateTimeLocal = () => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    const offsetMs = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16);
+  };
+
+  const pad2 = (value) => String(value).padStart(2, '0');
+
+  const parseLocalDateTime = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const formatDateTimeLabel = (value, fallback = 'Select date & time') => {
+    const parsed = parseLocalDateTime(value);
+    if (!parsed) return fallback;
+    return format(parsed, 'dd-MM-yyyy HH:mm');
+  };
+
+  const getFieldMinimumDate = (field) => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    now.setMilliseconds(0);
+    if (field === 'end' && scheduledAt) {
+      const start = parseLocalDateTime(scheduledAt);
+      if (start && start > now) return start;
+    }
+    return now;
+  };
+
+  const openDateTimePicker = (field) => {
+    const sourceValue = field === 'start' ? scheduledAt : endsAt;
+    const fallbackDate = getFieldMinimumDate(field);
+    const parsed = parseLocalDateTime(sourceValue) || fallbackDate;
+    setPickerState({
+      open: true,
+      field,
+      monthDate: startOfMonth(parsed),
+      selectedDate: format(parsed, 'yyyy-MM-dd'),
+      hour: pad2(parsed.getHours()),
+      minute: pad2(parsed.getMinutes()),
+    });
+  };
+
+  const closeDateTimePicker = () => {
+    setPickerState((prev) => ({ ...prev, open: false }));
+  };
+
+  const applyDateTimePicker = () => {
+    const { field, selectedDate, hour, minute } = pickerState;
+    if (!selectedDate) {
+      setAlertModal({
+        show: true,
+        title: 'Missing Date',
+        message: 'Please choose a date before applying.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    const composedValue = `${selectedDate}T${hour}:${minute}`;
+    const pickedDate = parseLocalDateTime(composedValue);
+    const minimumDate = getFieldMinimumDate(field);
+
+    if (!pickedDate || isBefore(pickedDate, minimumDate)) {
+      setAlertModal({
+        show: true,
+        title: 'Past Time Not Allowed',
+        message: 'Please choose a current or future time only.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    if (field === 'end' && scheduledAt) {
+      const startDate = parseLocalDateTime(scheduledAt);
+      if (startDate && pickedDate <= startDate) {
+        setAlertModal({
+          show: true,
+          title: 'Invalid Duration',
+          message: 'Session upto time must be after start time.',
+          type: 'warning'
+        });
+        return;
+      }
+    }
+
+    if (field === 'start') {
+      setScheduledAt(composedValue);
+      const currentEnd = parseLocalDateTime(endsAt);
+      if (currentEnd && pickedDate >= currentEnd) {
+        setEndsAt('');
+      }
+    } else {
+      setEndsAt(composedValue);
+    }
+
+    closeDateTimePicker();
+  };
 
   // Convert datetime-local value to UTC ISO assuming input is IST clock time.
   // This keeps 18:14 entered by teacher displayed as 18:14 for all users in IST.
@@ -204,6 +327,16 @@ const ClassSchedule = () => {
         show: true,
         title: 'Invalid End Time',
         message: 'Please select a valid session upto time',
+        type: 'warning'
+      });
+      return;
+    }
+    const selectedLocalStart = parseLocalDateTime(scheduledAt);
+    if (!selectedLocalStart || selectedLocalStart < new Date()) {
+      setAlertModal({
+        show: true,
+        title: 'Past Time Not Allowed',
+        message: 'Teachers cannot create or schedule sessions for previous time slots. Please choose a future start time.',
         type: 'warning'
       });
       return;
@@ -398,16 +531,19 @@ const ClassSchedule = () => {
       </div>
 
       {showForm && (
-        <div className="bg-white rounded-xl p-6 border">
-          <h2 className="text-lg font-bold mb-4">Schedule New Session</h2>
-          <div className="space-y-4">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-800 px-6 py-5 text-white">
+            <h2 className="text-xl font-bold">Schedule New Session</h2>
+            <p className="mt-1 text-sm text-slate-200">Choose a future slot, assign students, and publish the class in one step.</p>
+          </div>
+          <div className="space-y-4 p-6">
             {profile.role === 'admin' && (
               <div>
-                <label className="block text-sm font-medium mb-2">Assign Teacher</label>
+                <label className="block text-sm font-semibold mb-2 text-slate-700">Assign Teacher</label>
                 <select
                   value={selectedTeacher}
                   onChange={e => setSelectedTeacher(e.target.value)}
-                  className="w-full border rounded-lg p-2"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                 >
                   <option value="">Choose teacher...</option>
                   {teachers.map(teacher => (
@@ -419,46 +555,50 @@ const ClassSchedule = () => {
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium mb-2">Session Title</label>
+              <label className="block text-sm font-semibold mb-2 text-slate-700">Session Title</label>
               <input 
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 placeholder="e.g., Python Basics - Morning Session"
-                className="w-full border rounded-lg p-2"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Date & Time</label>
-              <input 
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={e => setScheduledAt(e.target.value)}
-                className="w-full border rounded-lg p-2"
-              />
+              <label className="block text-sm font-semibold mb-2 text-slate-700">Date & Time</label>
+              <button
+                type="button"
+                onClick={() => openDateTimePicker('start')}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-slate-900 transition hover:border-blue-300 hover:bg-white"
+              >
+                <span>{formatDateTimeLabel(scheduledAt, 'Select start date & time')}</span>
+                <Calendar size={18} className="text-blue-600" />
+              </button>
               <p className="text-xs text-slate-500 mt-1">
-                Recommended slots: 9:00-10:00 AM or 5:00-6:00 PM
+                Recommended slots: 9:00-10:00 AM or 5:00-6:00 PM. Past times are disabled.
               </p>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Session Upto</label>
-              <input
-                type="datetime-local"
-                value={endsAt}
-                onChange={e => setEndsAt(e.target.value)}
-                className="w-full border rounded-lg p-2"
-              />
+              <label className="block text-sm font-semibold mb-2 text-slate-700">Session Upto</label>
+              <button
+                type="button"
+                onClick={() => openDateTimePicker('end')}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-slate-900 transition hover:border-blue-300 hover:bg-white"
+              >
+                <span>{formatDateTimeLabel(endsAt, 'Select session upto time')}</span>
+                <Clock size={18} className="text-indigo-600" />
+              </button>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Meeting Platform</label>
+              <label className="block text-sm font-semibold mb-2 text-slate-700">Meeting Platform</label>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <button
                   type="button"
                   onClick={() => setMeetingType('jitsi')}
-                  className={`p-3 border-2 rounded-lg text-left transition ${
+                  className={`p-4 border-2 rounded-2xl text-left transition ${
                     meetingType === 'jitsi' 
-                      ? 'border-blue-600 bg-blue-50' 
-                      : 'border-slate-200 hover:border-blue-300'
+                      ? 'border-blue-600 bg-blue-50 shadow-sm' 
+                      : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
                   }`}
                 >
                   <div className="font-semibold text-sm">Jitsi Meet</div>
@@ -467,10 +607,10 @@ const ClassSchedule = () => {
                 <button
                   type="button"
                   onClick={() => setMeetingType('external')}
-                  className={`p-3 border-2 rounded-lg text-left transition ${
+                  className={`p-4 border-2 rounded-2xl text-left transition ${
                     meetingType === 'external' 
-                      ? 'border-purple-600 bg-purple-50' 
-                      : 'border-slate-200 hover:border-purple-300'
+                      ? 'border-purple-600 bg-purple-50 shadow-sm' 
+                      : 'border-slate-200 hover:border-purple-300 hover:bg-slate-50'
                   }`}
                 >
                   <div className="font-semibold text-sm">External Link</div>
@@ -483,7 +623,7 @@ const ClassSchedule = () => {
                   value={joinLink}
                   onChange={e => setJoinLink(e.target.value)}
                   placeholder="https://zoom.us/j/... or Google Meet link"
-                  className="w-full border rounded-lg p-2"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-purple-400 focus:bg-white focus:ring-4 focus:ring-purple-100"
                   required
                 />
               )}
@@ -494,10 +634,10 @@ const ClassSchedule = () => {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">
+              <label className="block text-sm font-semibold mb-2 text-slate-700">
                 Select Students (Optional - Leave empty for all assigned students)
               </label>
-              <div className="border rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
+              <div className="border border-slate-200 rounded-2xl bg-slate-50 p-3 max-h-48 overflow-y-auto space-y-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -513,9 +653,9 @@ const ClassSchedule = () => {
                   />
                   <span className="font-semibold">Select All ({students.length})</span>
                 </label>
-                <div className="border-t pt-2 space-y-1">
+                <div className="border-t border-slate-200 pt-2 space-y-1">
                   {students.map(student => (
-                    <label key={student.id} className="flex items-center gap-2 text-sm hover:bg-slate-50 p-1 rounded">
+                    <label key={student.id} className="flex items-center gap-2 text-sm hover:bg-white p-2 rounded-xl transition">
                       <input
                         type="checkbox"
                         checked={selectedStudents.includes(student.id)}
@@ -541,16 +681,177 @@ const ClassSchedule = () => {
             <div className="flex gap-2">
               <button 
                 onClick={createSession}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-2xl hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-100 font-semibold"
               >
                 Create Session
               </button>
               <button 
                 onClick={() => setShowForm(false)}
-                className="bg-slate-200 text-slate-700 px-6 py-2 rounded-lg hover:bg-slate-300"
+                className="bg-white border border-slate-300 text-slate-700 px-6 py-3 rounded-2xl hover:bg-slate-50 font-semibold"
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pickerState.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-blue-800 px-6 py-5 text-white">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-100">
+                  {pickerState.field === 'start' ? 'Start Time' : 'End Time'}
+                </p>
+                <h3 className="mt-2 text-2xl font-bold">
+                  {formatDateTimeLabel(
+                    pickerState.selectedDate ? `${pickerState.selectedDate}T${pickerState.hour}:${pickerState.minute}` : '',
+                    'Pick date & time'
+                  )}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeDateTimePicker}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition hover:bg-white/20"
+                aria-label="Close date picker"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="border-b border-slate-200 p-6 lg:border-b-0 lg:border-r">
+                <div className="mb-4 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setPickerState((prev) => ({ ...prev, monthDate: subMonths(prev.monthDate, 1) }))}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Prev
+                  </button>
+                  <p className="text-lg font-bold text-slate-900">{format(pickerState.monthDate, 'MMMM, yyyy')}</p>
+                  <button
+                    type="button"
+                    onClick={() => setPickerState((prev) => ({ ...prev, monthDate: addMonths(prev.monthDate, 1) }))}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Next
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-7 gap-2 text-center text-sm font-semibold text-slate-500">
+                  {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
+                    <div key={day} className="py-2">{day}</div>
+                  ))}
+                </div>
+
+                <div className="mt-2 grid grid-cols-7 gap-2">
+                  {eachDayOfInterval({
+                    start: startOfWeek(startOfMonth(pickerState.monthDate)),
+                    end: endOfWeek(endOfMonth(pickerState.monthDate)),
+                  }).map((day) => {
+                    const minimumDate = getFieldMinimumDate(pickerState.field);
+                    const dayDisabled = isBefore(day, new Date(minimumDate.getFullYear(), minimumDate.getMonth(), minimumDate.getDate())) && !isSameDay(day, minimumDate);
+                    const isSelected = pickerState.selectedDate === format(day, 'yyyy-MM-dd');
+                    return (
+                      <button
+                        key={day.toISOString()}
+                        type="button"
+                        disabled={dayDisabled}
+                        onClick={() => setPickerState((prev) => ({ ...prev, selectedDate: format(day, 'yyyy-MM-dd') }))}
+                        className={`h-12 rounded-2xl text-sm font-semibold transition ${
+                          isSelected
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                            : isSameMonth(day, pickerState.monthDate)
+                            ? 'bg-slate-50 text-slate-800 hover:bg-blue-50'
+                            : 'bg-slate-50/60 text-slate-300'
+                        } ${dayDisabled ? 'cursor-not-allowed opacity-40' : ''}`}
+                      >
+                        {format(day, 'd')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="mb-3 text-sm font-semibold text-slate-700">Hour</p>
+                    <div className="max-h-80 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                      {Array.from({ length: 24 }, (_, hour) => pad2(hour)).map((hour) => (
+                        <button
+                          key={hour}
+                          type="button"
+                          onClick={() => setPickerState((prev) => ({ ...prev, hour }))}
+                          className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                            pickerState.hour === hour
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-white text-slate-700 hover:bg-blue-50'
+                          }`}
+                        >
+                          {hour}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-3 text-sm font-semibold text-slate-700">Minute</p>
+                    <div className="max-h-80 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                      {Array.from({ length: 60 }, (_, minute) => pad2(minute)).map((minute) => (
+                        <button
+                          key={minute}
+                          type="button"
+                          onClick={() => setPickerState((prev) => ({ ...prev, minute }))}
+                          className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                            pickerState.minute === minute
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-white text-slate-700 hover:bg-indigo-50'
+                          }`}
+                        >
+                          {minute}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={closeDateTimePicker}
+                    className="rounded-2xl border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = getFieldMinimumDate(pickerState.field);
+                      setPickerState((prev) => ({
+                        ...prev,
+                        monthDate: startOfMonth(now),
+                        selectedDate: format(now, 'yyyy-MM-dd'),
+                        hour: pad2(now.getHours()),
+                        minute: pad2(now.getMinutes()),
+                      }));
+                    }}
+                    className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-3 font-semibold text-blue-700 transition hover:bg-blue-100"
+                  >
+                    Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyDateTimePicker}
+                    className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-100 transition hover:from-blue-700 hover:to-indigo-700"
+                  >
+                    Apply Date & Time
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

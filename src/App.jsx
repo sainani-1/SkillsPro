@@ -102,6 +102,10 @@ const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
   const [supportContactEmail, setSupportContactEmail] = useState('');
 
+  const handleBlockedAccountLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
   useEffect(() => {
     let mounted = true;
     const loadSupportEmail = async () => {
@@ -146,16 +150,23 @@ const ProtectedRoute = ({ children }) => {
           <p className="text-red-100">
             {realProfile?.disabled_reason
               ? `Reason: ${realProfile.disabled_reason}`
-              : 'Your account has been disabled by admin due to suspicious activity.'}
+              : 'Your account has been disabled by the SkillPro team due to suspicious activity.'}
           </p>
           <div className="rounded-xl bg-red-500/10 border border-red-300/30 p-4">
-            <p className="text-sm text-red-100">Please contact admin/support for reactivation.</p>
+            <p className="text-sm text-red-100">Please contact the SkillPro team for reactivation.</p>
             {supportContactEmail ? (
               <a className="inline-block mt-2 text-sm font-semibold underline text-red-200" href={`mailto:${supportContactEmail}`}>
                 {supportContactEmail}
               </a>
             ) : null}
           </div>
+          <button
+            type="button"
+            onClick={handleBlockedAccountLogout}
+            className="inline-flex items-center justify-center rounded-xl border border-red-200/40 bg-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/20"
+          >
+            Logout
+          </button>
         </div>
       </div>
     );
@@ -163,17 +174,37 @@ const ProtectedRoute = ({ children }) => {
 
   // Check if user is locked
   if (realProfile?.is_locked && !isImpersonating) {
-    const lockedUntil = new Date(realProfile.locked_until);
-    if (lockedUntil > new Date()) {
+    const lockedUntil = realProfile?.locked_until ? new Date(realProfile.locked_until) : null;
+    const hasActiveLock = !lockedUntil || lockedUntil > new Date();
+    if (hasActiveLock) {
       return (
-        <div className="h-screen flex items-center justify-center bg-red-50 text-red-800 flex-col">
-          <div className="text-center space-y-4">
-            <h1 className="text-3xl font-bold">Account Locked</h1>
-            <p>{realProfile?.lock_reason || 'Your account has been locked due to suspicious activity detected during an exam.'}</p>
-            <p className="text-sm">Lock expires on: {lockedUntil.toLocaleDateString('en-IN')}</p>
-            {supportContactEmail ? (
-              <p className="text-sm">Support: <a className="font-semibold underline" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a></p>
-            ) : null}
+        <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-red-950 text-white p-6 flex items-center justify-center relative overflow-hidden">
+          <img
+            src="/skillpro-logo.png"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 m-auto w-72 h-72 object-contain opacity-15 mix-blend-multiply pointer-events-none select-none"
+          />
+          <div className="max-w-xl w-full rounded-2xl border border-red-300/30 bg-white/5 backdrop-blur-sm shadow-2xl p-8 text-center space-y-4 relative z-10">
+            <h1 className="text-3xl font-bold text-red-300">Account Locked</h1>
+            <p className="text-red-100">{realProfile?.lock_reason || 'Your account has been locked due to suspicious activity detected during an exam.'}</p>
+            <div className="rounded-xl bg-red-500/10 border border-red-300/30 p-4 text-sm text-red-100">
+              {lockedUntil ? (
+                <p>Lock expires on: {lockedUntil.toLocaleDateString('en-IN')}</p>
+              ) : (
+                <p>Your account is locked until the SkillPro team reviews it.</p>
+              )}
+              {supportContactEmail ? (
+                <p className="mt-2">Need help? Contact <a className="font-semibold underline text-red-200" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a>.</p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={handleBlockedAccountLogout}
+              className="inline-flex items-center justify-center rounded-xl border border-red-200/40 bg-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/20"
+            >
+              Logout
+            </button>
           </div>
         </div>
       );

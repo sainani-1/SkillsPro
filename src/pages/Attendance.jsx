@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import AlertModal from '../components/AlertModal';
-import { ClipboardList, CheckCircle, XCircle, User, Calendar, Clock, Save } from 'lucide-react';
+import { ClipboardList, CheckCircle, XCircle, User, Calendar, Clock, Save, X } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Attendance = () => {
@@ -10,7 +10,10 @@ const Attendance = () => {
   const [activeTab, setActiveTab] = useState('sessions');
   const [sessions, setSessions] = useState([]);
   const [students, setStudents] = useState([]);
+  const [assignedStudents, setAssignedStudents] = useState([]);
   const studentsRef = useRef([]);
+  const assignedStudentsRef = useRef([]);
+  const sessionStudentsCacheRef = useRef({});
   const [selectedSession, setSelectedSession] = useState(null);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,19 +25,34 @@ const Attendance = () => {
   const [attendanceLocked, setAttendanceLocked] = useState(false);
   const [attendanceOverride, setAttendanceOverride] = useState(false);
   const [overrideLoading, setOverrideLoading] = useState(false);
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [currentStudentIndex, setCurrentStudentIndex] = useState(0);
+  const [sequentialSaving, setSequentialSaving] = useState(false);
+  const [sessionMarkedCount, setSessionMarkedCount] = useState(0);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
-    useEffect(() => {
-      studentsRef.current = students;
-    }, [students]);
+  useEffect(() => {
+    studentsRef.current = students;
+  }, [students]);
+
+  useEffect(() => {
+    assignedStudentsRef.current = assignedStudents;
+  }, [assignedStudents]);
   const isTeacher = profile?.role === 'teacher';
   const isAdmin = profile?.role === 'admin';
 
-  // Check if selected session is today
-  const checkSessionDate = (session) => {
+  const isSameCalendarDay = (left, right) =>
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+
+  // Attendance opens after the session start time and remains open until the end of that day.
+  const canMarkAttendanceNow = (session) => {
     if (!session) return false;
-    const today = new Date();
+    const now = new Date();
     const sessionDate = new Date(session.scheduled_for);
-    return today.toDateString() === sessionDate.toDateString();
+    if (!isSameCalendarDay(now, sessionDate)) return false;
+    return now >= sessionDate;
   };
 
 
@@ -64,10 +82,40 @@ const Attendance = () => {
       
       const { data: guidanceSessions } = await guidanceQuery.order('scheduled_for', { ascending: false });
 
+      const classSessionIds = (classSessions || []).map((s) => s.id);
+      let reassignmentMap = {};
+      if (classSessionIds.length > 0) {
+        const { data: reassignments, error: reassignmentError } = await supabase
+          .from('session_reassignments')
+          .select(`
+            session_id,
+            original_teacher_id,
+            reassigned_to_teacher_id,
+            original_teacher:original_teacher_id(id, full_name),
+            reassigned_teacher:reassigned_to_teacher_id(id, full_name)
+          `)
+          .in('session_id', classSessionIds)
+          .is('reverted_at', null);
+
+        if (reassignmentError) {
+          console.error('Error loading attendance reassignments:', reassignmentError);
+        } else {
+          reassignmentMap = (reassignments || []).reduce((acc, item) => {
+            acc[item.session_id] = item;
+            return acc;
+          }, {});
+        }
+      }
+
       // Combine both types
       const allSessions = [
-        ...(classSessions || []).map(s => ({ ...s, type: 'class', title: s.title })),
-        ...(guidanceSessions || []).map(s => ({ 
+        ...(classSessions || []).map((s) => ({
+          ...s,
+          type: 'class',
+          title: s.title,
+          reassignment: reassignmentMap[s.id] || null
+        })),
+        ...(guidanceSessions || []).map((s) => ({ 
           ...s, 
           type: 'guidance', 
           title: s.guidance_requests?.topic || 'Guidance Session'
@@ -77,14 +125,13 @@ const Attendance = () => {
       setSessions(allSessions);
 
       // Mark sessions that already have attendance posted.
-      const classSessionIds = allSessions.filter((s) => s.type === 'class').map((s) => s.id);
       const guidanceSessionIds = allSessions.filter((s) => s.type === 'guidance').map((s) => s.id);
       let classPosted = [];
       let guidancePosted = [];
       if (classSessionIds.length > 0) {
         const { data } = await supabase
           .from('class_attendance')
-          .select('session_id')
+          .select('session_id, student_id')
           .in('session_id', classSessionIds);
         classPosted = data || [];
       }
@@ -96,7 +143,20 @@ const Attendance = () => {
         guidancePosted = data || [];
       }
       const postedMap = {};
-      classPosted.forEach((r) => { postedMap[`class-${r.session_id}`] = true; });
+      const classAttendanceCountMap = {};
+      classPosted.forEach((row) => {
+        const key = `class-${row.session_id}`;
+        if (!classAttendanceCountMap[key]) classAttendanceCountMap[key] = new Set();
+        if (row.student_id) classAttendanceCountMap[key].add(row.student_id);
+      });
+      allSessions
+        .filter((session) => session.type === 'class')
+        .forEach((session) => {
+          const key = `class-${session.id}`;
+          const expectedCount = session.class_session_participants?.length || 0;
+          const markedCount = classAttendanceCountMap[key]?.size || 0;
+          postedMap[key] = expectedCount > 0 && markedCount >= expectedCount;
+        });
       guidancePosted.forEach((r) => { postedMap[`guidance-${r.session_id}`] = true; });
       setPostedSessionKeys(postedMap);
 
@@ -119,7 +179,7 @@ const Attendance = () => {
         }
       });
 
-      setStudents(Object.values(uniqueStudents));
+      setAssignedStudents(Object.values(uniqueStudents));
     } else {
       // Student: Load their attendance records from both tables
       const { data: classAttendance } = await supabase
@@ -183,25 +243,31 @@ const Attendance = () => {
     if (session.type === 'class') {
       const { data: participants, error: participantError } = await supabase
         .from('class_session_participants')
-        .select('student_id, profiles!class_session_participants_student_id_fkey(id, full_name, avatar_url, email)')
+        .select('student_id')
         .eq('session_id', session.id);
 
       if (participantError) {
         console.error('Error loading class participants:', participantError);
+        return [];
       }
 
-      const mapped = (participants || [])
-        .map((row) => row.profiles)
-        .filter(Boolean);
+      const participantIds = [...new Set((participants || []).map((row) => row.student_id).filter(Boolean))];
+      if (participantIds.length === 0) {
+        return [];
+      }
 
-      if (mapped.length > 0) return mapped;
-
-      const { data: allStudents } = await supabase
+      const { data: participantProfiles, error: profileError } = await supabase
         .from('profiles')
         .select('id, full_name, avatar_url, email')
-        .eq('role', 'student')
+        .in('id', participantIds)
         .order('full_name');
-      return allStudents || [];
+
+      if (profileError) {
+        console.error('Error loading participant profiles:', profileError);
+        return [];
+      }
+
+      return participantProfiles || [];
     }
 
     const guidanceStudentId = session?.guidance_requests?.student_id;
@@ -214,16 +280,50 @@ const Attendance = () => {
       return student ? [student] : [];
     }
 
-    return studentsRef.current || [];
+    return assignedStudentsRef.current || [];
   };
 
   const loadSessionAttendance = async (session) => {
+    const sessionKey = `${session.type}-${session.id}`;
     const sessionStudents = await loadStudentsForSession(session);
+    const cachedStudents = sessionStudentsCacheRef.current[sessionKey] || [];
+    const visibleStudents =
+      selectedSession && `${selectedSession.type}-${selectedSession.id}` === sessionKey
+        ? (studentsRef.current || [])
+        : [];
+
     const tableName = session.type === 'class' ? 'class_attendance' : 'guidance_attendance';
     const { data } = await supabase
       .from(tableName)
       .select('id, student_id, attended')
       .eq('session_id', session.id);
+
+    let attendanceStudents = [];
+    const attendanceStudentIds = [...new Set((data || []).map((record) => record.student_id).filter(Boolean))];
+    if (attendanceStudentIds.length > 0) {
+      const { data: attendanceProfiles, error: attendanceProfilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, email')
+        .in('id', attendanceStudentIds)
+        .order('full_name');
+
+      if (attendanceProfilesError) {
+        console.error('Error loading attendance student profiles:', attendanceProfilesError);
+      } else {
+        attendanceStudents = attendanceProfiles || [];
+      }
+    }
+
+    const fallbackStudents = cachedStudents.length > 0
+      ? cachedStudents
+      : visibleStudents.length > 0
+      ? visibleStudents
+      : attendanceStudents;
+    const currentStudents = sessionStudents.length > 0 ? sessionStudents : fallbackStudents;
+
+    if (currentStudents.length > 0) {
+      sessionStudentsCacheRef.current[sessionKey] = currentStudents;
+    }
 
     let overrideActive = false;
     if (isAdmin) {
@@ -242,73 +342,230 @@ const Attendance = () => {
       setAttendanceOverride(overrideActive);
     }
 
-    if (data && data.length > 0) {
-      setAttendanceLocked(!(isAdmin && overrideActive));
-      setPostedSessionKeys((prev) => ({
-        ...prev,
-        [`${session.type}-${session.id}`]: true
-      }));
-    } else {
-      setAttendanceLocked(false);
-    }
-
     const attendanceMap = {};
     data?.forEach(record => {
       attendanceMap[record.student_id] = record.attended;
     });
 
-    const currentStudents = sessionStudents.length > 0 ? sessionStudents : (studentsRef.current || []);
-    const studentsWithAttendance = currentStudents.map(s => ({
+    const baseStudents = currentStudents.length > 0
+      ? currentStudents
+      : (selectedSession && `${selectedSession.type}-${selectedSession.id}` === sessionKey && studentsRef.current.length > 0)
+      ? studentsRef.current
+      : [];
+
+    const studentsWithAttendance = baseStudents.map(s => ({
       ...s,
       attended: attendanceMap[s.id],
       locked: false,
       recordId: data?.find(r => r.student_id === s.id)?.id
     }));
 
-    setStudents(studentsWithAttendance);
+    const allStudentsMarked =
+      studentsWithAttendance.length > 0 &&
+      studentsWithAttendance.every((student) => !!student.recordId);
+
+    if (data && data.length > 0) {
+      setAttendanceLocked(allStudentsMarked && !(isAdmin && overrideActive));
+      setPostedSessionKeys((prev) => ({
+        ...prev,
+        [`${session.type}-${session.id}`]: allStudentsMarked
+      }));
+    } else {
+      setAttendanceLocked(false);
+      setPostedSessionKeys((prev) => ({
+        ...prev,
+        [`${session.type}-${session.id}`]: false
+      }));
+    }
+
+    if (studentsWithAttendance.length > 0 || studentsRef.current.length === 0) {
+      setStudents(studentsWithAttendance);
+    }
+
+    return studentsWithAttendance;
   };
 
-  const selectSessionForAttendance = async (session) => {
-    const isToday = checkSessionDate(session);
-    if (!isToday && !isAdmin) {
+  const closeAttendanceModal = () => {
+    setAttendanceModalOpen(false);
+    setCurrentStudentIndex(0);
+    setSequentialSaving(false);
+    setSessionMarkedCount(0);
+    setCloseConfirmOpen(false);
+  };
+
+  const requestCloseAttendanceModal = () => {
+    if (sequentialSaving) return;
+    if (isAdmin) {
+      closeAttendanceModal();
+      return;
+    }
+    if (sessionMarkedCount > 0) return;
+    setCloseConfirmOpen(true);
+  };
+
+  const saveSingleAttendance = async (studentId, attended) => {
+    if (!selectedSession) return { error: new Error('No session selected.') };
+
+    const tableName = selectedSession.type === 'class' ? 'class_attendance' : 'guidance_attendance';
+    const teacherId = selectedSession.teacher_id || profile.id;
+    const student = studentsRef.current.find((item) => item.id === studentId);
+
+    if (student?.recordId) {
+      const { error } = await supabase
+        .from(tableName)
+        .update({
+          teacher_id: teacherId,
+          attended,
+          marked_at: new Date().toISOString()
+        })
+        .eq('id', student.recordId);
+      return { error };
+    }
+
+    const { data: insertedRows, error } = await supabase
+      .from(tableName)
+      .insert({
+        session_id: selectedSession.id,
+        student_id: studentId,
+        teacher_id: teacherId,
+        attended,
+        marked_at: new Date().toISOString()
+      })
+      .select('id')
+      .limit(1);
+
+    return {
+      error,
+      recordId: insertedRows?.[0]?.id || null
+    };
+  };
+
+  const handleSequentialAttendance = async (attended) => {
+    const currentStudent = students[currentStudentIndex];
+    if (!currentStudent || sequentialSaving) return;
+
+    const canMarkNow = selectedSession ? canMarkAttendanceNow(selectedSession) : false;
+    if (!canMarkNow && !isAdmin) {
       setAlertModal({
         show: true,
         title: 'Cannot Mark Attendance',
-        message: 'Attendance can only be marked on the day of the session.',
+        message: 'Attendance can only be marked after the session start time and until the end of that day.',
         type: 'warning'
       });
       return;
     }
 
-    if (!isAdmin) {
-      const tableName = session.type === 'class' ? 'class_attendance' : 'guidance_attendance';
-      const { count, error } = await supabase
-        .from(tableName)
-        .select('id', { count: 'exact', head: true })
-        .eq('session_id', session.id);
+    if (attendanceLocked && !isAdmin) {
+      setAlertModal({
+        show: true,
+        title: 'Attendance Locked',
+        message: 'Attendance was already posted and cannot be edited.',
+        type: 'warning'
+      });
+      return;
+    }
 
-      if (error) {
-        console.error('Attendance lookup error:', error);
-      }
+    setSequentialSaving(true);
 
-      if ((count || 0) > 0) {
+    try {
+      const { error, recordId } = await saveSingleAttendance(currentStudent.id, attended);
+      if (error) throw error;
+
+      const updatedStudents = studentsRef.current.map((student) =>
+        student.id === currentStudent.id
+          ? { ...student, attended, recordId: student.recordId || recordId || student.recordId }
+          : student
+      );
+
+      studentsRef.current = updatedStudents;
+      setStudents(updatedStudents);
+      setSessionMarkedCount((prev) => prev + 1);
+      const allStudentsMarked = updatedStudents.every(
+        (student) => !!(student.recordId || student.id === currentStudent.id)
+      );
+      setPostedSessionKeys((prev) => ({
+        ...prev,
+        [`${selectedSession.type}-${selectedSession.id}`]: allStudentsMarked
+      }));
+      const nextIndex = updatedStudents.findIndex(
+        (student, index) => index > currentStudentIndex && !student.recordId
+      );
+      if (nextIndex === -1) {
+        if (!attendanceOverride) {
+          setAttendanceLocked(true);
+        }
+        closeAttendanceModal();
         setAlertModal({
           show: true,
-          title: 'Attendance Locked',
-          message: 'Attendance was already posted and cannot be reopened.',
-          type: 'warning'
+          title: 'Success',
+          message: 'Attendance marked for all students.',
+          type: 'success'
         });
-        return;
+      } else {
+        setCurrentStudentIndex(nextIndex);
       }
+    } catch (error) {
+      console.error('Error saving attendance:', error);
+      setAlertModal({
+        show: true,
+        title: 'Error',
+        message: error.message || 'Error saving attendance.',
+        type: 'error'
+      });
+    } finally {
+      setSequentialSaving(false);
     }
+  };
+
+  const selectSessionForAttendance = async (session) => {
+    const canMarkNow = canMarkAttendanceNow(session);
+    if (!canMarkNow && !isAdmin) {
+      setAlertModal({
+        show: true,
+        title: 'Cannot Mark Attendance',
+        message: 'Attendance can only be marked after the session start time and until the end of that day.',
+        type: 'warning'
+      });
+      return;
+    }
+
     setSelectedSession(session);
     setCanAccessSession(true);
-    setActiveTab('mark');
     setPendingChanges({});
     setHasPendingChanges(false);
     setAttendanceLocked(false);
     setAttendanceOverride(false);
-    await loadSessionAttendance(session);
+    const studentsForSession = await loadSessionAttendance(session);
+    if (studentsForSession && studentsForSession.length > 0) {
+      const firstUnmarkedIndex = studentsForSession.findIndex((student) => !student.recordId);
+      const alreadyMarkedCount = studentsForSession.filter((student) => !!student.recordId).length;
+
+      if (firstUnmarkedIndex === -1 && !isAdmin) {
+        setAlertModal({
+          show: true,
+          title: 'Attendance Locked',
+          message: 'Attendance for all students was already completed for this session.',
+          type: 'warning'
+        });
+        return;
+      }
+
+      setCurrentStudentIndex(
+        isAdmin
+          ? 0
+          : (firstUnmarkedIndex === -1 ? 0 : firstUnmarkedIndex)
+      );
+      setSessionMarkedCount(alreadyMarkedCount);
+      setCloseConfirmOpen(false);
+      setAttendanceModalOpen(true);
+    } else {
+      setAlertModal({
+        show: true,
+        title: 'No Students',
+        message: 'No students assigned yet for this session.',
+        type: 'warning'
+      });
+    }
   };
 
   useEffect(() => {
@@ -333,18 +590,18 @@ const Attendance = () => {
   }, [selectedSession]);
 
   const markAttendance = (studentId, attended) => {
-    const isToday = selectedSession ? checkSessionDate(selectedSession) : false;
-    if (!isToday && !(isAdmin && attendanceOverride)) {
+    const canMarkNow = selectedSession ? canMarkAttendanceNow(selectedSession) : false;
+    if (!canMarkNow && !isAdmin) {
       setAlertModal({
         show: true,
         title: 'Cannot Mark Attendance',
-        message: 'Attendance can only be marked on the day of the session.',
+        message: 'Attendance can only be marked after the session start time and until the end of that day.',
         type: 'warning'
       });
       return;
     }
 
-    if (attendanceLocked && !(isAdmin && attendanceOverride)) {
+    if (attendanceLocked && !isAdmin) {
       setAlertModal({
         show: true,
         title: 'Attendance Locked',
@@ -368,17 +625,17 @@ const Attendance = () => {
 
   const saveAttendance = async () => {
     if (!selectedSession || !hasPendingChanges) return;
-    const isToday = selectedSession ? checkSessionDate(selectedSession) : false;
-    if (!isToday && !(isAdmin && attendanceOverride)) {
+    const canMarkNow = selectedSession ? canMarkAttendanceNow(selectedSession) : false;
+    if (!canMarkNow && !isAdmin) {
       setAlertModal({
         show: true,
         title: 'Cannot Mark Attendance',
-        message: 'Attendance can only be marked on the day of the session.',
+        message: 'Attendance can only be marked after the session start time and until the end of that day.',
         type: 'warning'
       });
       return;
     }
-    if (attendanceLocked && !(isAdmin && attendanceOverride)) {
+    if (attendanceLocked && !isAdmin) {
       setAlertModal({
         show: true,
         title: 'Attendance Locked',
@@ -461,7 +718,16 @@ const Attendance = () => {
   };
 
 
-  if (loading) return <LoadingSpinner message="Loading attendance management..." />;
+  const shouldShowInitialLoader =
+    loading &&
+    sessions.length === 0 &&
+    attendanceRecords.length === 0 &&
+    students.length === 0 &&
+    !selectedSession;
+
+  if (shouldShowInitialLoader) {
+    return <LoadingSpinner message="Loading attendance management..." />;
+  }
 
   if (!isTeacher && !isAdmin) {
     // Student view - show their attendance history
@@ -529,34 +795,17 @@ const Attendance = () => {
   // Teacher/Admin view - tabs for sessions and marking
   return (
     <div className="space-y-6">
+      <AlertModal
+        show={alertModal.show}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ show: false, title: '', message: '', type: 'info' })}
+      />
+
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Attendance Management</h1>
         <p className="text-slate-500">{isAdmin ? 'View and manage all attendance' : 'Mark and view attendance for your sessions'}</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-2 border-b">
-        <button
-          onClick={() => setActiveTab('sessions')}
-          className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'sessions'
-              ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          Sessions ({sessions.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('mark')}
-          className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'mark'
-              ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-          disabled={!selectedSession}
-        >
-          Mark Attendance {selectedSession && `- ${selectedSession.title}`}
-        </button>
       </div>
 
       {activeTab === 'sessions' && (
@@ -578,6 +827,13 @@ const Attendance = () => {
                         {session.type === 'class' ? 'Class' : 'Guidance'}
                       </span>
                     </div>
+                    {session.reassignment ? (
+                      <p className="mb-2 text-sm text-amber-700">
+                        {session.reassignment.reassigned_to_teacher_id === profile?.id
+                          ? `Assigned to you from ${session.reassignment.original_teacher?.full_name || 'another teacher'}`
+                          : `Reassigned from ${session.reassignment.original_teacher?.full_name || 'another teacher'} to ${session.reassignment.reassigned_teacher?.full_name || 'replacement teacher'}`}
+                      </p>
+                    ) : null}
                     <div className="flex items-center gap-4 text-sm text-slate-600">
                       <span className="flex items-center gap-1">
                         <Calendar size={14} />
@@ -592,14 +848,14 @@ const Attendance = () => {
                   {(() => {
                     const sessionKey = `${session.type}-${session.id}`;
                     const alreadyPosted = !!postedSessionKeys[sessionKey];
-                    const canMarkToday = checkSessionDate(session) || isAdmin;
-                    const canOpen = canMarkToday && !(alreadyPosted && !isAdmin);
+                    const canMarkCurrentSession = canMarkAttendanceNow(session) || isAdmin;
+                    const canOpen = canMarkCurrentSession && !(alreadyPosted && !isAdmin);
                     const buttonText = alreadyPosted && !isAdmin
                       ? 'Already Posted'
-                      : (canMarkToday ? 'Mark Attendance' : 'Not Today');
+                      : (canMarkCurrentSession ? 'Mark Attendance' : 'Not Started Yet');
                     const buttonTitle = alreadyPosted && !isAdmin
                       ? 'Attendance already saved for this session'
-                      : (canMarkToday ? 'Mark attendance' : 'Attendance can only be marked on session day');
+                      : (canMarkCurrentSession ? 'Mark attendance' : 'Attendance opens after the scheduled session time');
                     return (
                   <button
                     onClick={() => selectSessionForAttendance(session)}
@@ -626,6 +882,13 @@ const Attendance = () => {
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border">
             <h3 className="font-bold text-lg">{selectedSession.title}</h3>
+            {selectedSession.reassignment ? (
+              <p className="mt-1 text-sm text-amber-700">
+                {selectedSession.reassignment.reassigned_to_teacher_id === profile?.id
+                  ? `This class was assigned to you from ${selectedSession.reassignment.original_teacher?.full_name || 'another teacher'} for leave coverage.`
+                  : `This class is reassigned from ${selectedSession.reassignment.original_teacher?.full_name || 'another teacher'} to ${selectedSession.reassignment.reassigned_teacher?.full_name || 'replacement teacher'}.`}
+              </p>
+            ) : null}
             <p className="text-sm text-slate-600">
               {new Date(selectedSession.scheduled_for).toLocaleString()} • 
               <span className={`ml-2 px-2 py-0.5 rounded text-xs ${
@@ -639,9 +902,9 @@ const Attendance = () => {
                 Attendance already posted. Editing is disabled.
               </p>
             )}
-            {isAdmin && !checkSessionDate(selectedSession) && !attendanceOverride && (
+            {isAdmin && !canMarkAttendanceNow(selectedSession) && !attendanceOverride && (
               <p className="text-sm text-orange-700 mt-2">
-                Attendance can only be marked on the session day unless override is enabled.
+                Admin can review and update attendance for this session at any time.
               </p>
             )}
             {isAdmin && attendanceOverride && (
@@ -725,80 +988,170 @@ const Attendance = () => {
             </div>
           )}
 
-          {/* Save Button */}
-          {hasPendingChanges && !attendanceLocked && (
-            <div className="flex gap-2 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex-1">
-                <p className="font-semibold text-yellow-900">You have pending changes</p>
-                <p className="text-sm text-yellow-800">Click Save to apply these changes</p>
-              </div>
-              <button
-                onClick={saveAttendance}
-                disabled={saving}
-                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center gap-2 disabled:opacity-50"
-              >
-                <Save size={18} />
-                {saving ? 'Saving...' : 'Save Attendance'}
-              </button>
-            </div>
-          )}
-
-          <div className="grid gap-3">
-            {students.length === 0 ? (
-              <div className="bg-white p-8 rounded-xl border text-center text-slate-500">
-                No students assigned yet.
-              </div>
-            ) : (
-              students.map(student => (
-                <div key={student.id} className="bg-white p-4 rounded-xl border shadow-sm flex items-center gap-4 relative">
-                  {/* Student Avatar */}
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold overflow-hidden">
-                    {student.avatar_url ? (
-                      <img src={student.avatar_url} alt={student.full_name} className="w-full h-full object-cover" />
-                    ) : (
-                      <User size={24} />
-                    )}
-                  </div>
-
-                  {/* Student Info */}
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900">{student.full_name}</p>
-                    <p className="text-xs text-slate-500 font-mono">{student.id.substring(0, 8)}...</p>
-                    <p className="text-xs text-slate-600">{student.email}</p>
-                  </div>
-
-                  {/* Attendance Status */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => markAttendance(student.id, true)}
-                      className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                        student.attended === true
-                          ? 'bg-green-600 text-white ring-2 ring-green-300'
-                          : 'bg-green-100 text-green-700 hover:bg-green-200'
-                      }`}
-                    >
-                      <CheckCircle size={18} className="inline mr-1" />
-                      Present
-                    </button>
-                    <button
-                      onClick={() => markAttendance(student.id, false)}
-                      className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                        student.attended === false
-                          ? 'bg-red-600 text-white ring-2 ring-red-300'
-                          : 'bg-red-100 text-red-700 hover:bg-red-200'
-                      }`}
-                    >
-                      <XCircle size={18} className="inline mr-1" />
-                      Absent
-                    </button>
-
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </div>
       )}
+
+      {attendanceModalOpen && selectedSession && students[currentStudentIndex] ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 px-6 py-5 text-white">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-100">Mark Attendance</p>
+                  <h3 className="mt-2 text-2xl font-bold">{selectedSession.title}</h3>
+                  <p className="mt-2 text-sm text-blue-50">
+                    Student {currentStudentIndex + 1} of {students.length}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={requestCloseAttendanceModal}
+                  disabled={sequentialSaving || sessionMarkedCount > 0}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Close attendance popup"
+                  title={sessionMarkedCount > 0 ? 'Attendance already started. Finish this popup to continue.' : 'Close attendance popup'}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all"
+                  style={{ width: `${((currentStudentIndex + 1) / Math.max(students.length, 1)) * 100}%` }}
+                />
+              </div>
+
+              {selectedSession.reassignment ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {selectedSession.reassignment.reassigned_to_teacher_id === profile?.id
+                    ? `Assigned to you from ${selectedSession.reassignment.original_teacher?.full_name || 'another teacher'}`
+                    : `Reassigned class session`}
+                </div>
+              ) : null}
+
+              <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                  {students[currentStudentIndex].avatar_url ? (
+                    <img
+                      src={students[currentStudentIndex].avatar_url}
+                      alt={students[currentStudentIndex].full_name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <User size={28} />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xl font-bold text-slate-900">{students[currentStudentIndex].full_name}</p>
+                  <p className="text-sm text-slate-500">{students[currentStudentIndex].email || 'No email available'}</p>
+                  <div className="mt-2">
+                    {students[currentStudentIndex].attended === true ? (
+                      <span className="inline-flex rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                        Current status: Present
+                      </span>
+                    ) : students[currentStudentIndex].attended === false ? (
+                      <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                        Current status: Absent
+                      </span>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                        Current status: Not marked yet
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleSequentialAttendance(true)}
+                  disabled={sequentialSaving}
+                  className={`rounded-2xl px-5 py-4 text-base font-bold transition disabled:opacity-60 ${
+                    students[currentStudentIndex].attended === true
+                      ? 'bg-green-700 text-white ring-4 ring-green-100'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  {sequentialSaving ? 'Saving...' : 'Present'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSequentialAttendance(false)}
+                  disabled={sequentialSaving}
+                  className={`rounded-2xl px-5 py-4 text-base font-bold transition disabled:opacity-60 ${
+                    students[currentStudentIndex].attended === false
+                      ? 'bg-red-700 text-white ring-4 ring-red-100'
+                      : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                >
+                  {sequentialSaving ? 'Saving...' : 'Absent'}
+                </button>
+              </div>
+
+              {isAdmin ? (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={closeAttendanceModal}
+                    disabled={sequentialSaving}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Exit Attendance Popup
+                  </button>
+                  <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStudentIndex((prev) => Math.max(prev - 1, 0))}
+                    disabled={currentStudentIndex === 0 || sequentialSaving}
+                    className="rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Previous Student
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStudentIndex((prev) => Math.min(prev + 1, students.length - 1))}
+                    disabled={currentStudentIndex === students.length - 1 || sequentialSaving}
+                    className="rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Next Student
+                  </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {closeConfirmOpen ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="font-semibold text-amber-900">Exit attendance popup?</p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    Attendance has not started yet. If you exit now, nothing will be saved.
+                  </p>
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCloseConfirmOpen(false)}
+                      className="flex-1 rounded-xl border border-amber-300 px-4 py-2.5 font-semibold text-amber-900 transition hover:bg-amber-100"
+                    >
+                      Stay Here
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeAttendanceModal}
+                      className="flex-1 rounded-xl bg-amber-600 px-4 py-2.5 font-semibold text-white transition hover:bg-amber-700"
+                    >
+                      Exit
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

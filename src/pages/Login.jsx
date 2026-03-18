@@ -21,7 +21,6 @@ const Login = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
   const [inlineNotice, setInlineNotice] = useState('');
-  const [supportContactEmail, setSupportContactEmail] = useState('');
   const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
   const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
@@ -103,25 +102,7 @@ const Login = () => {
       window.history.replaceState({}, '', cleanUrl);
     }
 
-    const loadSupportEmail = async () => {
-      try {
-        const { data } = await supabase
-          .from('settings')
-          .select('value')
-          .eq('key', 'support_contact_email')
-          .maybeSingle();
-        setSupportContactEmail(data?.value || '');
-      } catch {
-        setSupportContactEmail('');
-      }
-    };
-    loadSupportEmail();
   }, []);
-
-  const getSupportLine = () =>
-    supportContactEmail
-      ? `Please contact ${supportContactEmail}.`
-      : 'Please contact support.';
 
   const askTakeoverConfirmation = () =>
     new Promise((resolve) => {
@@ -191,31 +172,6 @@ const Login = () => {
       const { error: upsertError } = await supabase.from('profiles').upsert(bootstrapProfile, { onConflict: 'id' });
       if (upsertError) throw upsertError;
       profile = bootstrapProfile;
-    }
-
-    if (profile.is_disabled) {
-        await supabase.auth.signOut();
-        setAlertModal({
-          show: true,
-          title: 'Account Disabled',
-          message: `${profile.disabled_reason ? `Reason: ${profile.disabled_reason}. ` : ''}Your account has been disabled by an administrator. ${getSupportLine()}`,
-          type: 'error'
-        });
-        return;
-    }
-
-    if (profile.is_locked && (!profile.locked_until || new Date(profile.locked_until) > new Date())) {
-      await supabase.auth.signOut();
-      const lockText = profile.locked_until
-        ? `Lock expires on ${new Date(profile.locked_until).toLocaleDateString('en-IN')}.`
-        : 'Your account is currently locked.';
-      setAlertModal({
-        show: true,
-        title: 'Account Locked',
-        message: `${profile.lock_reason ? `Reason: ${profile.lock_reason}. ` : ''}${lockText} ${getSupportLine()}`,
-        type: 'error'
-      });
-      return;
     }
 
     if (!profile.terms_accepted || !profile.google_profile_completed) {
@@ -463,41 +419,6 @@ const Login = () => {
         await attachPendingReferral(signInData.user.id, signInData.user.email || email.trim());
       } catch (referralError) {
         console.warn('Referral attach failed after login:', referralError.message || referralError);
-      }
-
-      // Check if account is disabled
-      if (userProfile.is_disabled) {
-        await supabase.auth.signOut();
-        setAlertModal({
-          show: true,
-            title: userProfile.deleted_at ? 'Account Deleted' : 'Account Disabled',
-            message: userProfile.deleted_at
-              ? (userProfile.deleted_reason
-                ? `Your account was deleted. Reason: ${userProfile.deleted_reason}`
-                : `Your account was deleted. ${getSupportLine()}`)
-            : `${userProfile.disabled_reason ? `Reason: ${userProfile.disabled_reason}. ` : ''}Your account has been disabled by an administrator. ${getSupportLine()}`,
-            type: 'error'
-          });
-        setLoggingIn(false);
-        return;
-      }
-
-      if (userProfile.is_locked && (!userProfile.locked_until || new Date(userProfile.locked_until) > new Date())) {
-        await supabase.auth.signOut();
-        setAlertModal({
-          show: true,
-          title: 'Account Locked',
-          message: userProfile.lock_reason
-            ? `${userProfile.lock_reason}. ${userProfile.locked_until
-              ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
-              : `Your account is locked. ${getSupportLine()}`}`
-            : userProfile.locked_until
-              ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
-              : `Your account is locked. ${getSupportLine()}`,
-          type: 'error'
-        });
-        setLoggingIn(false);
-        return;
       }
 
       // Check for admin role and MFA

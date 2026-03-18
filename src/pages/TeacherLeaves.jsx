@@ -317,6 +317,35 @@ const TeacherLeaves = () => {
     try {
       setError('');
       const leave = leaves.find((item) => item.id === leaveId);
+
+      const { data: activeReassignments, error: fetchReassignmentsError } = await supabase
+        .from('session_reassignments')
+        .select('id, session_id, original_teacher_id')
+        .eq('leave_id', leaveId)
+        .is('reverted_at', null);
+
+      if (fetchReassignmentsError) throw fetchReassignmentsError;
+
+      if (activeReassignments && activeReassignments.length > 0) {
+        const originalTeacherId = leave?.teacher_id || activeReassignments[0]?.original_teacher_id;
+
+        if (originalTeacherId) {
+          const { error: restoreSessionsError } = await supabase
+            .from('class_sessions')
+            .update({ teacher_id: originalTeacherId })
+            .in('id', activeReassignments.map((item) => item.session_id));
+
+          if (restoreSessionsError) throw restoreSessionsError;
+        }
+
+        const { error: markRevertedError } = await supabase
+          .from('session_reassignments')
+          .update({ reverted_at: new Date().toISOString() })
+          .in('id', activeReassignments.map((item) => item.id));
+
+        if (markRevertedError) throw markRevertedError;
+      }
+
       const { error: updateError } = await supabase
         .from('teacher_leaves')
         .update({
