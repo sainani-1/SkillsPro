@@ -23,6 +23,8 @@ const LiveClass = () => {
   const canJoinStartedMeeting = profile?.role === 'student' || profile?.role === 'admin' || isTeacherOwner;
   const sessionStartTime = session ? new Date(session.scheduled_for) : null;
   const isSessionStartReached = sessionStartTime ? new Date() >= sessionStartTime : false;
+  const getJitsiRoomName = (sessionRow) => `SkillPro_Session_${sessionRow.id}_${sessionRow.title?.replace(/\s+/g, '_') || 'Class'}`;
+  const getJitsiRoomUrl = (sessionRow) => `https://meet.jit.si/${encodeURIComponent(getJitsiRoomName(sessionRow))}`;
 
   const getSessionEndTime = (sessionRow) => {
     if (sessionRow?.ends_at) return new Date(sessionRow.ends_at);
@@ -170,87 +172,13 @@ const LiveClass = () => {
       return;
     }
 
-    // Check if Jitsi script is loaded
-    if (!window.JitsiMeetExternalAPI) {
-      console.log('Loading Jitsi script...');
-      // Load Jitsi script dynamically
-      const script = document.createElement('script');
-      script.src = 'https://meet.jit.si/external_api.js';
-      script.async = true;
-      script.onload = () => {
-        console.log('Jitsi script loaded successfully');
-        initializeJitsi();
-      };
-      script.onerror = () => {
-        console.error('Failed to load Jitsi script');
-        openPopup('Connection issue', 'Failed to load Jitsi. Please check your internet connection.', 'error');
-      };
-      document.body.appendChild(script);
-    } else {
-      console.log('Jitsi API already loaded, initializing...');
-      initializeJitsi();
+    const meetingWindow = window.open(getJitsiRoomUrl(session), '_blank', 'noopener,noreferrer');
+    if (!meetingWindow) {
+      openPopup('Popup Blocked', 'Please allow popups for this site so the Jitsi meeting can open in a new tab.', 'warning');
+      return;
     }
-  };
 
-  const initializeJitsi = () => {
-    console.log('initializeJitsi called');
-    const domain = 'meet.jit.si';
-    const roomName = `SkillPro_Session_${session.id}_${session.title?.replace(/\s+/g, '_') || 'Class'}`;
-    
-    console.log('Room name:', roomName);
-    console.log('Domain:', domain);
-    
-    try {
-      const options = {
-        roomName: roomName,
-        width: '100%',
-        height: '100%',
-        parentNode: jitsiContainerRef.current,
-        configOverwrite: {
-          startWithAudioMuted: false,
-          startWithVideoMuted: false,
-          enableWelcomePage: false,
-          prejoinPageEnabled: false,
-          disableDeepLinking: true,
-        },
-        interfaceConfigOverwrite: {
-          SHOW_JITSI_WATERMARK: false,
-          SHOW_WATERMARK_FOR_GUESTS: false,
-          DEFAULT_BACKGROUND: '#1e293b',
-          TOOLBAR_BUTTONS: [
-            'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
-            'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
-            'livestreaming', 'etherpad', 'sharedvideo', 'settings', 'raisehand',
-            'videoquality', 'filmstrip', 'stats', 'shortcuts',
-            'tileview', 'videobackgroundblur', 'download', 'help', 'mute-everyone',
-          ],
-        },
-        userInfo: {
-          displayName: profile?.full_name || 'Guest',
-          email: profile?.email || ''
-        }
-      };
-
-      console.log('Creating Jitsi API with options:', options);
-      const api = new window.JitsiMeetExternalAPI(domain, options);
-      jitsiApiRef.current = api;
-      setMeetingStarted(true);
-      console.log('Jitsi meeting started successfully');
-
-      // Event listeners
-      api.on('readyToClose', () => {
-        console.log('Meeting ended by user');
-        api.dispose();
-        navigate('/app');
-      });
-
-      api.on('participantLeft', (data) => {
-        console.log('Participant left:', data);
-      });
-    } catch (error) {
-      console.error('Error initializing Jitsi:', error);
-      openPopup('Meeting error', `Failed to start meeting: ${error.message}`, 'error');
-    }
+    setMeetingStarted(true);
   };
 
   const handleExternalLink = () => {
@@ -387,12 +315,6 @@ const LiveClass = () => {
 
       {/* Meeting Area */}
       <div className="flex-1 relative">
-        {/* Jitsi Container - always rendered but hidden when not started */}
-        <div 
-          ref={jitsiContainerRef} 
-          className={`absolute inset-0 ${meetingStarted ? 'block' : 'hidden'}`}
-        />
-        
         {/* Ready to Join Screen */}
         {!meetingStarted && session.meeting_type === 'jitsi' && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -463,6 +385,37 @@ const LiveClass = () => {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {meetingStarted && session.meeting_type === 'jitsi' && (
+          <div className="absolute inset-0 flex items-center justify-center px-6">
+            <div className="max-w-2xl rounded-3xl border border-slate-700 bg-slate-800/95 p-10 text-center shadow-2xl">
+              <Video className="mx-auto mb-6 text-blue-400" size={72} />
+              <h2 className="mb-4 text-3xl font-bold text-white">Meeting Opened in New Tab</h2>
+              <p className="mb-4 text-slate-300">
+                Your class is now running on the full Jitsi page, not the demo embed, so it should not hit that 5-minute embedded-session cutoff.
+              </p>
+              <p className="mb-8 text-slate-400">
+                If the tab did not open, use the button below to open the Jitsi room again.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-4">
+                <button
+                  onClick={() => window.open(getJitsiRoomUrl(session), '_blank', 'noopener,noreferrer')}
+                  className="rounded-2xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
+                >
+                  Open Jitsi Meeting
+                </button>
+                <a
+                  href={getJitsiRoomUrl(session)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-2xl border border-slate-600 px-6 py-3 font-semibold text-slate-200 transition hover:bg-slate-700"
+                >
+                  Open in Browser
+                </a>
+              </div>
             </div>
           </div>
         )}
