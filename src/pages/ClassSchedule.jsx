@@ -863,10 +863,11 @@ const ClassSchedule = () => {
           {sessions.filter((s) => !isSessionCompleted(s)).map(session => (
             (() => {
               const isStudent = profile.role === 'student';
+              const isTeacher = profile.role === 'teacher';
               const start = new Date(session.scheduled_for);
               const end = getSessionEndTime(session);
               const now = new Date();
-              const canStudentJoinNow = !isStudent || (now >= start && now < end);
+              const canJoinNow = profile.role === 'admin' || ((isStudent || isTeacher) ? (now >= start && now < end) : now < end);
               return (
             <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg hover:shadow-md transition">
               <div className="flex items-center gap-3">
@@ -910,20 +911,20 @@ const ClassSchedule = () => {
                 {session.meeting_type === 'jitsi' ? (
                   <button
                     onClick={() => {
-                      if (!canStudentJoinNow) return;
+                      if (!canJoinNow) return;
                       console.log('Join Class button clicked, session:', session);
                       console.log('Navigating to:', `/live-class/${session.id}`);
                       navigate(`/live-class/${session.id}`);
                     }}
-                    disabled={!canStudentJoinNow}
+                    disabled={!canJoinNow}
                     className={`px-6 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
-                      canStudentJoinNow
+                      canJoinNow
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-slate-300 text-slate-600 cursor-not-allowed'
                     }`}
                   >
                     <Video size={18} />
-                    {canStudentJoinNow ? 'Join Class' : 'Available at Scheduled Time'}
+                    {canJoinNow ? 'Join Class' : 'Available at Scheduled Time'}
                   </button>
                 ) : (
                   <a 
@@ -931,16 +932,16 @@ const ClassSchedule = () => {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => {
-                      if (!canStudentJoinNow) e.preventDefault();
+                      if (!canJoinNow) e.preventDefault();
                     }}
                     className={`px-6 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
-                      canStudentJoinNow
+                      canJoinNow
                         ? 'bg-purple-600 text-white hover:bg-purple-700'
                         : 'bg-slate-300 text-slate-600 pointer-events-none'
                     }`}
                   >
                     <ExternalLink size={18} />
-                    {canStudentJoinNow ? 'Open Link' : 'Available at Scheduled Time'}
+                    {canJoinNow ? 'Open Link' : 'Available at Scheduled Time'}
                   </a>
                 )}
                 {(profile.role === 'teacher' || profile.role === 'admin') && (

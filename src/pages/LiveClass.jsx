@@ -19,6 +19,10 @@ const LiveClass = () => {
   const [loading, setLoading] = useState(true);
   const [meetingStarted, setMeetingStarted] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const isTeacherOwner = profile?.role === 'teacher' && session?.teacher_id === profile?.id;
+  const canJoinStartedMeeting = profile?.role === 'student' || profile?.role === 'admin' || isTeacherOwner;
+  const sessionStartTime = session ? new Date(session.scheduled_for) : null;
+  const isSessionStartReached = sessionStartTime ? new Date() >= sessionStartTime : false;
 
   const getSessionEndTime = (sessionRow) => {
     if (sessionRow?.ends_at) return new Date(sessionRow.ends_at);
@@ -36,7 +40,23 @@ const LiveClass = () => {
     }
   }, [sessionId, profile]);
 
-  const loadSession = async () => {
+  useEffect(() => {
+    if (!profile || meetingStarted || session?.meeting_type !== 'jitsi') {
+      return undefined;
+    }
+
+    if (isTeacherOwner || session?.status === 'live' || session?.status === 'ended') {
+      return undefined;
+    }
+
+    const interval = setInterval(() => {
+      loadSession({ silent: true });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [profile, meetingStarted, session?.meeting_type, session?.status, isTeacherOwner]);
+
+  const loadSession = async ({ silent = false } = {}) => {
     console.log('loadSession called');
     
     if (!profile) {
@@ -95,16 +115,25 @@ const LiveClass = () => {
         return;
       }
 
+      if (data.status === 'ended') {
+        setSession(data);
+        setSessionEnded(true);
+        setLoading(false);
+        return;
+      }
+
       setSession(data);
       setLoading(false);
     } catch (error) {
       console.error('Error loading session:', error);
-      openPopup('Load failed', 'Failed to load class session.', 'error');
-      navigate('/app');
+      if (!silent) {
+        openPopup('Load failed', 'Failed to load class session.', 'error');
+        navigate('/app');
+      }
     }
   };
 
-  const startJitsiMeeting = () => {
+  const startJitsiMeeting = async () => {
     console.log('startJitsiMeeting called');
     console.log('Session:', session);
     console.log('jitsiContainerRef.current:', jitsiContainerRef.current);
@@ -120,6 +149,24 @@ const LiveClass = () => {
     }
     if (new Date() >= getSessionEndTime(session)) {
       openPopup('Session Completed', 'This class session is over.', 'info');
+      return;
+    }
+
+    if (isTeacherOwner) {
+      const { error } = await supabase
+        .from('class_sessions')
+        .update({ status: 'live' })
+        .eq('id', sessionId);
+
+      if (error) {
+        console.error('Error updating session live status:', error);
+        openPopup('Start failed', 'Unable to start the class right now. Please try again.', 'error');
+        return;
+      }
+
+      setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
+    } else if (session.status !== 'live') {
+      openPopup('Please Wait', 'Only the teacher can start this Jitsi class. You can join after the teacher starts it.', 'info');
       return;
     }
 
@@ -349,18 +396,73 @@ const LiveClass = () => {
         {/* Ready to Join Screen */}
         {!meetingStarted && session.meeting_type === 'jitsi' && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
+            <div className="text-center max-w-xl px-6">
               <Video className="mx-auto mb-6 text-blue-400" size={80} />
-              <h2 className="text-white text-2xl font-bold mb-4">Ready to Join?</h2>
-              <p className="text-slate-400 mb-8">
-                Join the live class: {session.title}
-              </p>
-              <button
-                onClick={startJitsiMeeting}
-                className="bg-blue-600 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-blue-700 transition shadow-lg"
-              >
-                Join Class Now
-              </button>
+              {isTeacherOwner ? (
+                <>
+                  <h2 className="text-white text-2xl font-bold mb-4">
+                    {isSessionStartReached ? 'Start Live Class' : 'Class Not Started Yet'}
+                  </h2>
+                  <p className="text-slate-400 mb-3">
+                    {isSessionStartReached
+                      ? `Start the Jitsi meeting for ${session.title}. Students can join once you start it.`
+                      : `You can start this class only at the scheduled time: ${sessionStartTime?.toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                          timeZone: 'Asia/Kolkata'
+                        })}`}
+                  </p>
+                  {!isSessionStartReached && (
+                    <p className="text-slate-500 mb-8">
+                      The start button will be available once the class time begins.
+                    </p>
+                  )}
+                  <button
+                    onClick={startJitsiMeeting}
+                    disabled={!isSessionStartReached}
+                    className={`px-8 py-4 rounded-xl text-lg font-semibold transition shadow-lg ${
+                      isSessionStartReached
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/30'
+                        : 'bg-slate-700 text-slate-300 cursor-not-allowed shadow-none'
+                    }`}
+                  >
+                    {isSessionStartReached ? 'Start Class Now' : 'Available at Scheduled Time'}
+                  </button>
+                </>
+              ) : session.status === 'live' && canJoinStartedMeeting ? (
+                <>
+                  <h2 className="text-white text-2xl font-bold mb-4">Ready to Join?</h2>
+                  <p className="text-slate-400 mb-8">
+                    The teacher has started this live class. You can join now.
+                  </p>
+                  <button
+                    onClick={startJitsiMeeting}
+                    className="bg-blue-600 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-blue-700 transition shadow-lg"
+                  >
+                    Join Class Now
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-white text-2xl font-bold mb-4">Waiting for Teacher</h2>
+                  <p className="text-slate-400 mb-3">
+                    Only the teacher can start this Jitsi meeting.
+                  </p>
+                  <p className="text-slate-500 mb-8">
+                    This page will refresh automatically and let you join once the class starts.
+                  </p>
+                  <button
+                    onClick={() => loadSession()}
+                    className="bg-slate-700 text-white px-6 py-3 rounded-xl text-base font-semibold hover:bg-slate-600 transition"
+                  >
+                    Refresh Status
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
