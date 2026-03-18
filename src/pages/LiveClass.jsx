@@ -138,10 +138,9 @@ const LiveClass = () => {
   const startJitsiMeeting = async () => {
     console.log('startJitsiMeeting called');
     console.log('Session:', session);
-    console.log('jitsiContainerRef.current:', jitsiContainerRef.current);
     
-    if (!session || !jitsiContainerRef.current) {
-      console.error('Missing session or container ref');
+    if (!session) {
+      console.error('Missing session');
       return;
     }
 
@@ -154,6 +153,12 @@ const LiveClass = () => {
       return;
     }
 
+    const meetingWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!meetingWindow) {
+      openPopup('Popup Blocked', 'Please allow popups for this site so the Jitsi meeting can open in a new tab.', 'warning');
+      return;
+    }
+
     if (isTeacherOwner) {
       const { error } = await supabase
         .from('class_sessions')
@@ -161,6 +166,7 @@ const LiveClass = () => {
         .eq('id', sessionId);
 
       if (error) {
+        meetingWindow.close();
         console.error('Error updating session live status:', error);
         openPopup('Start failed', 'Unable to start the class right now. Please try again.', 'error');
         return;
@@ -168,16 +174,12 @@ const LiveClass = () => {
 
       setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
     } else if (session.status !== 'live') {
+      meetingWindow.close();
       openPopup('Please Wait', 'Only the teacher can start this Jitsi class. You can join after the teacher starts it.', 'info');
       return;
     }
 
-    const meetingWindow = window.open(getJitsiRoomUrl(session), '_blank', 'noopener,noreferrer');
-    if (!meetingWindow) {
-      openPopup('Popup Blocked', 'Please allow popups for this site so the Jitsi meeting can open in a new tab.', 'warning');
-      return;
-    }
-
+    meetingWindow.location.href = getJitsiRoomUrl(session);
     setMeetingStarted(true);
   };
 
