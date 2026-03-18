@@ -153,12 +153,6 @@ const LiveClass = () => {
       return;
     }
 
-    const meetingWindow = window.open('', '_blank', 'noopener,noreferrer');
-    if (!meetingWindow) {
-      openPopup('Popup Blocked', 'Please allow popups for this site so the Jitsi meeting can open in a new tab.', 'warning');
-      return;
-    }
-
     if (isTeacherOwner) {
       const { error } = await supabase
         .from('class_sessions')
@@ -166,7 +160,6 @@ const LiveClass = () => {
         .eq('id', sessionId);
 
       if (error) {
-        meetingWindow.close();
         console.error('Error updating session live status:', error);
         openPopup('Start failed', 'Unable to start the class right now. Please try again.', 'error');
         return;
@@ -174,12 +167,11 @@ const LiveClass = () => {
 
       setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
     } else if (session.status !== 'live') {
-      meetingWindow.close();
       openPopup('Please Wait', 'Only the teacher can start this Jitsi class. You can join after the teacher starts it.', 'info');
       return;
     }
 
-    meetingWindow.location.href = getJitsiRoomUrl(session);
+    window.location.assign(getJitsiRoomUrl(session));
     setMeetingStarted(true);
   };
 
@@ -400,11 +392,11 @@ const LiveClass = () => {
                 Your class is now running on the full Jitsi page, not the demo embed, so it should not hit that 5-minute embedded-session cutoff.
               </p>
               <p className="mb-8 text-slate-400">
-                If the tab did not open, use the button below to open the Jitsi room again.
+                If the meeting did not open, use the button below to go to the Jitsi room directly.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-4">
                 <button
-                  onClick={() => window.open(getJitsiRoomUrl(session), '_blank', 'noopener,noreferrer')}
+                  onClick={() => window.location.assign(getJitsiRoomUrl(session))}
                   className="rounded-2xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
                 >
                   Open Jitsi Meeting
