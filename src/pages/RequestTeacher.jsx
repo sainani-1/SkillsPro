@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AlertModal from '../components/AlertModal';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const RequestTeacher = () => {
   const { user, profile, isPremium } = useAuth();
@@ -93,6 +94,12 @@ const RequestTeacher = () => {
         }]);
 
       if (error) throw error;
+
+      await sendAdminNotification({
+        title: 'New Teacher Assignment Request',
+        content: `${profile?.full_name || 'Student'} requested a teacher assignment.`,
+        admin_id: profile?.id || null,
+      });
 
       setAlertModal({
         show: true,

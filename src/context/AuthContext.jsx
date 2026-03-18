@@ -2,22 +2,27 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { supabase } from '../supabaseClient';
 import {
   clearStoredSessionKey,
+  fetchActiveSessionRecord,
+  getOrCreateDeviceId,
   heartbeatSingleSession,
   isCurrentDeviceSessionOwner,
   releaseSingleSession,
   setSingleSessionNotice
 } from '../utils/singleSession';
 import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySession';
+import { reportMultiSessionViolation } from '../utils/sessionSecurity';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [impersonationProfile, setImpersonationProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const conflictStateRef = useRef({ strikes: 0, lastAt: 0 });
 
   const PROFILE_CACHE_KEY = 'profile_cache';
+  const IMPERSONATION_KEY = 'admin_impersonation_profile';
 
   const readProfileCache = () => {
     try {
@@ -44,8 +49,55 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const readImpersonation = () => {
+    try {
+      const stored = sessionStorage.getItem(IMPERSONATION_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const writeImpersonation = (data) => {
+    try {
+      sessionStorage.setItem(IMPERSONATION_KEY, JSON.stringify(data));
+    } catch (error) {
+      // Ignore storage failures.
+    }
+  };
+
+  const clearImpersonation = () => {
+    try {
+      sessionStorage.removeItem(IMPERSONATION_KEY);
+    } catch (error) {
+      // Ignore storage failures.
+    }
+  };
+
   const handleSingleSessionConflict = async (userId) => {
-    setSingleSessionNotice('Your account was logged in from another device.');
+    const latestSession = await fetchActiveSessionRecord(userId);
+    const violation = await reportMultiSessionViolation(
+      profile || { id: userId, role: 'student', full_name: '', email: '' },
+      {
+        existingDeviceLabel: latestSession?.device_label,
+        existingDeviceId: latestSession?.device_id,
+        existingUpdatedAt: latestSession?.updated_at,
+        incomingDeviceLabel: 'Current device',
+        incomingDeviceId: getOrCreateDeviceId(),
+      }
+    );
+    const repeated = Number(violation?.count || 0) >= 2;
+    const oldDevice = latestSession?.device_label || latestSession?.device_id || 'Another active device';
+    setSingleSessionNotice({
+      title: repeated ? 'Repeated Multi-Session Detected' : 'Multi-Session Detected',
+      type: 'warning',
+      inlineMessage: repeated
+        ? 'Two or more sessions detected again. Reported to admin.'
+        : 'Two or more sessions detected. Reported to admin.',
+      message: repeated
+        ? `Two or more active sessions were detected for this account.\n\nLogged-in device: ${oldDevice}\nThis device: Current device\n\nReported to admin again. Your account will be disabled by admin soon if this repeats.`
+        : `Two or more active sessions were detected for this account.\n\nLogged-in device: ${oldDevice}\nThis device: Current device\n\nThis has been reported to admin. You have been logged out from this device.`,
+    });
     clearStoredSessionKey(userId);
     setUser(null);
     setProfile(null);
@@ -62,8 +114,10 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let isMounted = true;
     const cachedProfile = readProfileCache();
+    const cachedImpersonation = readImpersonation();
     if (cachedProfile?.profile) {
       setProfile(cachedProfile.profile);
+      setImpersonationProfile(cachedImpersonation);
       if (cachedProfile.userId) {
         setUser({ id: cachedProfile.userId });
       }
@@ -88,7 +142,9 @@ export const AuthProvider = ({ children }) => {
       if (session?.user) fetchProfile(session.user.id, { background: !!cachedProfile?.profile });
       else {
         setProfile(null);
+        setImpersonationProfile(null);
         clearProfileCache();
+        clearImpersonation();
         setLoading(false);
       }
     };
@@ -100,7 +156,9 @@ export const AuthProvider = ({ children }) => {
       if (session?.user) fetchProfile(session.user.id, { background: true });
       else {
         setProfile(null);
+        setImpersonationProfile(null);
         clearProfileCache();
+        clearImpersonation();
         setLoading(false);
       }
     });
@@ -227,6 +285,14 @@ export const AuthProvider = ({ children }) => {
       
       setProfile(data);
       writeProfileCache({ userId: data.id, profile: data });
+      setImpersonationProfile((prev) => {
+        if (!prev) return null;
+        if (prev.id === data.id) {
+          clearImpersonation();
+          return null;
+        }
+        return prev;
+      });
       writeDailyLoginState({
         userId,
         email: data.email || '',
@@ -235,9 +301,21 @@ export const AuthProvider = ({ children }) => {
       });
     } catch (error) {
       setProfile(null);
+      setImpersonationProfile(null);
     } finally {
       if (!background) setLoading(false);
     }
+  };
+
+  const startImpersonation = (targetProfile) => {
+    if (!targetProfile) return;
+    setImpersonationProfile(targetProfile);
+    writeImpersonation(targetProfile);
+  };
+
+  const stopImpersonation = () => {
+    setImpersonationProfile(null);
+    clearImpersonation();
   };
 
   const signOut = async () => {
@@ -251,7 +329,9 @@ export const AuthProvider = ({ children }) => {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setImpersonationProfile(null);
     clearProfileCache();
+    clearImpersonation();
     clearStoredSessionKey(currentUserId);
     clearDailyLoginState();
     try {
@@ -266,8 +346,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const effectiveProfile = impersonationProfile || profile;
+  const isImpersonating = Boolean(impersonationProfile);
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut, fetchProfile, isPremium }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile: effectiveProfile,
+        realProfile: profile,
+        impersonationProfile,
+        isImpersonating,
+        loading,
+        signOut,
+        fetchProfile,
+        isPremium,
+        startImpersonation,
+        stopImpersonation,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

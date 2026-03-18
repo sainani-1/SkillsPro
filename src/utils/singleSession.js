@@ -35,13 +35,19 @@ export const clearStoredSessionKey = (userId) => {
 };
 
 export const setSingleSessionNotice = (message) => {
-  sessionStorage.setItem(SESSION_NOTICE_KEY, message);
+  const value = typeof message === 'string' ? message : JSON.stringify(message);
+  sessionStorage.setItem(SESSION_NOTICE_KEY, value);
 };
 
 export const takeSingleSessionNotice = () => {
   const message = sessionStorage.getItem(SESSION_NOTICE_KEY);
   if (message) sessionStorage.removeItem(SESSION_NOTICE_KEY);
-  return message;
+  if (!message) return null;
+  try {
+    return JSON.parse(message);
+  } catch {
+    return message;
+  }
 };
 
 export const claimSingleSession = async (userId, options = {}) => {
@@ -53,7 +59,7 @@ export const claimSingleSession = async (userId, options = {}) => {
 
   const { data: currentRow, error: readError } = await supabase
     .from('active_user_sessions')
-    .select('user_id, active_session_key, device_id, updated_at')
+    .select('user_id, active_session_key, device_id, device_label, updated_at')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -75,7 +81,15 @@ export const claimSingleSession = async (userId, options = {}) => {
     currentRow.device_id !== deviceId;
 
   if (otherActiveSession && !forceTakeover) {
-    return { status: 'requires_takeover', reason: 'already_logged_in_elsewhere' };
+    return {
+      status: 'requires_takeover',
+      reason: 'already_logged_in_elsewhere',
+      conflictingSession: currentRow || null,
+      incomingDevice: {
+        device_id: deviceId,
+        device_label: deviceLabel,
+      },
+    };
   }
 
   const nextKey = generateRandomKey();
@@ -113,6 +127,18 @@ export const isCurrentDeviceSessionOwner = async (userId) => {
   if (error) return null;
   if (!data?.active_session_key) return null;
   return data.active_session_key === localKey;
+};
+
+export const fetchActiveSessionRecord = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from('active_user_sessions')
+    .select('user_id, active_session_key, device_id, device_label, updated_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) return null;
+  return data || null;
 };
 
 export const heartbeatSingleSession = async (userId) => {

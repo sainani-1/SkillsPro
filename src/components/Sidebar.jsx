@@ -7,7 +7,7 @@ import { useNotifications } from '../context/NotificationContext';
 import { getChatReadTimes, markChatsAsRead } from '../utils/chatReadState';
 
 const Sidebar = () => {
-  const { profile, signOut } = useAuth();
+  const { profile, realProfile, isImpersonating, stopImpersonation, signOut } = useAuth();
   const { unreadNotifications } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
@@ -180,6 +180,8 @@ const Sidebar = () => {
         if (lastSeen && data) {
           const newCount = data.filter(u => new Date(u.created_at) > new Date(lastSeen)).length;
           setNewUserRegistrations(newCount);
+        } else {
+          setNewUserRegistrations(data?.length || 0);
         }
       } catch (err) {
         setNewUserRegistrations(0);
@@ -254,7 +256,7 @@ const Sidebar = () => {
         }
 
         const { data, error } = await supabase
-          .from('leave_requests')
+          .from('teacher_leaves')
           .select('id, created_at, status')
           .eq('status', 'pending')
           .order('created_at', { ascending: false });
@@ -333,6 +335,23 @@ const Sidebar = () => {
           {shouldShowText && <span className="font-bold text-xl tracking-tight">SkillPro</span>}
         </div>
         {shouldShowText && <p className="text-xs text-slate-400 mt-2 uppercase tracking-wider">{role} Panel</p>}
+        {shouldShowText && isImpersonating && (
+          <div className="mt-3 rounded-lg border border-amber-300/30 bg-amber-400/10 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">
+              Viewing As {profile?.role}
+            </p>
+            <p className="mt-1 text-xs text-amber-100">
+              Admin: {realProfile?.full_name || realProfile?.email || 'Admin'}
+            </p>
+            <button
+              type="button"
+              onClick={stopImpersonation}
+              className="mt-2 rounded-md bg-amber-400 px-2.5 py-1 text-xs font-semibold text-slate-900 hover:bg-amber-300"
+            >
+              Exit User View
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Toggle Button */}
@@ -599,6 +618,19 @@ const Sidebar = () => {
                   {newTeacherRequests > 9 ? '9+' : newTeacherRequests}
                 </span>
               )}
+            </NavLink>
+            <NavLink to="/app/leaves" className={navItemClass} title="Teacher Leaves">
+              <Calendar size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Teacher Leaves</span>}
+              {newLeaveRequests > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {newLeaveRequests > 9 ? '9+' : newLeaveRequests}
+                </span>
+              )}
+            </NavLink>
+            <NavLink to="/app/admin/user-access" className={navItemClass} title="User Access">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">User Access</span>}
             </NavLink>
             <NavLink to="/app/admin/accounts" className={navItemClass} title="Account Management">
               <Lock size={28} />

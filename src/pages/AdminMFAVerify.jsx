@@ -8,6 +8,7 @@ import Toast from "../components/Toast";
 export default function AdminMFAVerify() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [alert, setAlert] = useState({ show: false, title: "", message: "", type: "error" });
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const inputRefs = useRef([]);
@@ -31,6 +32,40 @@ export default function AdminMFAVerify() {
       verify(codeStr);
     }
   }, [codeStr, loading]);
+
+  useEffect(() => {
+    let active = true;
+
+    const ensureSession = async () => {
+      let restoredSession = null;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const { data } = await supabase.auth.getSession();
+        restoredSession = data?.session || null;
+        if (restoredSession?.user) break;
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+
+      if (!active) return;
+
+      if (!restoredSession?.user) {
+        setAlert({
+          show: true,
+          title: "Session Expired",
+          message: "Your admin login session is missing. Please login again.",
+          type: "warning",
+        });
+        setTimeout(() => navigate("/login", { replace: true }), 1200);
+        return;
+      }
+
+      setSessionReady(true);
+    };
+
+    ensureSession();
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
 
   const handleChange = (e, idx) => {
     const val = e.target.value.replace(/\D/g, "").slice(0, 1);
@@ -61,10 +96,14 @@ export default function AdminMFAVerify() {
   };
 
   const verify = async (codeValue) => {
-    if (loading) return;
+    if (loading || !sessionReady) return;
 
     try {
       setLoading(true);
+      const { data: sessionResp } = await supabase.auth.getSession();
+      if (!sessionResp?.session?.user) {
+        throw new Error("Your login session expired. Please login again.");
+      }
       const { data: factors, error: factorError } = await supabase.auth.mfa.listFactors();
       if (factorError) throw factorError;
 
@@ -135,13 +174,13 @@ export default function AdminMFAVerify() {
           ))}
         </div>
         <button
-          disabled={loading || codeStr.length !== 6 || !codeStr.split("").every((d) => d)}
+          disabled={loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d)}
           onClick={() => verify(codeStr)}
           className={`w-full py-3 rounded-lg font-bold text-lg text-white transition-colors ${
-            loading || codeStr.length !== 6 || !codeStr.split("").every((d) => d) ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
+            loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d) ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
           }`}
         >
-          {loading ? "Verifying MFA..." : "Verify MFA"}
+          {loading ? "Verifying MFA..." : !sessionReady ? "Checking Session..." : "Verify MFA"}
         </button>
       </div>
     </div>

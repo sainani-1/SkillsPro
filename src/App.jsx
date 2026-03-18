@@ -96,9 +96,10 @@ import DiscussionForum from './pages/DiscussionForum';
 import SkillBadges from './pages/SkillBadges';
 import AdminWebsiteProtection from './pages/AdminWebsiteProtection';
 import UniversalAssistant from './pages/UniversalAssistant';
+import AdminUserAccess from './pages/AdminUserAccess';
 
 const ProtectedRoute = ({ children }) => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, realProfile, isImpersonating, loading } = useAuth();
   const [supportContactEmail, setSupportContactEmail] = useState('');
 
   useEffect(() => {
@@ -115,13 +116,13 @@ const ProtectedRoute = ({ children }) => {
         if (mounted) setSupportContactEmail('');
       }
     };
-    if (profile?.is_disabled || profile?.is_locked) {
+    if (realProfile?.is_disabled || realProfile?.is_locked) {
       loadSupportEmail();
     }
     return () => {
       mounted = false;
     };
-  }, [profile?.is_disabled, profile?.is_locked]);
+  }, [realProfile?.is_disabled, realProfile?.is_locked]);
 
   if (loading) return <LoadingSpinner message="Initializing your account..." />;
   if (!user) return <Navigate to="/login" />;
@@ -131,7 +132,7 @@ const ProtectedRoute = ({ children }) => {
   if (googleProfileIncomplete) return <Navigate to="/complete-profile" />;
 
   // Check if user is disabled
-  if (profile?.is_disabled) {
+  if (realProfile?.is_disabled && !isImpersonating) {
     return (
       <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-red-950 text-white p-6 flex items-center justify-center relative overflow-hidden">
         <img
@@ -143,7 +144,9 @@ const ProtectedRoute = ({ children }) => {
         <div className="max-w-xl w-full rounded-2xl border border-red-300/30 bg-white/5 backdrop-blur-sm shadow-2xl p-8 text-center space-y-4 relative z-10">
           <h1 className="text-3xl font-bold text-red-300">Account Disabled</h1>
           <p className="text-red-100">
-            Your account has been disabled by admin due to suspicious activity.
+            {realProfile?.disabled_reason
+              ? `Reason: ${realProfile.disabled_reason}`
+              : 'Your account has been disabled by admin due to suspicious activity.'}
           </p>
           <div className="rounded-xl bg-red-500/10 border border-red-300/30 p-4">
             <p className="text-sm text-red-100">Please contact admin/support for reactivation.</p>
@@ -159,14 +162,14 @@ const ProtectedRoute = ({ children }) => {
   }
 
   // Check if user is locked
-  if (profile?.is_locked) {
-    const lockedUntil = new Date(profile.locked_until);
+  if (realProfile?.is_locked && !isImpersonating) {
+    const lockedUntil = new Date(realProfile.locked_until);
     if (lockedUntil > new Date()) {
       return (
         <div className="h-screen flex items-center justify-center bg-red-50 text-red-800 flex-col">
           <div className="text-center space-y-4">
             <h1 className="text-3xl font-bold">Account Locked</h1>
-            <p>Your account has been locked due to suspicious activity detected during an exam.</p>
+            <p>{realProfile?.lock_reason || 'Your account has been locked due to suspicious activity detected during an exam.'}</p>
             <p className="text-sm">Lock expires on: {lockedUntil.toLocaleDateString('en-IN')}</p>
             {supportContactEmail ? (
               <p className="text-sm">Support: <a className="font-semibold underline" href={`mailto:${supportContactEmail}`}>{supportContactEmail}</a></p>
@@ -182,12 +185,12 @@ const ProtectedRoute = ({ children }) => {
 
 const AdminRoute = ({ children }) => {
 
-  const { profile, loading } = useAuth();
+  const { realProfile, loading } = useAuth();
 
   if (loading)
     return <LoadingSpinner message="Loading dashboard..." />;
 
-  if (profile?.role !== "admin")
+  if (realProfile?.role !== "admin")
     return <Navigate to="/app" />;
 
   return <RequireAdminMFA>{children}</RequireAdminMFA>;
@@ -275,6 +278,8 @@ function App() {
           <Route path="teacher/tests" element={<TeacherRoute><TeacherConductTests /></TeacherRoute>} />
           <Route path="admin/student-progress" element={<AdminRoute><StudentProgress /></AdminRoute>} />
           <Route path="admin/student/:studentId" element={<AdminRoute><StudentDetail /></AdminRoute>} />
+          <Route path="admin/user-access" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
+          <Route path="admin/user-access/:userId" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />
           <Route path="admin/teacher-assignment" element={<AdminRoute><TeacherAssignment /></AdminRoute>} />
           <Route path="admin/student-reassignments" element={<AdminRoute><AdminStudentReassignments /></AdminRoute>} />

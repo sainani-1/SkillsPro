@@ -21,8 +21,8 @@ const UserManagementPage = () => {
         setLoading(true);
         const { data } = await supabase
           .from('profiles')
-          .select('id, auth_user_id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate')
-          .order('full_name');
+          .select('id, auth_user_id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate, created_at')
+          .order('created_at', { ascending: false });
         setUsers(data || []);
         setLoading(false);
     };
@@ -33,6 +33,10 @@ const UserManagementPage = () => {
       const matchesRole = roleFilter === 'all' || u.role === roleFilter;
       return matchesSearch && matchesRole;
     });
+    const recentUsersCount = users.filter((u) => {
+      if (!u.created_at) return false;
+      return Date.now() - new Date(u.created_at).getTime() <= 24 * 60 * 60 * 1000;
+    }).length;
 
     const changeUserRole = async (userId, newRole) => {
       if (changingRole) return;
@@ -110,7 +114,10 @@ const UserManagementPage = () => {
         {popupNode}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 rounded-xl text-white">
           <h1 className="text-2xl font-bold mb-1">User Management</h1>
-          <p className="text-blue-100">Students, teachers, and admins with status, premium, and lock info.</p>
+          <p className="text-blue-100">
+            Students, teachers, and admins with status, premium, and lock info.
+            {recentUsersCount > 0 ? ` ${recentUsersCount} new user${recentUsersCount === 1 ? '' : 's'} joined in the last 24 hours.` : ''}
+          </p>
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-sm space-y-4">
@@ -220,7 +227,14 @@ const UserManagementPage = () => {
                           fallbackName={u.full_name || 'User'}
                           className="w-8 h-8 rounded-full object-cover"
                         />
-                        <span className="font-semibold text-slate-800">{u.full_name}</span>
+                        <div className="min-w-0">
+                          <span className="font-semibold text-slate-800">{u.full_name}</span>
+                          {u.created_at && Date.now() - new Date(u.created_at).getTime() <= 24 * 60 * 60 * 1000 ? (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                              New
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{u.email}</td>
                       <td className="px-4 py-3">

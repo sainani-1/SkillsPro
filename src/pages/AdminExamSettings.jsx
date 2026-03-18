@@ -5,6 +5,7 @@ import { Save } from 'lucide-react';
 
 const AdminExamSettings = () => {
   const [minQuestions, setMinQuestions] = useState(25);
+  const [strictProctorLockDays, setStrictProctorLockDays] = useState(60);
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [minQuestionsByCourse, setMinQuestionsByCourse] = useState({});
@@ -23,9 +24,13 @@ const AdminExamSettings = () => {
     const { data, error } = await supabase
       .from('settings')
       .select('key, value')
-      .eq('key', 'min_questions');
+      .in('key', ['min_questions', 'strict_proctor_lock_days']);
     if (error) setMessage('Error loading settings');
-    else if (data && data.length > 0) setMinQuestions(parseInt(data[0].value) || 25);
+    else if (data && data.length > 0) {
+      const settingsMap = Object.fromEntries((data || []).map((row) => [row.key, row.value]));
+      setMinQuestions(parseInt(settingsMap.min_questions, 10) || 25);
+      setStrictProctorLockDays(parseInt(settingsMap.strict_proctor_lock_days, 10) || 60);
+    }
     setLoading(false);
   };
 
@@ -52,7 +57,10 @@ const AdminExamSettings = () => {
     setSaving(true);
     const { error } = await supabase
       .from('settings')
-      .upsert({ key: 'min_questions', value: minQuestions.toString() }, { onConflict: 'key' });
+      .upsert([
+        { key: 'min_questions', value: minQuestions.toString() },
+        { key: 'strict_proctor_lock_days', value: strictProctorLockDays.toString() }
+      ], { onConflict: 'key' });
     if (error) setMessage('Error saving settings');
     else setMessage('Settings saved successfully!');
     setSaving(false);
@@ -106,6 +114,21 @@ const AdminExamSettings = () => {
           <Save size={18} />
           {saving ? 'Saving...' : 'Save Global Setting'}
         </button>
+      </div>
+
+      <div className="mb-6">
+        <label className="block text-sm font-semibold text-slate-700 mb-2">Strict Proctor Lock Days</label>
+        <input
+          type="number"
+          className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={strictProctorLockDays}
+          onChange={e => setStrictProctorLockDays(parseInt(e.target.value, 10) || 1)}
+          min="1"
+          max="365"
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          Used when blank screen or strict proctoring violations lock a student account.
+        </p>
       </div>
 
       <div className="mb-6">

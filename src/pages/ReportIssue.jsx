@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import usePopup from '../hooks/usePopup';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const CATEGORY_OPTIONS = [
   { value: 'technical', label: 'Technical' },
@@ -81,6 +82,11 @@ const ReportIssue = () => {
       };
       const { error } = await supabase.from('issue_reports').insert(payload);
       if (error) throw error;
+      await sendAdminNotification({
+        title: 'New Issue Report',
+        content: `${profile?.full_name || 'User'} submitted an issue report: ${subject}`,
+        admin_id: profile?.id || null,
+      });
       setForm({ category: 'technical', subject: '', description: '' });
       setActiveTab('pending');
       openPopup('Submitted', 'Your issue report has been submitted.', 'success');

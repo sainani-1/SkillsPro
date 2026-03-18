@@ -5,6 +5,12 @@ import usePopup from '../hooks/usePopup';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const isCompletedStatus = (status) => status === 'resolved' || status === 'closed';
+const STATUS_OPTIONS = [
+  { value: 'open', label: 'Open' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'closed', label: 'Closed' },
+];
 
 const AdminIssueReports = () => {
   const { popupNode, openPopup } = usePopup();
@@ -50,7 +56,7 @@ const AdminIssueReports = () => {
     try {
       setSavingId(report.id);
       const trimmedNote = String(report.admin_note || '').trim();
-      const nextStatus = trimmedNote ? 'resolved' : (report.status || 'open');
+      const nextStatus = report.status || 'open';
       const payload = {
         status: nextStatus,
         admin_note: trimmedNote || null,
@@ -60,8 +66,8 @@ const AdminIssueReports = () => {
       const { error } = await supabase.from('issue_reports').update(payload).eq('id', report.id);
       if (error) throw error;
       setEditingId(null);
-      setActiveTab(trimmedNote ? 'completed' : activeTab);
-      openPopup('Saved', trimmedNote ? 'Issue report marked completed.' : 'Issue report updated.', 'success');
+      setActiveTab(isCompletedStatus(nextStatus) ? 'completed' : 'pending');
+      openPopup('Saved', 'Issue report updated.', 'success');
       await loadReports();
     } catch (error) {
       openPopup('Error', error.message || 'Failed to update issue report.', 'error');
@@ -143,16 +149,38 @@ const AdminIssueReports = () => {
                 </button>
               </div>
               {editingId === report.id ? (
-                <textarea
-                  value={report.admin_note || ''}
-                  onChange={(e) => {
-                    const nextNote = e.target.value;
-                    setReports((prev) => prev.map((row) => row.id === report.id ? { ...row, admin_note: nextNote } : row));
-                  }}
-                  rows={4}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-3"
-                  placeholder="Add response. Saving a response will mark this report completed."
-                />
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Status</label>
+                    <select
+                      value={report.status || 'open'}
+                      onChange={(e) => {
+                        const nextStatus = e.target.value;
+                        setReports((prev) => prev.map((row) => row.id === report.id ? { ...row, status: nextStatus } : row));
+                      }}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                    >
+                      {STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Admin Note (Optional)</label>
+                    <textarea
+                      value={report.admin_note || ''}
+                      onChange={(e) => {
+                        const nextNote = e.target.value;
+                        setReports((prev) => prev.map((row) => row.id === report.id ? { ...row, admin_note: nextNote } : row));
+                      }}
+                      rows={4}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-3"
+                      placeholder="Add response if needed."
+                    />
+                  </div>
+                </div>
               ) : (
                 <div className="min-h-24 border border-slate-200 rounded-lg px-3 py-3 bg-slate-50 text-sm text-slate-700 whitespace-pre-wrap">
                   {report.admin_note || 'No admin response yet.'}
@@ -170,7 +198,7 @@ const AdminIssueReports = () => {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60"
                 >
                   <CheckCircle2 size={16} />
-                  {savingId === report.id ? 'Saving...' : 'Save And Complete'}
+                  {savingId === report.id ? 'Saving...' : 'Save'}
                 </button>
               ) : null}
             </div>

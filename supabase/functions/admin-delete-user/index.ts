@@ -8,6 +8,7 @@ const corsHeaders = {
 
 type DeletePayload = {
   user_id?: string;
+  profile_id?: string;
   reason?: string;
 };
 
@@ -71,14 +72,36 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     const body = (await req.json()) as DeletePayload;
-    const userId = String(body.user_id || "").trim();
+    const rawUserId = String(body.user_id || "").trim();
+    const rawProfileId = String(body.profile_id || "").trim();
     const reason = String(body.reason || "Deleted by admin").trim();
-    if (!userId) {
-      return new Response("user_id is required.", { status: 400, headers: corsHeaders });
+    if (!rawUserId && !rawProfileId) {
+      return new Response("user_id or profile_id is required.", { status: 400, headers: corsHeaders });
+    }
+
+    let userId = rawUserId;
+    let profileId = rawProfileId;
+
+    if (!profileId && rawUserId) {
+      const { data: profileByAuth } = await adminClient
+        .from("profiles")
+        .select("id")
+        .eq("auth_user_id", rawUserId)
+        .maybeSingle();
+      profileId = profileByAuth?.id || rawUserId;
+    }
+
+    if (!userId && rawProfileId) {
+      const { data: profileById } = await adminClient
+        .from("profiles")
+        .select("auth_user_id")
+        .eq("id", rawProfileId)
+        .maybeSingle();
+      userId = String(profileById?.auth_user_id || rawProfileId).trim();
     }
 
     const isAdmin = !roleError && !!callerProfile && callerProfile.role === "admin";
-    const isSelfDelete = callerId === userId;
+    const isSelfDelete = callerId === userId || callerId === profileId;
     if (!isAdmin && !isSelfDelete) {
       return new Response("Only admin or account owner can delete this user.", {
         status: 403,
@@ -89,12 +112,12 @@ Deno.serve(async (req: Request) => {
     const { data: targetProfile } = await adminClient
       .from("profiles")
       .select("id, full_name, email, role, phone")
-      .eq("id", userId)
+      .eq("id", profileId)
       .maybeSingle();
 
     if (targetProfile) {
       await adminClient.from("deleted_accounts").insert({
-        user_id: userId,
+        user_id: profileId,
         full_name: targetProfile.full_name || null,
         email: targetProfile.email || null,
         role: targetProfile.role || null,
@@ -109,24 +132,24 @@ Deno.serve(async (req: Request) => {
     const { data: ownedChatGroups } = await adminClient
       .from("chat_groups")
       .select("id")
-      .eq("created_by", userId);
+      .eq("created_by", profileId);
     const ownedGroupIds = (ownedChatGroups || []).map((g) => g.id).filter(Boolean);
 
-    await ignoreMissingTable(() => adminClient.from("chat_members").delete().eq("user_id", userId));
-    await ignoreMissingTable(() => adminClient.from("chat_messages").delete().eq("sender_id", userId));
+    await ignoreMissingTable(() => adminClient.from("chat_members").delete().eq("user_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("chat_messages").delete().eq("sender_id", profileId));
     if (ownedGroupIds.length > 0) {
       await ignoreMissingTable(() => adminClient.from("chat_members").delete().in("group_id", ownedGroupIds));
       await ignoreMissingTable(() => adminClient.from("chat_messages").delete().in("group_id", ownedGroupIds));
     }
-    await ignoreMissingTable(() => adminClient.from("chat_groups").delete().eq("created_by", userId));
-    await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("student_id", userId));
-    await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("teacher_id", userId));
-    await ignoreMissingTable(() => adminClient.from("class_session_participants").delete().eq("student_id", userId));
-    await ignoreMissingTable(() => adminClient.from("exam_submissions").delete().eq("user_id", userId));
-    await ignoreMissingTable(() => adminClient.from("certificates").delete().eq("user_id", userId));
-    await ignoreMissingTable(() => adminClient.from("notification_reads").delete().eq("user_id", userId));
-    await ignoreMissingTable(() => adminClient.from("active_user_sessions").delete().eq("user_id", userId));
-    await ignoreMissingTable(() => adminClient.from("profiles").delete().eq("id", userId));
+    await ignoreMissingTable(() => adminClient.from("chat_groups").delete().eq("created_by", profileId));
+    await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("student_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("teacher_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("class_session_participants").delete().eq("student_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("exam_submissions").delete().eq("user_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("certificates").delete().eq("user_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("notification_reads").delete().eq("user_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("active_user_sessions").delete().eq("user_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("profiles").delete().eq("id", profileId));
 
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId, false);
     if (!deleteError) {

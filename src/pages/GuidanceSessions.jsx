@@ -7,6 +7,7 @@ import { Calendar, MessageSquare, Plus, AlertCircle, CheckCircle, Clock, Link as
 import LoadingSpinner from '../components/LoadingSpinner';
 import useDialog from '../hooks/useDialog.jsx';
 import { trackPremiumEvent } from '../utils/growth';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const GuidanceSessions = () => {
   const { confirm, dialogNode } = useDialog();
@@ -204,6 +205,20 @@ const GuidanceSessions = () => {
     return new Date(session.scheduled_for).getTime() < Date.now();
   };
 
+  const getTeacherName = (teacherId) => {
+    if (!teacherId) return 'Not assigned';
+    const teacher = teachers.find((item) => item.id === teacherId);
+    return teacher?.full_name || teacherId;
+  };
+
+  const getStudentProfile = (studentId) => {
+    if (!studentId) return null;
+    return students.find((item) => item.id === studentId) || null;
+  };
+
+  const getSessionForRequest = (requestId) =>
+    sessions.find((session) => session.request_id === requestId) || null;
+
   const submitRequest = async () => {
     if (!isPremium(profile)) {
       setAlertModal({
@@ -241,6 +256,12 @@ const GuidanceSessions = () => {
         });
         return;
       }
+
+      await sendAdminNotification({
+        title: 'New Mentorship Request',
+        content: `${profile?.full_name || 'Student'} requested mentorship on "${topic.trim()}".`,
+        admin_id: profile?.id || null,
+      });
       
       setTopic('');
       setNotes('');
@@ -297,7 +318,7 @@ const GuidanceSessions = () => {
       setAlertModal({
         show: true,
         title: 'Success',
-        message: 'Teacher assigned successfully!',
+        message: 'Teacher assigned successfully. Session scheduling is optional now and can be done later by admin or teacher.',
         type: 'success'
       });
     } catch (err) {
@@ -587,7 +608,7 @@ const GuidanceSessions = () => {
                             {new Date(sess.scheduled_for).toLocaleString()}
                           </p>
                           {sess.link_active_until && (
-                            <p className="text-xs text-slate-500 mt-1">
+                            <p className="mt-3 text-sm text-slate-600">
                               Link active until: {new Date(sess.link_active_until).toLocaleString()}
                             </p>
                           )}
@@ -780,36 +801,65 @@ const GuidanceSessions = () => {
 
           {/* Assigned Requests (Admin) */}
           <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
-            <h2 className="text-lg font-bold mb-4">Assigned Guidance Requests ({requests.filter(r => r.status === 'assigned').length})</h2>
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Assigned Guidance Requests ({requests.filter(r => r.status === 'assigned').length})</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  After teacher assignment, scheduling is optional. Admin or the assigned teacher can schedule the session later.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                These requests stay here until a session is scheduled.
+              </div>
+            </div>
             {requests.filter(r => r.status === 'assigned').length === 0 ? (
               <p className="text-slate-500 text-sm">No assigned requests</p>
             ) : (
               <div className="space-y-3">
                 {requests.filter(r => r.status === 'assigned').map(req => {
-                  const assignedTeacher = teachers.find(t => t.id === req.assigned_to_teacher_id);
+                  const student = getStudentProfile(req.student_id);
                   return (
-                    <div key={req.id} className="border border-green-200 bg-green-50 rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-3">
+                    <div key={req.id} className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-teal-50 p-5 shadow-sm">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="flex-1">
-                          <h3 className="font-semibold text-slate-900">{req.topic}</h3>
-                          <p className="text-sm text-slate-600 mt-1">
-                            <strong>Student ID:</strong> {req.student_id}
-                          </p>
-                          <p className="text-sm text-slate-600 mt-1">
-                            <strong>Assigned to:</strong> {assignedTeacher?.full_name || req.assigned_to_teacher_id || 'Unknown'}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            Assigned: {req.assigned_at ? new Date(req.assigned_at).toLocaleDateString() : 'N/A'}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-semibold text-slate-900">{req.topic}</h3>
+                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">
+                              Teacher Assigned
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-white/80 bg-white/80 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Student</p>
+                              <p className="mt-1 text-sm font-medium text-slate-800">{student?.full_name || req.student_id}</p>
+                              <p className="text-xs text-slate-500">{student?.email || 'Student email not available'}</p>
+                            </div>
+                            <div className="rounded-xl border border-white/80 bg-white/80 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assigned Teacher</p>
+                              <p className="mt-1 text-sm font-medium text-slate-800">{getTeacherName(req.assigned_to_teacher_id)}</p>
+                              <p className="text-xs text-slate-500">
+                                Assigned on {req.assigned_at ? new Date(req.assigned_at).toLocaleString() : 'N/A'}
+                              </p>
+                            </div>
+                          </div>
+                          {req.notes && (
+                            <div className="mt-3 rounded-xl border border-emerald-100 bg-white/70 p-3 text-sm text-slate-600">
+                              {req.notes}
+                            </div>
+                          )}
                         </div>
-                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Assigned</span>
+                        <div className="flex min-w-[220px] flex-col gap-3">
+                          <button 
+                            onClick={() => openSessionModal(req)}
+                            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+                          >
+                            Schedule Now
+                          </button>
+                          <div className="rounded-xl border border-dashed border-emerald-300 bg-white/80 p-3 text-xs leading-5 text-slate-600">
+                            This is optional. The assigned teacher can also schedule this session later from the teacher panel.
+                          </div>
+                        </div>
                       </div>
-                      <button 
-                        onClick={() => openSessionModal(req)}
-                        className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
-                      >
-                        Schedule Session
-                      </button>
                     </div>
                   );
                 })}
@@ -819,7 +869,17 @@ const GuidanceSessions = () => {
 
           {/* Scheduled Sessions */}
           <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
-            <h2 className="text-lg font-bold mb-4">Scheduled Sessions</h2>
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Scheduled Sessions ({sessions.length})</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Sessions scheduled by admin or teacher will appear here with their meeting link.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                Admin can review the scheduled status and open the session link from here.
+              </div>
+            </div>
             {sessions.length === 0 ? (
               <p className="text-slate-500 text-sm">No sessions scheduled yet</p>
             ) : (
@@ -827,38 +887,53 @@ const GuidanceSessions = () => {
                 {sessions.map(sess => {
                   const relatedRequest = requests.find(r => r.id === sess.request_id);
                   const completed = isSessionCompleted(sess);
-                  const teacher = teachers.find((t) => t.id === sess.teacher_id);
+                  const student = getStudentProfile(relatedRequest?.student_id);
                   return (
-                    <div key={sess.id} className="border border-slate-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between gap-3">
+                    <div key={sess.id} className="rounded-2xl border border-sky-100 bg-gradient-to-r from-sky-50 via-white to-cyan-50 p-5 shadow-sm">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="flex items-start gap-3 flex-1">
                           <Calendar className="text-nani-dark flex-shrink-0 mt-1" size={20} />
                           <div className="flex-1">
-                            <p className="font-semibold text-slate-900">{relatedRequest?.topic || 'Guidance Session'}</p>
-                            <p className="text-sm text-slate-600 mt-1">
-                              <strong>Teacher:</strong> {teacher?.full_name || sess.teacher_id}
-                            </p>
-                            <p className="text-sm text-slate-600 mt-1">
-                              <strong>Student ID:</strong> {relatedRequest?.student_id || 'N/A'}
-                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-lg font-semibold text-slate-900">{relatedRequest?.topic || 'Guidance Session'}</p>
+                              <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">
+                                Scheduled Session
+                              </span>
+                            </div>
+                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                              <div className="rounded-xl border border-white/80 bg-white/80 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Teacher</p>
+                                <p className="mt-1 text-sm font-medium text-slate-800">{getTeacherName(sess.teacher_id)}</p>
+                              </div>
+                              <div className="rounded-xl border border-white/80 bg-white/80 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Student</p>
+                                <p className="mt-1 text-sm font-medium text-slate-800">
+                                  {student?.full_name || relatedRequest?.student_id || 'N/A'}
+                                </p>
+                                <p className="text-xs text-slate-500">{student?.email || 'Student email not available'}</p>
+                              </div>
+                            </div>
                             <p className="text-xs text-slate-500 mt-1">
                               📅 {new Date(sess.scheduled_for).toLocaleString()}
                             </p>
                             {!completed && (
-                              <a 
-                                href={sess.join_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-blue-600 hover:underline break-all mt-2 inline-block"
-                              >
-                                {sess.join_link}
-                              </a>
+                              <div className="mt-3 rounded-xl border border-sky-200 bg-white/80 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Meeting Link</p>
+                                <a 
+                                  href={sess.join_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1 inline-block break-all text-sm text-blue-600 hover:underline"
+                                >
+                                  {sess.join_link}
+                                </a>
+                              </div>
                             )}
                           </div>
                         </div>
                         <div className="flex flex-col gap-2 flex-shrink-0">
                           {completed ? (
-                            <span className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm text-center cursor-not-allowed">
+                            <span className="rounded-xl bg-slate-100 px-4 py-2 text-center text-sm text-slate-600 cursor-not-allowed">
                               Completed
                             </span>
                           ) : (
@@ -866,14 +941,14 @@ const GuidanceSessions = () => {
                               href={sess.join_link}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="bg-nani-dark text-white px-4 py-2 rounded-lg text-sm hover:bg-nani-accent transition-colors text-center"
+                              className="rounded-xl bg-nani-dark px-4 py-2 text-center text-sm text-white transition-colors hover:bg-nani-accent"
                             >
-                              Join Link
+                              Open Meeting Link
                             </a>
                           )}
                           <button
                             onClick={() => deleteSession(sess.id)}
-                            className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                            className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
                           >
                             <Trash2 size={16} /> Delete
                           </button>

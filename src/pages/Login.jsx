@@ -25,6 +25,7 @@ const Login = () => {
   const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
   const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
+  const currentDeviceLabel = 'Web Login';
 
   const applyPendingAvatarIfAny = async (userId, userEmail) => {
     if (!userId || !userEmail) return null;
@@ -71,7 +72,17 @@ const Login = () => {
 
     const notice = takeSingleSessionNotice();
     if (notice) {
-      setInlineNotice(notice);
+      if (typeof notice === 'string') {
+        setInlineNotice(notice);
+      } else {
+        setInlineNotice(String(notice.inlineMessage || ''));
+        setAlertModal({
+          show: true,
+          title: notice.title || 'Session Conflict Detected',
+          message: notice.message || 'More than one active session was detected.',
+          type: notice.type || 'warning'
+        });
+      }
     }
 
     const params = new URLSearchParams(window.location.search);
@@ -125,20 +136,28 @@ const Login = () => {
     if (resolver) resolver(accepted);
   };
 
-  const ensureSingleActiveSession = async (userId) => {
-    const initial = await claimSingleSession(userId, { forceTakeover: false, deviceLabel: 'Web Login' });
+  const ensureSingleActiveSession = async (userId, userProfile = null) => {
+    const initial = await claimSingleSession(userId, { forceTakeover: false, deviceLabel: currentDeviceLabel });
     if (initial.status === 'requires_takeover') {
       const ok = await askTakeoverConfirmation();
-      if (!ok) return { allowed: false, message: 'Login canceled. Account is active on another device.' };
+      if (!ok) {
+        return {
+          allowed: false,
+          message: 'Login canceled. Account is active on another device.',
+        };
+      }
 
-      const takeover = await claimSingleSession(userId, { forceTakeover: true, deviceLabel: 'Web Login' });
+      const takeover = await claimSingleSession(userId, { forceTakeover: true, deviceLabel: currentDeviceLabel });
       if (takeover.status !== 'claimed') {
         return {
           allowed: false,
           message: 'Could not transfer active session. Please try again.'
         };
       }
-      return { allowed: true, message: 'Previous device was logged out. You are now logged in here.' };
+      return {
+        allowed: true,
+        message: 'Previous device was logged out. You are now logged in here.',
+      };
     }
 
     if (initial.status === 'claimed' || initial.status === 'unavailable') {
@@ -152,7 +171,7 @@ const Login = () => {
   const routeGoogleUser = async (oauthUser) => {
     let { data: profile } = await supabase
       .from('profiles')
-      .select('id, role, is_disabled, is_locked, locked_until, terms_accepted, google_profile_completed, auth_provider')
+      .select('id, role, is_disabled, is_locked, locked_until, lock_reason, disabled_reason, terms_accepted, google_profile_completed, auth_provider, full_name, email, phone, session_violation_count')
       .eq('id', oauthUser.id)
       .maybeSingle();
 
@@ -179,7 +198,7 @@ const Login = () => {
         setAlertModal({
           show: true,
           title: 'Account Disabled',
-          message: `Your account has been disabled by an administrator. ${getSupportLine()}`,
+          message: `${profile.disabled_reason ? `Reason: ${profile.disabled_reason}. ` : ''}Your account has been disabled by an administrator. ${getSupportLine()}`,
           type: 'error'
         });
         return;
@@ -193,7 +212,7 @@ const Login = () => {
       setAlertModal({
         show: true,
         title: 'Account Locked',
-        message: `${lockText} ${getSupportLine()}`,
+        message: `${profile.lock_reason ? `Reason: ${profile.lock_reason}. ` : ''}${lockText} ${getSupportLine()}`,
         type: 'error'
       });
       return;
@@ -204,7 +223,7 @@ const Login = () => {
       return;
     }
 
-    const sessionCheck = await ensureSingleActiveSession(oauthUser.id);
+    const sessionCheck = await ensureSingleActiveSession(oauthUser.id, profile);
     if (!sessionCheck.allowed) {
       await supabase.auth.signOut();
       setAlertModal({
@@ -310,7 +329,7 @@ const Login = () => {
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, role, is_disabled, is_locked, locked_until, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject')
+        .select('id, role, is_disabled, is_locked, locked_until, lock_reason, disabled_reason, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject, session_violation_count')
         .eq('id', signInData.user.id)
         .single();
 
@@ -456,7 +475,7 @@ const Login = () => {
               ? (userProfile.deleted_reason
                 ? `Your account was deleted. Reason: ${userProfile.deleted_reason}`
                 : `Your account was deleted. ${getSupportLine()}`)
-            : `Your account has been disabled by an administrator. ${getSupportLine()}`,
+            : `${userProfile.disabled_reason ? `Reason: ${userProfile.disabled_reason}. ` : ''}Your account has been disabled by an administrator. ${getSupportLine()}`,
             type: 'error'
           });
         setLoggingIn(false);
@@ -468,9 +487,13 @@ const Login = () => {
         setAlertModal({
           show: true,
           title: 'Account Locked',
-          message: userProfile.locked_until
-            ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
-            : `Your account is locked. ${getSupportLine()}`,
+          message: userProfile.lock_reason
+            ? `${userProfile.lock_reason}. ${userProfile.locked_until
+              ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
+              : `Your account is locked. ${getSupportLine()}`}`
+            : userProfile.locked_until
+              ? `Your account is locked until ${new Date(userProfile.locked_until).toLocaleDateString('en-IN')}. ${getSupportLine()}`
+              : `Your account is locked. ${getSupportLine()}`,
           type: 'error'
         });
         setLoggingIn(false);
@@ -478,7 +501,7 @@ const Login = () => {
       }
 
       // Check for admin role and MFA
-      const sessionCheck = await ensureSingleActiveSession(signInData.user.id);
+      const sessionCheck = await ensureSingleActiveSession(signInData.user.id, userProfile);
       if (!sessionCheck.allowed) {
         await supabase.auth.signOut();
         setInlineNotice(sessionCheck.message || 'Login blocked. Account is active on another device.');

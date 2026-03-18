@@ -15,6 +15,15 @@ const TeacherLeaves = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [teachers, setTeachers] = useState([]);
+  const [approvalState, setApprovalState] = useState({
+    show: false,
+    leave: null,
+    teacherId: '',
+    comments: '',
+    sessions: [],
+    loadingSessions: false,
+  });
   const [actionModal, setActionModal] = useState({
     show: false,
     leaveId: null,
@@ -28,8 +37,11 @@ const TeacherLeaves = () => {
   useEffect(() => {
     if (profile?.id) {
       loadLeaves();
+      if (profile.role === 'admin') {
+        loadTeachers();
+      }
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.role]);
 
   const pushNotification = async (payload) => {
     try {
@@ -77,6 +89,21 @@ const TeacherLeaves = () => {
     } catch (err) {
       console.error('Error loading leaves:', err);
       setError('Failed to load leave requests');
+    }
+  };
+
+  const loadTeachers = async () => {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('role', 'teacher')
+        .order('full_name');
+
+      if (fetchError) throw fetchError;
+      setTeachers(data || []);
+    } catch (err) {
+      console.error('Error loading teachers:', err);
     }
   };
 
@@ -161,6 +188,128 @@ const TeacherLeaves = () => {
       console.error('Error updating leave:', err);
       setError('Failed to update leave request');
       openPopup('Error', 'Failed to update leave request.', 'error');
+    }
+  };
+
+  const closeApprovalModal = () => {
+    setApprovalState({
+      show: false,
+      leave: null,
+      teacherId: '',
+      comments: '',
+      sessions: [],
+      loadingSessions: false,
+    });
+  };
+
+  const openApproveModal = async (leave) => {
+    setApprovalState({
+      show: true,
+      leave,
+      teacherId: '',
+      comments: '',
+      sessions: [],
+      loadingSessions: true,
+    });
+
+    try {
+      const startIso = new Date(`${leave.start_date}T00:00:00`).toISOString();
+      const endIso = new Date(`${leave.end_date}T23:59:59`).toISOString();
+      const { data, error: fetchError } = await supabase
+        .from('class_sessions')
+        .select('id, title, scheduled_for')
+        .eq('teacher_id', leave.teacher_id)
+        .gte('scheduled_for', startIso)
+        .lte('scheduled_for', endIso)
+        .order('scheduled_for', { ascending: true });
+
+      if (fetchError) throw fetchError;
+      setApprovalState((prev) => ({ ...prev, sessions: data || [], loadingSessions: false }));
+    } catch (err) {
+      console.error('Error loading sessions for leave approval:', err);
+      setApprovalState((prev) => ({ ...prev, sessions: [], loadingSessions: false }));
+      openPopup('Warning', 'Could not load scheduled classes for this leave. You can still approve it.', 'warning');
+    }
+  };
+
+  const approveWithReassignment = async () => {
+    const leave = approvalState.leave;
+    if (!leave) return;
+
+    if (approvalState.sessions.length > 0 && !approvalState.teacherId) {
+      openPopup('Validation', 'Select a teacher to reassign the scheduled classes.', 'warning');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+
+      const selectedReplacement = teachers.find((teacher) => teacher.id === approvalState.teacherId) || null;
+      const adminCommentParts = [];
+      if (approvalState.comments.trim()) adminCommentParts.push(approvalState.comments.trim());
+      if (selectedReplacement) adminCommentParts.push(`Classes reassigned to ${selectedReplacement.full_name}`);
+      if (!selectedReplacement && approvalState.sessions.length === 0) {
+        adminCommentParts.push('Approved. No scheduled classes required reassignment.');
+      }
+
+      const { error: leaveError } = await supabase
+        .from('teacher_leaves')
+        .update({
+          status: 'approved',
+          admin_comments: adminCommentParts.join(' | ') || null,
+          decided_at: new Date().toISOString(),
+          decided_by: profile.id
+        })
+        .eq('id', leave.id);
+
+      if (leaveError) throw leaveError;
+
+      if (approvalState.sessions.length > 0 && approvalState.teacherId) {
+        const reassignments = approvalState.sessions.map((session) => ({
+          session_id: session.id,
+          original_teacher_id: leave.teacher_id,
+          reassigned_to_teacher_id: approvalState.teacherId,
+          leave_id: leave.id,
+          reason: `Leave approved for ${leave.start_date} to ${leave.end_date}`
+        }));
+
+        const { error: reassignError } = await supabase
+          .from('session_reassignments')
+          .insert(reassignments);
+
+        if (reassignError) throw reassignError;
+
+        const { error: updateSessionsError } = await supabase
+          .from('class_sessions')
+          .update({ teacher_id: approvalState.teacherId })
+          .in('id', approvalState.sessions.map((session) => session.id));
+
+        if (updateSessionsError) throw updateSessionsError;
+      }
+
+      if (leave.teacher_id) {
+        await pushNotification({
+          title: 'Leave Request Updated',
+          content: selectedReplacement
+            ? `Your leave request is approved. Scheduled classes were reassigned to ${selectedReplacement.full_name}.`
+            : 'Your leave request is approved.',
+          type: 'success',
+          target_role: 'teacher',
+          target_user_id: leave.teacher_id,
+          admin_id: profile?.id || null,
+        });
+      }
+
+      closeApprovalModal();
+      openPopup('Approved', 'Leave approved successfully.', 'success');
+      await loadLeaves();
+    } catch (err) {
+      console.error('Error approving leave with reassignment:', err);
+      setError(err.message || 'Failed to approve leave request');
+      openPopup('Error', err.message || 'Failed to approve leave request.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -383,7 +532,7 @@ const TeacherLeaves = () => {
                 {profile?.role === 'admin' && leave.status === 'pending' && (
                   <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
                     <button 
-                      onClick={() => openActionModal(leave.id, 'approved')}
+                      onClick={() => openApproveModal(leave)}
                       className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
                     >
                       <Check size={16} /> Approve
@@ -443,6 +592,101 @@ const TeacherLeaves = () => {
                 className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {approvalState.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4">
+            <h3 className="text-lg font-bold mb-2">Approve Leave</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              Select who should handle this teacher's scheduled classes during the approved leave period.
+            </p>
+
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-800">
+                  {approvalState.leave?.teacher?.full_name || 'Teacher'}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {approvalState.leave?.start_date} to {approvalState.leave?.end_date}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Reassign Teacher</label>
+                <select
+                  value={approvalState.teacherId}
+                  onChange={(e) => setApprovalState((prev) => ({ ...prev, teacherId: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  disabled={approvalState.loadingSessions}
+                >
+                  <option value="">
+                    {approvalState.sessions.length > 0 ? 'Select teacher...' : 'No reassignment needed'}
+                  </option>
+                  {teachers
+                    .filter((teacher) => teacher.id !== approvalState.leave?.teacher_id)
+                    .map((teacher) => (
+                      <option key={teacher.id} value={teacher.id}>
+                        {teacher.full_name} {teacher.email ? `(${teacher.email})` : ''}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {approvalState.sessions.length > 0
+                    ? `Required because ${approvalState.sessions.length} scheduled class(es) fall inside the leave dates.`
+                    : 'This leave has no scheduled classes in the selected period, so reassignment is optional.'}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Admin Comments (Optional)</label>
+                <textarea
+                  value={approvalState.comments}
+                  onChange={(e) => setApprovalState((prev) => ({ ...prev, comments: e.target.value }))}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Add any note for the teacher..."
+                />
+              </div>
+
+              <div className="rounded-lg border border-slate-200 p-4 max-h-56 overflow-y-auto">
+                <p className="text-sm font-semibold text-slate-800 mb-2">Affected Scheduled Classes</p>
+                {approvalState.loadingSessions ? (
+                  <p className="text-sm text-slate-500">Loading scheduled classes...</p>
+                ) : approvalState.sessions.length === 0 ? (
+                  <p className="text-sm text-slate-500">No scheduled classes found in this leave period.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {approvalState.sessions.map((session) => (
+                      <div key={session.id} className="rounded border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-sm font-medium text-slate-800">{session.title || 'Class Session'}</p>
+                        <p className="text-xs text-slate-500">
+                          {new Date(session.scheduled_for).toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={closeApprovalModal}
+                className="flex-1 bg-slate-200 text-slate-700 py-2 rounded-lg hover:bg-slate-300 transition-colors"
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={approveWithReassignment}
+                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60"
+                disabled={loading || approvalState.loadingSessions}
+              >
+                {loading ? 'Approving...' : 'Approve Leave'}
               </button>
             </div>
           </div>

@@ -120,6 +120,8 @@ const Layout = () => {
       { label: 'Assign Teachers', path: '/app/admin/teacher-assignment' },
       { label: 'Student Reassignments', path: '/app/admin/student-reassignments' },
       { label: 'Teacher Requests', path: '/app/admin/teacher-requests' },
+      { label: 'Teacher Leaves', path: '/app/leaves' },
+      { label: 'User Access', path: '/app/admin/user-access' },
       { label: 'Account Management', path: '/app/admin/accounts' },
       { label: 'Post Notifications', path: '/app/admin/notifications' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
@@ -264,23 +266,23 @@ const Layout = () => {
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'leave_requests' },
+        { event: 'INSERT', schema: 'public', table: 'teacher_leaves' },
         (payload) => {
           if (profile.role !== 'admin') return;
           const row = payload?.new || {};
-          const eventKey = `leave_requests:insert:${row.id}:${row.created_at || ''}`;
+          const eventKey = `teacher_leaves:insert:${row.id}:${row.created_at || ''}`;
           if (markSeen(eventKey)) return;
           pushActivityToast('New leave request submitted.');
         }
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'leave_requests' },
+        { event: 'UPDATE', schema: 'public', table: 'teacher_leaves' },
         (payload) => {
           if (profile.role !== 'teacher') return;
           const row = payload?.new || {};
           if (row.teacher_id !== profile.id) return;
-          const eventKey = `leave_requests:update:${row.id}:${row.updated_at || ''}`;
+          const eventKey = `teacher_leaves:update:${row.id}:${row.updated_at || ''}`;
           if (markSeen(eventKey)) return;
           if (row.status) pushActivityToast(`Leave status: ${String(row.status)}`);
         }

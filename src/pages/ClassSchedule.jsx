@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Plus, Clock, Video, ExternalLink, Trash2, X } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const ClassSchedule = () => {
   const { profile, isPremium } = useAuth();
@@ -40,12 +41,13 @@ const ClassSchedule = () => {
   };
 
   useEffect(() => {
+    if (!profile?.id || !profile?.role) return;
     loadSessions();
     loadStudents();
-    if (profile?.role === 'admin') {
+    if (profile.role === 'admin') {
       loadTeachers();
     }
-  }, []);
+  }, [profile?.id, profile?.role]);
 
   // Auto refresh every 1 minute:
   // - refresh sessions so newly scheduled classes appear automatically
@@ -68,18 +70,36 @@ const ClassSchedule = () => {
   };
 
   const loadStudents = async () => {
-    const { data } = await supabase
+    let query = supabase
       .from('profiles')
       .select('id, full_name, email')
-      .eq('role', 'student')
-      .order('full_name');
+      .eq('role', 'student');
+
+    if (profile?.role === 'teacher') {
+      query = query.eq('assigned_teacher_id', profile.id);
+    }
+
+    const { data } = await query.order('full_name');
     setStudents(data || []);
   };
 
   const loadSessions = async () => {
-    const query = profile.role === 'teacher' || profile.role === 'admin'
-      ? supabase.from('class_sessions').select('*, class_session_participants(student_id, profiles(full_name))')
-      : supabase.from('class_sessions').select('*, class_session_participants!inner(student_id)').eq('class_session_participants.student_id', profile.id);
+    let query;
+    if (profile?.role === 'admin') {
+      query = supabase
+        .from('class_sessions')
+        .select('*, class_session_participants(student_id, profiles(full_name))');
+    } else if (profile?.role === 'teacher') {
+      query = supabase
+        .from('class_sessions')
+        .select('*, class_session_participants(student_id, profiles(full_name))')
+        .eq('teacher_id', profile.id);
+    } else {
+      query = supabase
+        .from('class_sessions')
+        .select('*, class_session_participants!inner(student_id)')
+        .eq('class_session_participants.student_id', profile.id);
+    }
     
     const { data } = await query.order('scheduled_for', { ascending: false });
     setSessions(data || []);
@@ -305,6 +325,14 @@ const ClassSchedule = () => {
     } catch (notificationError) {
       console.error('Failed to create class notifications:', notificationError);
     }
+
+    if (profile?.role === 'teacher') {
+      await sendAdminNotification({
+        title: 'New Class Scheduled',
+        content: `${profile?.full_name || 'Teacher'} scheduled "${title}" for ${new Date(sessionData.scheduled_for).toLocaleString('en-IN')}.`,
+        admin_id: profile?.id || null,
+      });
+    }
     
     setTitle('');
     setScheduledAt('');
@@ -466,7 +494,9 @@ const ClassSchedule = () => {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Select Students (Optional - Leave empty for all)</label>
+              <label className="block text-sm font-medium mb-2">
+                Select Students (Optional - Leave empty for all assigned students)
+              </label>
               <div className="border rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -505,7 +535,7 @@ const ClassSchedule = () => {
                 </div>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {selectedStudents.length === 0 ? 'All students can join' : `${selectedStudents.length} student(s) selected`}
+                {selectedStudents.length === 0 ? 'All assigned students can join' : `${selectedStudents.length} student(s) selected`}
               </p>
             </div>
             <div className="flex gap-2">

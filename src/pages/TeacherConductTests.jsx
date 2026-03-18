@@ -4,6 +4,7 @@ import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { Save, Plus, Trash2, BookOpen, Users, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const makeEmptyQuestion = (examId, orderIndex = 0) => ({
   exam_id: examId,
@@ -147,6 +148,7 @@ function TeacherConductTests() {
         setCoursesById({});
         setExamsByCourseId({});
         setQuestionsByExamId({});
+        setSubmissionsByExamId({});
         return;
       }
 
@@ -158,18 +160,9 @@ function TeacherConductTests() {
 
       const enrollList = enrollmentRows || [];
       setEnrollments(enrollList);
-      const courseIds = Array.from(new Set(enrollList.map((r) => r.course_id).filter(Boolean)));
-      if (courseIds.length === 0) {
-        setCoursesById({});
-        setExamsByCourseId({});
-        setQuestionsByExamId({});
-        return;
-      }
-
       const { data: courseRows, error: courseErr } = await supabase
         .from('courses')
         .select('id, title, category')
-        .in('id', courseIds)
         .order('title');
       if (courseErr) throw courseErr;
 
@@ -178,6 +171,14 @@ function TeacherConductTests() {
         courseMap[c.id] = c;
       });
       setCoursesById(courseMap);
+
+      const courseIds = Array.from(new Set((courseRows || []).map((row) => row.id).filter(Boolean)));
+      if (courseIds.length === 0) {
+        setExamsByCourseId({});
+        setQuestionsByExamId({});
+        setSubmissionsByExamId({});
+        return;
+      }
 
       const { data: examRows, error: examErr } = await supabase
         .from('exams')
@@ -447,6 +448,12 @@ function TeacherConductTests() {
       }
 
       await loadData();
+
+      await sendAdminNotification({
+        title: 'Teacher Published Test',
+        content: `${profile?.full_name || 'Teacher'} published ${testName?.trim() ? `"${testName.trim()}"` : 'a test'} for assigned students.`,
+        admin_id: profile?.id || null,
+      });
     } catch (err) {
       setAlertModal({
         show: true,
@@ -517,7 +524,7 @@ function TeacherConductTests() {
             <p className="text-sm text-slate-500">Select a student to start creating a test.</p>
           ) : availableCourses.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No reusable test bucket is available yet. Enroll any one assigned student in any course once so teacher tests can be published for all assigned students.
+              No course buckets are available yet. Add at least one course in admin panel so teacher tests can be created for assigned students.
             </p>
           ) : (
             <div className="space-y-4">

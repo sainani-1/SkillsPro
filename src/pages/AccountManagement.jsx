@@ -5,10 +5,12 @@ import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
 import { logAdminActivity } from '../utils/adminActivityLogger';
+import { useNavigate } from 'react-router-dom';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
 const AccountManagement = () => {
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all'); // all, locked, premium, no-premium
@@ -17,6 +19,7 @@ const AccountManagement = () => {
   const [action, setAction] = useState(''); // unlock, grant-premium, revoke-premium, disable, delete
   const [premiumDate, setPremiumDate] = useState('');
   const [premiumReason, setPremiumReason] = useState('');
+  const [actionReason, setActionReason] = useState('');
   const [grantLifetimePremium, setGrantLifetimePremium] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(''); // For double confirmation of delete
   const [loading, setLoading] = useState(false);
@@ -33,8 +36,9 @@ const AccountManagement = () => {
   const loadUsers = async () => {
     const { data } = await supabase
       .from('profiles')
-      .select('*')
-      .order('full_name');
+      .select('*, auth_user_id')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
     setUsers(data || []);
   };
 
@@ -67,12 +71,16 @@ const AccountManagement = () => {
       let successMsg = '';
 
       if (action === 'unlock') {
-        updatePayload = { is_locked: false, locked_until: null };
+        updatePayload = { is_locked: false, locked_until: null, lock_reason: null };
         successMsg = '✅ Account unlocked successfully!';
       } else if (action === 'lock') {
         const lockedUntil = new Date();
         lockedUntil.setDate(lockedUntil.getDate() + 60);
-        updatePayload = { is_locked: true, locked_until: lockedUntil.toISOString() };
+        updatePayload = {
+          is_locked: true,
+          locked_until: lockedUntil.toISOString(),
+          lock_reason: actionReason.trim() || 'Account locked by admin.'
+        };
         successMsg = '✅ Account locked for 60 days.';
       } else if (action === 'grant-premium') {
         if (!grantLifetimePremium && !premiumDate) {
@@ -103,21 +111,63 @@ const AccountManagement = () => {
         updatePayload = { premium_until: null };
         successMsg = 'Premium revoked successfully.';
       } else if (action === 'disable') {
-        updatePayload = { is_disabled: true };
+        updatePayload = {
+          is_disabled: true,
+          disabled_reason: actionReason.trim() || 'Account disabled by admin.'
+        };
         successMsg = '✅ Account disabled! User cannot login.';
       } else if (action === 'enable') {
-        updatePayload = { is_disabled: false };
+        updatePayload = { is_disabled: false, disabled_reason: null };
         successMsg = '✅ Account enabled!';
       } else if (action === 'delete') {
-        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
-          body: {
-            user_id: selectedUser.id,
-            reason: 'Deleted by admin from Account Management (' + (selectedUser.email || selectedUser.id) + ')'
-          }
-        });
+        const deleteReason = 'Deleted by admin from Account Management (' + (selectedUser.email || selectedUser.id) + ')';
+        let fnData = null;
+        let fnError = null;
+        try {
+          const result = await supabase.functions.invoke('admin-delete-user', {
+            body: {
+              user_id: selectedUser.auth_user_id || selectedUser.id,
+              profile_id: selectedUser.id,
+              reason: deleteReason
+            }
+          });
+          fnData = result.data;
+          fnError = result.error;
+        } catch (invokeError) {
+          fnError = invokeError;
+        }
 
         if (fnError) {
-          throw new Error(fnError.message || 'Failed to delete user');
+          const deletedAt = new Date().toISOString();
+          const { error: archiveError } = await supabase.from('deleted_accounts').insert({
+            user_id: selectedUser.id,
+            full_name: selectedUser.full_name || null,
+            email: selectedUser.email || null,
+            role: selectedUser.role || null,
+            phone: selectedUser.phone || null,
+            reason: `${deleteReason}. Fallback soft delete used because Edge Function was unreachable.`,
+            deleted_by: adminUser?.id || null,
+            deleted_at: deletedAt,
+          });
+          if (archiveError) throw archiveError;
+
+          const { error: softDeleteError } = await supabase
+            .from('profiles')
+            .update({
+              is_disabled: true,
+              disabled_reason: 'Account deleted by admin (fallback soft delete).',
+              deleted_at: deletedAt,
+              deleted_reason: deleteReason,
+              deleted_by: adminUser?.id || null,
+            })
+            .eq('id', selectedUser.id);
+
+          if (softDeleteError) throw softDeleteError;
+
+          fnData = {
+            deleted: false,
+            message: 'Edge Function was unreachable, so the user was soft-deleted and disabled instead.',
+          };
         }
 
         setAlertModal({
@@ -152,7 +202,7 @@ const AccountManagement = () => {
         .from('profiles')
         .update(updatePayload)
         .eq('id', selectedUser.id)
-        .select('id, full_name, email, role, is_locked, locked_until, premium_until, avatar_url, is_disabled')
+        .select('id, full_name, email, role, is_locked, locked_until, lock_reason, premium_until, avatar_url, is_disabled, disabled_reason')
         .single();
 
       if (error) throw error;
@@ -195,7 +245,12 @@ const AccountManagement = () => {
           user_email: selectedUser.email || null,
           role: selectedUser.role || null,
           payload: updatePayload,
-          reason: action === 'grant-premium' ? premiumReason.trim() : null,
+          reason:
+            action === 'grant-premium'
+              ? premiumReason.trim()
+              : ['lock', 'disable'].includes(action)
+                ? actionReason.trim() || null
+                : null,
         },
       });
       setSelectedUser(data);
@@ -203,6 +258,7 @@ const AccountManagement = () => {
       setShowModal(false);
       setPremiumDate('');
       setPremiumReason('');
+      setActionReason('');
       setGrantLifetimePremium(false);
       setDeleteConfirm('');
     } catch (error) {
@@ -223,6 +279,7 @@ const AccountManagement = () => {
     setAction(actionType);
     setPremiumDate('');
     setPremiumReason('');
+    setActionReason('');
     setGrantLifetimePremium(false);
     setDeleteConfirm('');
     setShowModal(true);
@@ -305,12 +362,17 @@ const AccountManagement = () => {
                     {user.is_locked ? (
                       <div className="flex items-center gap-2">
                         <Lock size={16} className="text-red-600" />
-                        <span className="text-sm text-red-600 font-semibold">Locked</span>
-                        {user.locked_until && (
-                          <span className="text-xs text-red-500">
-                            until {new Date(user.locked_until).toLocaleDateString('en-IN')}
-                          </span>
-                        )}
+                        <div>
+                          <span className="text-sm text-red-600 font-semibold">Locked</span>
+                          {user.locked_until && (
+                            <span className="ml-2 text-xs text-red-500">
+                              until {new Date(user.locked_until).toLocaleDateString('en-IN')}
+                            </span>
+                          )}
+                          {user.lock_reason ? (
+                            <p className="mt-1 text-xs text-red-500 max-w-xs">{user.lock_reason}</p>
+                          ) : null}
+                        </div>
                       </div>
                     ) : (
                       <span className="text-sm text-green-600 font-semibold">Active</span>
@@ -332,9 +394,14 @@ const AccountManagement = () => {
                   </td>
                   <td className="px-6 py-4">
                     {user.is_disabled ? (
-                      <span className="text-xs font-semibold px-2 py-1 bg-red-100 text-red-700 rounded">
-                        Disabled
-                      </span>
+                      <div>
+                        <span className="text-xs font-semibold px-2 py-1 bg-red-100 text-red-700 rounded">
+                          Disabled
+                        </span>
+                        {user.disabled_reason ? (
+                          <p className="mt-1 text-xs text-red-500 max-w-xs">{user.disabled_reason}</p>
+                        ) : null}
+                      </div>
                     ) : (
                       <span className="text-xs font-semibold px-2 py-1 bg-green-100 text-green-700 rounded">
                         Active
@@ -387,6 +454,13 @@ const AccountManagement = () => {
                           <AlertTriangle size={14} /> Disable
                         </button>
                       )}
+                      <button
+                        onClick={() => navigate(`/app/admin/user-access/${user.id}`)}
+                        className="px-3 py-1 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 text-xs font-semibold"
+                        title="Open admin access view"
+                      >
+                        Access
+                      </button>
                       <button
                         onClick={() => openModal(user, 'delete')}
                         className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs font-semibold flex items-center gap-1"
@@ -476,6 +550,12 @@ const AccountManagement = () => {
             {action === 'lock' && (
               <div className="mb-4 p-3 bg-red-50 rounded text-sm text-red-800">
                 <p>This will lock the account for 60 days and block all access.</p>
+                <textarea
+                  value={actionReason}
+                  onChange={e => setActionReason(e.target.value)}
+                  className="mt-3 w-full border rounded-lg p-2 min-h-[84px] bg-white text-slate-700"
+                  placeholder="Optional reason shown to the user"
+                />
               </div>
             )}
 
@@ -489,6 +569,12 @@ const AccountManagement = () => {
               <div className="mb-4 p-3 bg-orange-50 rounded text-sm text-orange-800">
                 <p className="font-medium">This account will be disabled.</p>
                 <p className="text-xs mt-1">The user cannot login until you enable it again.</p>
+                <textarea
+                  value={actionReason}
+                  onChange={e => setActionReason(e.target.value)}
+                  className="mt-3 w-full border rounded-lg p-2 min-h-[84px] bg-white text-slate-700"
+                  placeholder="Optional reason shown to the user"
+                />
               </div>
             )}
 
@@ -527,6 +613,7 @@ const AccountManagement = () => {
                   setDeleteConfirm('');
                   setPremiumDate('');
                   setPremiumReason('');
+                  setActionReason('');
                   setGrantLifetimePremium(false);
                 }}
                 className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
