@@ -95,14 +95,7 @@ export const NotificationProvider = ({ children }) => {
       }
 
       const dbNotificationIds = visibleNotifications.map((notification) => notification.id).filter(isUuid);
-      const readTrackingKey = `notificationReadsEnabled_${profile.id}`;
-      const readTrackingEnabled = localStorage.getItem(readTrackingKey) !== 'false';
       const localReadIds = getLocalNotificationReadIds(profile.id);
-
-      if (!readTrackingEnabled) {
-        setUnreadNotifications(visibleNotifications.filter((notification) => !localReadIds.has(notification.id)).length);
-        return;
-      }
 
       let reads = [];
       let readError = null;
@@ -117,7 +110,6 @@ export const NotificationProvider = ({ children }) => {
       }
 
       if (readError) {
-        localStorage.setItem(readTrackingKey, 'false');
         setUnreadNotifications(visibleNotifications.filter((notification) => !localReadIds.has(notification.id)).length);
         return;
       }

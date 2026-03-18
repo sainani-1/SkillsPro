@@ -188,13 +188,11 @@ export default function Notifications() {
 
       const notificationIds = finalNotifs.map((n) => n.id);
       const dbNotificationIds = notificationIds.filter(isUuid);
-      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
-      let readTrackingEnabled = localStorage.getItem(readTrackingKey) !== 'false';
       const localReadIds = getLocalNotificationReadIds(user.id);
 
       // Fetch read receipts for this user only (best-effort)
       let readIds = new Set(localReadIds);
-      if (readTrackingEnabled && dbNotificationIds.length > 0) {
+      if (dbNotificationIds.length > 0) {
         try {
           const { data: reads, error: readError } = await supabase
             .from('notification_reads')
@@ -206,14 +204,9 @@ export default function Notifications() {
             const dbReadIds = reads?.map((r) => r.notification_id) || [];
             readIds = new Set([...readIds, ...dbReadIds]);
             saveLocalNotificationReadIds(user.id, readIds);
-          } else {
-            readTrackingEnabled = false;
-            localStorage.setItem(readTrackingKey, 'false');
           }
         } catch (readErr) {
-          // Keep notifications usable even when read-receipt table is blocked.
-          readTrackingEnabled = false;
-          localStorage.setItem(readTrackingKey, 'false');
+          // Keep notifications usable even when read-receipt persistence is temporarily unavailable.
         }
       }
 
@@ -249,32 +242,17 @@ export default function Notifications() {
         )
       );
 
-      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
-      if (localStorage.getItem(readTrackingKey) === 'false') return;
       if (!isUuid(notificationId)) return;
 
-      // Check if already marked as read (best-effort)
-      const { data: existingRead } = await supabase
+      await supabase
         .from('notification_reads')
-        .select('id')
-        .eq('notification_id', notificationId)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (!existingRead) {
-        const { error: insertError } = await supabase
-          .from('notification_reads')
-          .insert({
+        .upsert(
+          {
             notification_id: notificationId,
             user_id: user.id,
-          });
-
-        if (insertError) {
-          localStorage.setItem(readTrackingKey, 'false');
-          return;
-        }
-      }
-
+          },
+          { onConflict: 'notification_id,user_id' }
+        );
     } catch (err) {
       // Keep silent here; notification content should remain usable even if read-write is blocked.
     }
@@ -299,20 +277,13 @@ export default function Notifications() {
       saveLocalNotificationReadIds(user.id, localReadIds);
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
 
-      const readTrackingKey = `notificationReadsEnabled_${user.id}`;
-      if (localStorage.getItem(readTrackingKey) === 'false') return;
-
       const unreadDbIds = unread.map((n) => n.id).filter(isUuid);
       if (!unreadDbIds.length) return;
 
       const rows = unreadDbIds.map((id) => ({ notification_id: id, user_id: user.id }));
-      const { error } = await supabase
+      await supabase
         .from('notification_reads')
         .upsert(rows, { onConflict: 'notification_id,user_id' });
-
-      if (error) {
-        localStorage.setItem(readTrackingKey, 'false');
-      }
     } catch (err) {
       // Keep UI responsive even when read tracking write fails.
     }

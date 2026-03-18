@@ -711,10 +711,10 @@ const Login = () => {
             <div className="px-7 py-6 space-y-5">
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-slate-800 text-sm font-medium">
-                  Continue here and securely end the previous session?
+                  Logout there and login here?
                 </p>
                 <p className="text-xs text-slate-600 mt-2">
-                  If you choose continue, the other device will be logged out immediately.
+                  If you continue, the other device will be logged out immediately.
                 </p>
               </div>
               <p className="text-xs text-slate-500">
