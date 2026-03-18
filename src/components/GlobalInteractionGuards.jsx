@@ -90,7 +90,16 @@ const GlobalInteractionGuards = () => {
 
     const blockRestrictedShortcuts = (event) => {
       const key = String(event.key || '').toLowerCase();
+      const code = String(event.code || '').toLowerCase();
       const usesModifier = event.ctrlKey || event.metaKey;
+      const isMetaPressed =
+        event.metaKey ||
+        key === 'meta' ||
+        key === 'os' ||
+        code === 'metaleft' ||
+        code === 'metaright' ||
+        code === 'osleft' ||
+        code === 'osright';
       const isF12 = settings.disable_f12_global && key === 'f12';
       const isInspectShortcut =
         settings.disable_ctrl_shift_i_global && usesModifier && event.shiftKey && key === 'i';
@@ -99,7 +108,8 @@ const GlobalInteractionGuards = () => {
       const isElementPickerShortcut =
         settings.disable_ctrl_shift_c_global && usesModifier && event.shiftKey && key === 'c';
       const isViewSourceShortcut = settings.disable_ctrl_u_global && usesModifier && key === 'u';
-      const isGameBarShortcut = settings.disable_windows_g_global && event.metaKey && key === 'g';
+      const isGameBarShortcut =
+        settings.disable_windows_g_global && isMetaPressed && (key === 'g' || code === 'keyg');
 
       if (
         isF12 ||
@@ -111,6 +121,9 @@ const GlobalInteractionGuards = () => {
       ) {
         event.preventDefault();
         event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation();
+        }
       }
     };
 

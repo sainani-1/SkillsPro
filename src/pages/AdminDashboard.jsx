@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import AlertModal from '../components/AlertModal';
-import { Users, Calendar, Video, FileText, Plus, Award, TrendingUp, UserPlus, Check, X, AlertTriangle } from 'lucide-react';
+import { Users, Calendar, Video, FileText, Plus, Award, TrendingUp, UserPlus, Check, X, AlertTriangle, MessageCircle, ShieldCheck } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
 import usePopup from '../hooks/usePopup.jsx';
@@ -82,6 +82,11 @@ const AdminDashboard = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Link to="/app/admin/user-access" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <ShieldCheck className="text-violet-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">User Access</h3>
+            <p className="text-xs text-slate-600">Open any user account view and review their chats, classes, and profile access.</p>
+          </Link>
           <Link to="/app/admin/student-progress" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
             <Users className="text-blue-600 mb-3" size={32} />
             <h3 className="font-bold mb-1">Student Progress</h3>
@@ -111,6 +116,11 @@ const AdminDashboard = () => {
             <TrendingUp className="text-emerald-600 mb-3" size={32} />
             <h3 className="font-bold mb-1">Growth Analytics</h3>
             <p className="text-xs text-slate-600">See referrals, leads, premium events, and trials</p>
+          </Link>
+          <Link to="/app/admin/user-access" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
+            <MessageCircle className="text-rose-600 mb-3" size={32} />
+            <h3 className="font-bold mb-1">Chats Monitor</h3>
+            <p className="text-xs text-slate-600">Review student and teacher chat conversations from the admin panel.</p>
           </Link>
         </div>
       </div>

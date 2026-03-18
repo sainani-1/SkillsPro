@@ -24,8 +24,11 @@ const AdminUserAccess = () => {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [chatGroups, setChatGroups] = useState([]);
+  const [chatMembersByGroup, setChatMembersByGroup] = useState({});
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [enrollments, setEnrollments] = useState([]);
   const [classSessions, setClassSessions] = useState([]);
   const [teacherStudents, setTeacherStudents] = useState([]);
@@ -80,6 +83,8 @@ const AdminUserAccess = () => {
       setError('');
       setSelectedGroupId(null);
       setChatMessages([]);
+      setChatMembersByGroup({});
+      setNewMessage('');
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -137,7 +142,7 @@ const AdminUserAccess = () => {
         return;
       }
 
-      const [{ data: groups, error: groupsError }, { data: messages, error: messagesError }] = await Promise.all([
+      const [{ data: groups, error: groupsError }, { data: messages, error: messagesError }, { data: groupMembers, error: groupMembersError }] = await Promise.all([
         supabase
           .from('chat_groups')
           .select('id, name, created_at, group_type')
@@ -148,10 +153,15 @@ const AdminUserAccess = () => {
           .select('id, group_id, content, created_at, sender_id, sender:profiles(full_name, email)')
           .in('group_id', groupIds)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('chat_members')
+          .select('group_id, user_id, profiles(full_name, email, role)')
+          .in('group_id', groupIds),
       ]);
 
       if (groupsError) throw groupsError;
       if (messagesError) throw messagesError;
+      if (groupMembersError) throw groupMembersError;
 
       const latestByGroup = {};
       (messages || []).forEach((message) => {
@@ -160,9 +170,24 @@ const AdminUserAccess = () => {
         }
       });
 
+      const membersMap = (groupMembers || []).reduce((acc, row) => {
+        if (!acc[row.group_id]) acc[row.group_id] = [];
+        acc[row.group_id].push({
+          user_id: row.user_id,
+          full_name: row.profiles?.full_name || 'User',
+          email: row.profiles?.email || '',
+          role: row.profiles?.role || '',
+        });
+        return acc;
+      }, {});
+
+      setChatMembersByGroup(membersMap);
+
       const nextGroups = (groups || []).map((group) => ({
         ...group,
         latestMessage: latestByGroup[group.id] || null,
+        messageCount: (messages || []).filter((message) => message.group_id === group.id).length,
+        members: membersMap[group.id] || [],
       }));
       setChatGroups(nextGroups);
       if (nextGroups[0]?.id) {
@@ -189,6 +214,7 @@ const AdminUserAccess = () => {
 
   const handleSelectChat = async (groupId) => {
     setSelectedGroupId(groupId);
+    setNewMessage('');
     const { data, error: messagesError } = await supabase
       .from('chat_messages')
       .select('id, group_id, content, created_at, sender_id, sender:profiles(full_name, email)')
@@ -200,6 +226,54 @@ const AdminUserAccess = () => {
       return;
     }
     setChatMessages(data || []);
+  };
+
+  const handleSendAdminMessage = async () => {
+    if (!selectedGroupId || !selectedUser?.id || !newMessage.trim() || sendingMessage) return;
+
+    try {
+      setSendingMessage(true);
+      setError('');
+
+      const content = newMessage.trim();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user?.id) {
+        throw new Error('Admin session not found. Please sign in again.');
+      }
+
+      const { data: insertedMessage, error: insertError } = await supabase
+        .from('chat_messages')
+        .insert({
+          group_id: selectedGroupId,
+          sender_id: user.id,
+          content,
+        })
+        .select('id, group_id, content, created_at, sender_id, sender:profiles(full_name, email)')
+        .single();
+
+      if (insertError) throw insertError;
+
+      setChatMessages((prev) => [...prev, insertedMessage]);
+      setChatGroups((prev) =>
+        prev.map((group) =>
+          group.id === selectedGroupId
+            ? {
+                ...group,
+                latestMessage: insertedMessage,
+                messageCount: (group.messageCount || 0) + 1,
+              }
+            : group
+        )
+      );
+      setNewMessage('');
+    } catch (err) {
+      setError(err.message || 'Failed to send admin message.');
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   if (loading) return <LoadingSpinner message="Loading admin user access..." />;
@@ -431,6 +505,12 @@ const AdminUserAccess = () => {
                         >
                           <p className="text-sm font-semibold text-slate-800">{group.name || `Chat ${group.id}`}</p>
                           <p className="text-xs text-slate-500">{group.group_type || 'chat'}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {(group.members || []).map((member) => member.full_name).join(', ') || 'No participants'}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {group.messageCount || 0} messages
+                          </p>
                           <p className="mt-1 truncate text-xs text-slate-500">{group.latestMessage?.content || 'No messages yet'}</p>
                         </button>
                       ))}
@@ -448,18 +528,60 @@ const AdminUserAccess = () => {
                   ) : !selectedGroupId ? (
                     <p className="text-sm text-slate-500">Select a chat group to view messages.</p>
                   ) : (
-                    <div className="max-h-[500px] space-y-3 overflow-y-auto pr-1">
-                      {chatMessages.map((message) => (
-                        <div key={message.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold text-slate-800">
-                              {message.sender?.full_name || message.sender?.email || message.sender_id}
-                            </p>
-                            <p className="text-xs text-slate-500">{new Date(message.created_at).toLocaleString('en-IN')}</p>
-                          </div>
-                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{message.content || '(empty message)'}</p>
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Participants</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(chatMembersByGroup[selectedGroupId] || []).map((member) => (
+                            <span
+                              key={`${selectedGroupId}-${member.user_id}`}
+                              className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200"
+                            >
+                              {member.full_name}
+                              {member.role ? ` • ${member.role}` : ''}
+                            </span>
+                          ))}
                         </div>
-                      ))}
+                      </div>
+
+                      <div className="max-h-[500px] space-y-3 overflow-y-auto pr-1">
+                        {chatMessages.map((message) => (
+                          <div key={message.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-sm font-semibold text-slate-800">
+                                {message.sender?.full_name || message.sender?.email || message.sender_id}
+                              </p>
+                              <p className="text-xs text-slate-500">{new Date(message.created_at).toLocaleString('en-IN')}</p>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{message.content || '(empty message)'}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Admin Reply
+                        </label>
+                        <div className="flex flex-col gap-3">
+                          <textarea
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            rows={3}
+                            placeholder="Send a message into this chat as admin"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-rose-400"
+                          />
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleSendAdminMessage}
+                              disabled={!newMessage.trim() || sendingMessage}
+                              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            >
+                              {sendingMessage ? 'Sending...' : 'Send Message'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
