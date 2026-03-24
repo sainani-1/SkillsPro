@@ -2130,6 +2130,40 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               ) : (
                                 <p className={`mt-4 text-xs ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-slate-300' : 'text-slate-500'}`}>{session ? 'Click to open live monitoring' : 'Student has not started the exam yet'}</p>
                               )}
+                              {session ? (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMonitoringSessionId(session.id);
+                                      setMonitorFeedTab('screen');
+                                    }}
+                                    className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                                  >
+                                    Open Live
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMonitoringSessionId(session.id);
+                                      setMonitorFeedTab('camera');
+                                    }}
+                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    Camera
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMonitoringSessionId(session.id);
+                                      setMonitorFeedTab('voice');
+                                    }}
+                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    Mic
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })}
@@ -2185,6 +2219,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                   {session?.status || booking.status}
                                 </span>
                               </div>
+                              {session ? (
+                                <div className={`mt-3 flex flex-wrap gap-2 ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-white' : ''}`}>
+                                  <span className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+                                    session && String(selectedMonitoringSessionId) === String(session.id)
+                                      ? 'bg-white/10 text-white'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    Click to open live camera, screen, and mic view
+                                  </span>
+                                </div>
+                              ) : null}
                             </button>
                           );
                         })}
@@ -2217,6 +2262,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
                               <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
                               <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
+                              <button type="button" onClick={() => handleJoinRoom(selectedSlot)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Open Live Room</button>
                             </div>
                             <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950">
                               {embeddedMonitoringUrl ? (

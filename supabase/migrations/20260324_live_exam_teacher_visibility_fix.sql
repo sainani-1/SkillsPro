@@ -9,6 +9,7 @@ as $$
     select 1
     from public.exam_slot_bookings b
     join public.profiles student on student.id = b.student_id
+    
     where b.slot_id = target_slot_id
       and b.status <> 'cancelled'
       and student.assigned_teacher_id = auth.uid()
