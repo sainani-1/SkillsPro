@@ -192,12 +192,30 @@ export default function LiveExamStreamMonitor({
       )
       .subscribe();
 
-    Promise.all([ensurePeer('screen'), ensurePeer('camera')]).catch((connectionError) => {
-      if (!cancelled) {
-        setError(connectionError.message || 'Failed to connect live stream.');
-        setStatus('Live stream is unavailable.');
+    const bootstrapSignals = async () => {
+      try {
+        await Promise.all([ensurePeer('screen'), ensurePeer('camera')]);
+        const { data: recentSignals, error: recentError } = await supabase
+          .from(LIVE_EXAM_SIGNAL_TABLE)
+          .select('*')
+          .eq('session_id', sessionId)
+          .eq('to_user_id', viewerId)
+          .eq('from_user_id', studentId)
+          .order('created_at', { ascending: false })
+          .limit(40);
+        if (recentError) throw recentError;
+        (recentSignals || []).reverse().forEach((row) => {
+          void handleSignal(row);
+        });
+      } catch (connectionError) {
+        if (!cancelled) {
+          setError(connectionError.message || 'Failed to connect live stream.');
+          setStatus('Live stream is unavailable.');
+        }
       }
-    });
+    };
+
+    void bootstrapSignals();
 
     return () => {
       cancelled = true;

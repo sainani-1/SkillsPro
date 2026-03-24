@@ -499,6 +499,22 @@ export default function Exam({ examMode = "certification" }) {
       )
       .subscribe();
 
+    const bootstrapSignals = async () => {
+      const { data: recentSignals, error: recentError } = await supabase
+        .from(LIVE_EXAM_SIGNAL_TABLE)
+        .select("*")
+        .eq("session_id", liveExamContext.sessionId)
+        .eq("to_user_id", currentUserId)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (recentError) return;
+      (recentSignals || []).reverse().forEach((row) => {
+        void handleSignal(row);
+      });
+    };
+
+    void bootstrapSignals();
+
     return () => {
       supabase.removeChannel(channel);
       closePublisherPeers();
