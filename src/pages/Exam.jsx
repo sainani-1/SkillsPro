@@ -4,6 +4,13 @@ import { supabase } from "../supabaseClient";
 import { runCode } from "../logicBuilding/codeRunner";
 import MonacoCdnEditor from "../components/MonacoCdnEditor";
 import { useAuth } from "../context/AuthContext";
+import {
+  LIVE_EXAM_SIGNAL_TABLE,
+  buildPeerKey,
+  createLiveExamPeer,
+  serializeIceCandidate,
+  serializeSessionDescription,
+} from "../lib/liveExamWebRTC";
 
 const EXAM_PHASES = {
   RULES: "RULES",
@@ -231,6 +238,8 @@ export default function Exam({ examMode = "certification" }) {
   const lastCameraSignatureRef = useRef(null);
   const cameraTrackIssueStartedAtRef = useRef(0);
   const examAutoSubmitTriggeredRef = useRef(false);
+  const webRtcPublisherPeersRef = useRef(new Map());
+  const processedWebRtcSignalIdsRef = useRef(new Set());
   const getSessionKey = (userId = null) =>
     `${EXAM_SESSION_PREFIX}:${examMode}:${routeIdentity}:${userId || "anon"}`;
   const safeSessionGet = (key) => {
@@ -375,6 +384,133 @@ export default function Exam({ examMode = "certification" }) {
       supabase.removeChannel(channel);
     };
   }, [liveExamContext?.sessionId, currentUserId]);
+
+  useEffect(() => {
+    if (!isLiveManagedExam || !liveExamContext?.sessionId || !currentUserId) return undefined;
+
+    const closePublisherPeers = () => {
+      webRtcPublisherPeersRef.current.forEach((peer) => peer.close());
+      webRtcPublisherPeersRef.current.clear();
+    };
+
+    const getStreamForType = (streamType) => {
+      if (streamType === "screen") {
+        const screenTracks = screenShareStream?.getVideoTracks?.() || [];
+        return screenTracks.length ? new MediaStream(screenTracks) : null;
+      }
+      const cameraTracks = cameraStream?.getVideoTracks?.() || [];
+      const audioTracks = cameraStream?.getAudioTracks?.() || [];
+      const tracks = [...cameraTracks, ...audioTracks];
+      return tracks.length ? new MediaStream(tracks) : null;
+    };
+
+    const sendSignal = async ({ toUserId, signalType, streamType, payload }) => {
+      await supabase.from(LIVE_EXAM_SIGNAL_TABLE).insert({
+        slot_id: liveExamContext.slotId,
+        session_id: liveExamContext.sessionId,
+        from_user_id: currentUserId,
+        from_role: "student",
+        to_user_id: toUserId,
+        signal_type: signalType,
+        stream_type: streamType,
+        payload,
+      });
+    };
+
+    const ensurePeer = async ({ watcherId, streamType, connectionId }) => {
+      const peerKey = buildPeerKey(watcherId, streamType, connectionId);
+      const existing = webRtcPublisherPeersRef.current.get(peerKey);
+      if (existing) return existing;
+
+      const publishStream = getStreamForType(streamType);
+      if (!publishStream) {
+        throw new Error(
+          streamType === "screen"
+            ? "Screen-share stream is not available."
+            : "Camera/mic stream is not available."
+        );
+      }
+
+      const peer = createLiveExamPeer({
+        onIceCandidate: (candidate) =>
+          void sendSignal({
+            toUserId: watcherId,
+            signalType: "ice-candidate",
+            streamType,
+            payload: {
+              ...serializeIceCandidate(candidate),
+              connectionId,
+            },
+          }),
+      });
+
+      publishStream.getTracks().forEach((track) => {
+        peer.addTrack(track, publishStream);
+      });
+      webRtcPublisherPeersRef.current.set(peerKey, peer);
+      return peer;
+    };
+
+    const handleSignal = async (row) => {
+      if (!row || processedWebRtcSignalIdsRef.current.has(row.id)) return;
+      if (String(row.session_id || "") !== String(liveExamContext.sessionId)) return;
+      if (String(row.to_user_id || "") !== String(currentUserId)) return;
+      if (String(row.from_user_id || "") === String(currentUserId)) return;
+      processedWebRtcSignalIdsRef.current.add(row.id);
+
+      const watcherId = row.from_user_id;
+      const streamType = row.stream_type === "screen" ? "screen" : "camera";
+      const connectionId = String(row.payload?.connectionId || "default");
+      const peer = await ensurePeer({ watcherId, streamType, connectionId });
+
+      if (row.signal_type === "offer" && row.payload?.sdp) {
+        await peer.setRemoteDescription(new RTCSessionDescription(row.payload));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        await sendSignal({
+          toUserId: watcherId,
+          signalType: "answer",
+          streamType,
+          payload: {
+            ...serializeSessionDescription(peer.localDescription),
+            connectionId,
+          },
+        });
+        return;
+      }
+
+      if (row.signal_type === "ice-candidate" && row.payload?.candidate) {
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(row.payload));
+        } catch {
+          // ignore out-of-order candidates
+        }
+      }
+    };
+
+    const channel = supabase
+      .channel(`live-exam-webrtc-publisher-${liveExamContext.sessionId}-${currentUserId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: LIVE_EXAM_SIGNAL_TABLE },
+        (payload) => {
+          void handleSignal(payload?.new);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      closePublisherPeers();
+    };
+  }, [
+    cameraStream,
+    currentUserId,
+    isLiveManagedExam,
+    liveExamContext?.sessionId,
+    liveExamContext?.slotId,
+    screenShareStream,
+  ]);
 
   useEffect(() => {
     // Immediate restore on mount to avoid flashing back to Step 1

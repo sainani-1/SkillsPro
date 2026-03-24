@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
+import LiveExamStreamMonitor from '../components/LiveExamStreamMonitor';
 
 const LIVE_EXAM_CONTEXT_KEY = 'live_exam_context';
 const BOOKING_WINDOW_DAYS = 60;
@@ -10,9 +11,6 @@ const DEFAULT_LOCK_DAYS = 60;
 
 const formatDateTime = (value) =>
   value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
-
-const formatRoomUrl = (roomName) =>
-  roomName ? `https://meet.jit.si/${encodeURIComponent(roomName)}` : null;
 
 const nowIso = () => new Date().toISOString();
 
@@ -422,18 +420,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     () => slotMessages.filter((message) => String(message.recipient_id || '') === String(selectedMonitoringSession?.student_id || '') || String(message.sender_id || '') === String(selectedMonitoringSession?.student_id || '')),
     [slotMessages, selectedMonitoringSession?.student_id]
   );
-  const embeddedMonitoringUrl = useMemo(() => {
-    if (!selectedSlot || !selectedMonitoringSession) return '';
-    const baseUrl = formatRoomUrl(roomNameForSlot(selectedSlot, selectedExam));
-    if (!baseUrl) return '';
-    const tabLabel =
-      monitorFeedTab === 'camera'
-        ? 'camera'
-        : monitorFeedTab === 'voice'
-          ? 'voice'
-          : 'screen-share';
-    return `${baseUrl}#config.prejoinPageEnabled=false&config.startWithAudioMuted=true&config.startWithVideoMuted=true&userInfo.displayName=${encodeURIComponent(`${selectedMonitoringStudent?.full_name || 'Invigilator'} (${tabLabel})`)}`;
-  }, [selectedSlot, selectedExam, selectedMonitoringSession, selectedMonitoringStudent?.full_name, monitorFeedTab]);
   const activeMonitoringSessions = useMemo(
     () => slotSessions.filter((session) => session.status === 'active'),
     [slotSessions]
@@ -1405,12 +1391,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     }
   };
 
-  const handleJoinRoom = (slot) => {
-    const url = formatRoomUrl(roomNameForSlot(slot, examsById[slot.exam_id]));
-    if (!url) return;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   const handleSendMessage = async () => {
     if (!selectedSlot?.id || !messageDraft.trim()) return;
     setSaving(true);
@@ -2071,10 +2051,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 {isMonitoringPanel ? (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <h3 className="text-lg font-semibold text-slate-900">{isInstructor ? 'Live Preview Boxes' : 'Students Writing Exam'}</h3>
-                          <p className="mt-1 text-sm text-slate-500">{isInstructor ? 'Each active student appears with a quick live room preview box for faster invigilation.' : 'Choose a student name box first. Then the live monitoring view for that student appears below.'}</p>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">{isInstructor ? 'Live Preview Boxes' : 'Students Writing Exam'}</h3>
+                          <p className="mt-1 text-sm text-slate-500">Each active student appears with direct live screen-share and camera preview boxes. Click a student to open the larger strict-monitoring view.</p>
                         </div>
                         <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">{slotBookings.length} students</div>
                       </div>
@@ -2082,7 +2062,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                         {slotBookings.length === 0 ? <p className="text-sm text-slate-500">No students booked for this slot yet.</p> : slotBookings.map((booking) => {
                           const session = sessionByBookingId[booking.id];
                           const student = profilesById[booking.student_id];
-                          const previewUrl = session ? `${formatRoomUrl(roomNameForSlot(selectedSlot, selectedExam))}#config.prejoinPageEnabled=false&config.startWithAudioMuted=true&config.startWithVideoMuted=true&userInfo.displayName=${encodeURIComponent(student?.full_name || 'Invigilator')}` : '';
                           return (
                             <div
                               key={booking.id}
@@ -2117,13 +2096,14 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                   </span>
                                 </div>
                               </button>
-                              {isInstructor && session ? (
-                                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
-                                  <iframe
-                                    title={`Preview for ${student?.full_name || 'student'}`}
-                                    src={previewUrl}
-                                    className="h-40 w-full"
-                                    allow="camera; microphone; fullscreen; display-capture"
+                              {session ? (
+                                <div className="mt-4">
+                                  <LiveExamStreamMonitor
+                                    slotId={selectedSlot.id}
+                                    session={session}
+                                    viewerId={profile?.id}
+                                    viewerRole={role}
+                                    compact
                                   />
                                 </div>
                               ) : (
@@ -2262,22 +2242,16 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
                               <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
                             </div>
-                            <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950">
-                              {embeddedMonitoringUrl ? (
-                                <iframe
-                                  title={`Live monitoring for ${selectedMonitoringStudent?.full_name || 'student'}`}
-                                  src={embeddedMonitoringUrl}
-                                  className="h-[520px] w-full"
-                                  allow="camera; microphone; fullscreen; display-capture"
-                                />
-                              ) : (
-                                <div className="flex h-[520px] items-center justify-center text-sm text-slate-300">
-                                  Monitoring stream is not available yet.
-                                </div>
-                              )}
+                            <div className="mt-4">
+                              <LiveExamStreamMonitor
+                                slotId={selectedSlot.id}
+                                session={selectedMonitoringSession}
+                                viewerId={profile?.id}
+                                viewerRole={role}
+                              />
                             </div>
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                              {monitorFeedTab === 'screen' ? 'Viewing the shared monitoring room for screen-share inspection.' : monitorFeedTab === 'camera' ? 'Viewing the shared monitoring room for live camera inspection.' : 'Viewing the shared monitoring room for voice/audio inspection.'}
+                              {monitorFeedTab === 'screen' ? 'Live screen share is shown above. Use the camera panel below it to inspect the student at the same time.' : monitorFeedTab === 'camera' ? 'Live camera is shown with the direct browser feed. Use Listen Mic to monitor audio if the browser blocks autoplay.' : 'Audio comes from the direct camera/mic stream. Click Listen Mic if you need to hear the student microphone.'}
                             </div>
                           </div>
 
