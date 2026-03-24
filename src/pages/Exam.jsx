@@ -240,6 +240,7 @@ export default function Exam({ examMode = "certification" }) {
   const examAutoSubmitTriggeredRef = useRef(false);
   const webRtcPublisherPeersRef = useRef(new Map());
   const processedWebRtcSignalIdsRef = useRef(new Set());
+  const webRtcPollTimerRef = useRef(null);
   const getSessionKey = (userId = null) =>
     `${EXAM_SESSION_PREFIX}:${examMode}:${routeIdentity}:${userId || "anon"}`;
   const safeSessionGet = (key) => {
@@ -389,6 +390,10 @@ export default function Exam({ examMode = "certification" }) {
     if (!isLiveManagedExam || !liveExamContext?.sessionId || !currentUserId) return undefined;
 
     const closePublisherPeers = () => {
+      if (webRtcPollTimerRef.current) {
+        window.clearInterval(webRtcPollTimerRef.current);
+        webRtcPollTimerRef.current = null;
+      }
       webRtcPublisherPeersRef.current.forEach((peer) => peer.close());
       webRtcPublisherPeersRef.current.clear();
     };
@@ -499,7 +504,7 @@ export default function Exam({ examMode = "certification" }) {
       )
       .subscribe();
 
-    const bootstrapSignals = async () => {
+    const fetchRecentSignals = async () => {
       const { data: recentSignals, error: recentError } = await supabase
         .from(LIVE_EXAM_SIGNAL_TABLE)
         .select("*")
@@ -513,7 +518,10 @@ export default function Exam({ examMode = "certification" }) {
       });
     };
 
-    void bootstrapSignals();
+    void fetchRecentSignals();
+    webRtcPollTimerRef.current = window.setInterval(() => {
+      void fetchRecentSignals();
+    }, 2000);
 
     return () => {
       supabase.removeChannel(channel);

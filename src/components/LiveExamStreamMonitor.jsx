@@ -34,6 +34,7 @@ export default function LiveExamStreamMonitor({
   const screenVideoRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const audioRef = useRef(null);
+  const pollTimerRef = useRef(null);
   const peersRef = useRef(new Map());
   const processedSignalIdsRef = useRef(new Set());
   const connectionIdRef = useRef(`monitor-${Math.random().toString(36).slice(2, 10)}`);
@@ -58,6 +59,10 @@ export default function LiveExamStreamMonitor({
 
   useEffect(() => {
     const closePeers = () => {
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
       peersRef.current.forEach((peer) => peer.close());
       peersRef.current.clear();
       remoteStreamsRef.current = {
@@ -192,21 +197,28 @@ export default function LiveExamStreamMonitor({
       )
       .subscribe();
 
+    const fetchRecentSignals = async () => {
+      const { data: recentSignals, error: recentError } = await supabase
+        .from(LIVE_EXAM_SIGNAL_TABLE)
+        .select('*')
+        .eq('session_id', sessionId)
+        .eq('to_user_id', viewerId)
+        .eq('from_user_id', studentId)
+        .order('created_at', { ascending: false })
+        .limit(40);
+      if (recentError) throw recentError;
+      (recentSignals || []).reverse().forEach((row) => {
+        void handleSignal(row);
+      });
+    };
+
     const bootstrapSignals = async () => {
       try {
         await Promise.all([ensurePeer('screen'), ensurePeer('camera')]);
-        const { data: recentSignals, error: recentError } = await supabase
-          .from(LIVE_EXAM_SIGNAL_TABLE)
-          .select('*')
-          .eq('session_id', sessionId)
-          .eq('to_user_id', viewerId)
-          .eq('from_user_id', studentId)
-          .order('created_at', { ascending: false })
-          .limit(40);
-        if (recentError) throw recentError;
-        (recentSignals || []).reverse().forEach((row) => {
-          void handleSignal(row);
-        });
+        await fetchRecentSignals();
+        pollTimerRef.current = window.setInterval(() => {
+          void fetchRecentSignals().catch(() => {});
+        }, 2000);
       } catch (connectionError) {
         if (!cancelled) {
           setError(connectionError.message || 'Failed to connect live stream.');
