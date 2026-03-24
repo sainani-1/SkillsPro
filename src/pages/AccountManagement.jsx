@@ -207,6 +207,54 @@ const AccountManagement = () => {
 
       if (error) throw error;
 
+      if (action === 'unlock') {
+        const unlockStamp = new Date().toISOString();
+        const { data: terminatedSessions, error: terminatedSessionsError } = await supabase
+          .from('exam_live_sessions')
+          .select('id, booking_id')
+          .eq('student_id', selectedUser.id)
+          .eq('status', 'terminated');
+        if (terminatedSessionsError) throw terminatedSessionsError;
+
+        const bookingIds = Array.from(
+          new Set((terminatedSessions || []).map((row) => row.booking_id).filter(Boolean))
+        );
+
+        if (bookingIds.length > 0) {
+          const { error: bookingResetError } = await supabase
+            .from('exam_slot_bookings')
+            .update({
+              status: 'booked',
+              cancelled_at: null,
+              cancellation_reason: null,
+              updated_at: unlockStamp,
+            })
+            .in('id', bookingIds);
+          if (bookingResetError) throw bookingResetError;
+        }
+
+        if ((terminatedSessions || []).length > 0) {
+          const { error: sessionResetError } = await supabase
+            .from('exam_live_sessions')
+            .update({
+              status: 'scheduled',
+              attendance_status: 'pending',
+              ended_at: null,
+              termination_reason: null,
+              camera_connected: false,
+              mic_connected: false,
+              screen_share_connected: false,
+              violation_count: 0,
+              last_violation_type: null,
+              last_violation_at: null,
+              updated_at: unlockStamp,
+            })
+            .eq('student_id', selectedUser.id)
+            .eq('status', 'terminated');
+          if (sessionResetError) throw sessionResetError;
+        }
+      }
+
       if (action === 'grant-premium') {
         const { error: grantLogError } = await supabase
           .from('premium_grants')

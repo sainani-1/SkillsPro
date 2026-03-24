@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionState, Room, RoomEvent, Track } from 'livekit-client';
 import { getLiveKitTokenForSession } from '../lib/livekitSession';
+import { supabase } from '../supabaseClient';
 
 function detachTrack(track, element) {
   try {
@@ -10,12 +11,51 @@ function detachTrack(track, element) {
   }
 }
 
+async function playMediaElement(element) {
+  if (!element?.play) return;
+  try {
+    await element.play();
+  } catch {
+    // autoplay can be blocked; ignore and keep element attached
+  }
+}
+
+function isTerminalSessionStatus(status) {
+  return ['terminated', 'disconnected', 'completed', 'cancelled'].includes(String(status || '').toLowerCase());
+}
+
+function resolvePreferredSession(currentSession, nextSession) {
+  if (!nextSession) return nextSession;
+  if (!currentSession) return nextSession;
+
+  const currentTerminal = isTerminalSessionStatus(currentSession.status);
+  const nextTerminal = isTerminalSessionStatus(nextSession.status);
+  const sameBooking =
+    currentSession.booking_id &&
+    nextSession.booking_id &&
+    String(currentSession.booking_id) === String(nextSession.booking_id);
+  const currentStamp = new Date(currentSession.updated_at || currentSession.started_at || currentSession.created_at || 0).getTime();
+  const nextStamp = new Date(nextSession.updated_at || nextSession.started_at || nextSession.created_at || 0).getTime();
+
+  if (sameBooking && !currentTerminal && nextTerminal) {
+    return currentSession;
+  }
+  if (sameBooking && currentTerminal && !nextTerminal) {
+    return nextSession;
+  }
+  if (sameBooking) {
+    return nextStamp >= currentStamp ? nextSession : currentSession;
+  }
+  return nextSession;
+}
+
 export default function LiveExamStreamMonitor({
   session,
   viewerId,
   compact = false,
   large = false,
 }) {
+  const [resolvedSession, setResolvedSession] = useState(session);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Connecting live preview...');
   const [audioEnabled, setAudioEnabled] = useState(false);
@@ -36,11 +76,43 @@ export default function LiveExamStreamMonitor({
     : 'rounded-3xl border border-slate-200 bg-slate-950 p-3';
   const screenHeightClass = compact ? 'h-36' : large ? 'h-[30rem]' : 'h-72';
   const cameraHeightClass = compact ? 'h-36' : large ? 'h-[24rem]' : 'h-72';
-  const sessionStatus = String(session?.status || '').toLowerCase();
-  const connectionKey = `${viewerId || ''}:${session?.id || ''}`;
+  const sessionStatus = String(resolvedSession?.status || '').toLowerCase();
+  const hasStartedSession =
+    Boolean(resolvedSession?.started_at) || ['active', 'paused'].includes(sessionStatus);
+  const connectionKey = `${viewerId || ''}:${resolvedSession?.id || ''}`;
 
   useEffect(() => {
-    if (!session?.id || !viewerId || !['active', 'paused', 'scheduled'].includes(sessionStatus)) {
+    setResolvedSession((currentSession) => resolvePreferredSession(currentSession, session));
+  }, [session]);
+
+  useEffect(() => {
+    if (!session?.booking_id || !isTerminalSessionStatus(session?.status)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const recoverLatestSession = async () => {
+      const { data, error: sessionError } = await supabase
+        .from('exam_live_sessions')
+        .select('*')
+        .eq('booking_id', session.booking_id)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+      if (cancelled || sessionError || !data?.length) return;
+      const recoveredSession = data.find((row) => !isTerminalSessionStatus(row.status));
+      if (recoveredSession) {
+        setResolvedSession((currentSession) => resolvePreferredSession(currentSession, recoveredSession));
+      }
+    };
+
+    void recoverLatestSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.booking_id, session?.status]);
+
+  useEffect(() => {
+    if (!resolvedSession?.id || !viewerId) {
       if (roomRef.current) {
         roomRef.current.disconnect?.();
         roomRef.current = null;
@@ -57,16 +129,35 @@ export default function LiveExamStreamMonitor({
       return undefined;
     }
 
+    if (!hasStartedSession) {
+      if (roomRef.current) {
+        roomRef.current.disconnect?.();
+        roomRef.current = null;
+        connectedSessionKeyRef.current = '';
+      }
+      setStatus('Student has not joined yet.');
+      setError('');
+      setDebugState({
+        room: '-',
+        screen: 'waiting',
+        camera: 'waiting',
+        mic: 'waiting',
+      });
+      return undefined;
+    }
+
     if (roomRef.current && connectedSessionKeyRef.current === connectionKey) {
       return undefined;
     }
 
     let mounted = true;
     const detachFns = [];
+    const attachedTrackSids = new Set();
 
     const cleanup = () => {
       detachFns.forEach((fn) => fn());
       detachFns.length = 0;
+      attachedTrackSids.clear();
       roomRef.current?.disconnect?.();
       roomRef.current = null;
       connectedSessionKeyRef.current = '';
@@ -75,14 +166,22 @@ export default function LiveExamStreamMonitor({
       if (audioRef.current) audioRef.current.srcObject = null;
     };
 
-    const attachPublication = (publication) => {
+    const attachPublication = async (publication) => {
       const subscribedTrack = publication?.track;
       if (!subscribedTrack) return;
+      const trackSid = publication?.trackSid || subscribedTrack?.sid || `${publication?.source || 'unknown'}-${subscribedTrack?.kind || 'track'}`;
+      if (attachedTrackSids.has(trackSid)) return;
 
       if (publication.source === Track.Source.ScreenShare && subscribedTrack.kind === Track.Kind.Video) {
         const element = screenVideoRef.current;
         if (!element) return;
+        subscribedTrack.setEnabled?.(true);
+        publication.setSubscribed?.(true);
+        element.srcObject = null;
+        element.muted = true;
         subscribedTrack.attach(element);
+        await playMediaElement(element);
+        attachedTrackSids.add(trackSid);
         setDebugState((prev) => ({ ...prev, screen: 'connected' }));
         detachFns.push(() => detachTrack(subscribedTrack, element));
         return;
@@ -91,7 +190,13 @@ export default function LiveExamStreamMonitor({
       if (publication.source === Track.Source.Camera && subscribedTrack.kind === Track.Kind.Video) {
         const element = cameraVideoRef.current;
         if (!element) return;
+        subscribedTrack.setEnabled?.(true);
+        publication.setSubscribed?.(true);
+        element.srcObject = null;
+        element.muted = true;
         subscribedTrack.attach(element);
+        await playMediaElement(element);
+        attachedTrackSids.add(trackSid);
         setDebugState((prev) => ({ ...prev, camera: 'connected' }));
         detachFns.push(() => detachTrack(subscribedTrack, element));
         return;
@@ -100,11 +205,23 @@ export default function LiveExamStreamMonitor({
       if (publication.source === Track.Source.Microphone && subscribedTrack.kind === Track.Kind.Audio) {
         const element = audioRef.current;
         if (!element) return;
+        subscribedTrack.setEnabled?.(true);
+        publication.setSubscribed?.(true);
+        element.srcObject = null;
         subscribedTrack.attach(element);
         element.muted = !audioEnabled;
+        await playMediaElement(element);
+        attachedTrackSids.add(trackSid);
         setDebugState((prev) => ({ ...prev, mic: 'connected' }));
         detachFns.push(() => detachTrack(subscribedTrack, element));
       }
+    };
+
+    const subscribeParticipantTracks = (participant) => {
+      participant?.trackPublications?.forEach?.((publication) => {
+        publication.setSubscribed?.(true);
+        void attachPublication(publication);
+      });
     };
 
     const connectRoom = async () => {
@@ -119,7 +236,7 @@ export default function LiveExamStreamMonitor({
         });
 
         const tokenData = await getLiveKitTokenForSession({
-          sessionId: session.id,
+          sessionId: resolvedSession.id,
           mode: 'observer',
           requesterId: viewerId,
         });
@@ -135,12 +252,21 @@ export default function LiveExamStreamMonitor({
         room
           .on(RoomEvent.ConnectionStateChanged, (state) => {
             setDebugState((prev) => ({ ...prev, room: state }));
-            setStatus(state === ConnectionState.Connected ? 'Live stream connected.' : 'Connecting live preview...');
+            setStatus(state === ConnectionState.Connected ? 'Waiting for student media...' : 'Connecting live preview...');
+          })
+          .on(RoomEvent.ParticipantConnected, (participant) => {
+            subscribeParticipantTracks(participant);
+          })
+          .on(RoomEvent.TrackPublished, (_, publication, participant) => {
+            publication?.setSubscribed?.(true);
+            subscribeParticipantTracks(participant);
           })
           .on(RoomEvent.TrackSubscribed, (track, publication) => {
-            attachPublication({ ...publication, track });
+            void attachPublication({ ...publication, track });
           })
-          .on(RoomEvent.TrackUnsubscribed, (_, publication) => {
+          .on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+            const trackSid = publication?.trackSid || track?.sid || `${publication?.source || 'unknown'}-${track?.kind || 'track'}`;
+            attachedTrackSids.delete(trackSid);
             if (publication.source === Track.Source.ScreenShare) {
               setDebugState((prev) => ({ ...prev, screen: 'waiting' }));
             }
@@ -158,12 +284,8 @@ export default function LiveExamStreamMonitor({
         if (!mounted) return;
 
         room.remoteParticipants.forEach((participant) => {
-          participant.trackPublications.forEach((publication) => {
-            attachPublication(publication);
-          });
+          subscribeParticipantTracks(participant);
         });
-
-        setStatus('Live stream connected.');
       } catch (connectionError) {
         if (!mounted) return;
         setError(connectionError.message || 'Failed to connect LiveKit preview.');
@@ -177,15 +299,15 @@ export default function LiveExamStreamMonitor({
       mounted = false;
       cleanup();
     };
-  }, [session?.id, viewerId, connectionKey, sessionStatus]);
+  }, [resolvedSession?.id, viewerId, connectionKey, hasStartedSession]);
 
   useEffect(() => {
     if (!roomRef.current) return;
-    if (['active', 'paused', 'scheduled'].includes(sessionStatus)) return;
+    if (!['terminated', 'disconnected', 'completed', 'cancelled'].includes(sessionStatus)) return;
     roomRef.current.disconnect?.();
     roomRef.current = null;
     connectedSessionKeyRef.current = '';
-    setStatus('Student is not live right now.');
+    setStatus('Live session ended.');
     setDebugState({
       room: '-',
       screen: 'waiting',
@@ -203,6 +325,39 @@ export default function LiveExamStreamMonitor({
       }
     }
   }, [audioEnabled]);
+
+  useEffect(() => {
+    if (error) return;
+    if (!resolvedSession?.id || !viewerId) {
+      setStatus('Student is not live right now.');
+      return;
+    }
+    if (!hasStartedSession) {
+      setStatus('Student has not joined yet.');
+      return;
+    }
+    if (['terminated', 'disconnected', 'completed', 'cancelled'].includes(sessionStatus)) {
+      setStatus('Live session ended.');
+      return;
+    }
+
+    const roomConnected = String(debugState.room).toLowerCase() === String(ConnectionState.Connected).toLowerCase();
+    const hasVideoFeed = debugState.screen === 'connected' || debugState.camera === 'connected';
+
+    if (hasVideoFeed) {
+      setStatus('Live stream connected.');
+      return;
+    }
+    if (roomConnected) {
+      setStatus('Waiting for student camera/screen share...');
+      return;
+    }
+    if (String(debugState.room).toLowerCase() === 'fetching token') {
+      setStatus('Connecting live preview...');
+      return;
+    }
+    setStatus('Connecting live preview...');
+  }, [debugState.room, debugState.screen, debugState.camera, error, resolvedSession?.id, sessionStatus, viewerId, hasStartedSession]);
 
   const statusTone = useMemo(() => {
     if (error) return 'text-rose-300';

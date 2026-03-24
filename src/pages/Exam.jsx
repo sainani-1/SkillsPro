@@ -654,7 +654,8 @@ export default function Exam({ examMode = "certification" }) {
         const [screenVideoTrack] = screenShareStream?.getVideoTracks?.() || [];
 
         if (cameraVideoTrack) {
-          const localCameraTrack = new LocalVideoTrack(cameraVideoTrack, {
+          const clonedCameraVideoTrack = cameraVideoTrack.clone();
+          const localCameraTrack = new LocalVideoTrack(clonedCameraVideoTrack, {
             name: "student-camera",
           });
           await room.localParticipant.publishTrack(localCameraTrack, {
@@ -664,7 +665,8 @@ export default function Exam({ examMode = "certification" }) {
         }
 
         if (cameraAudioTrack) {
-          const localMicTrack = new LocalAudioTrack(cameraAudioTrack, {
+          const clonedCameraAudioTrack = cameraAudioTrack.clone();
+          const localMicTrack = new LocalAudioTrack(clonedCameraAudioTrack, {
             name: "student-mic",
           });
           await room.localParticipant.publishTrack(localMicTrack, {
@@ -674,7 +676,8 @@ export default function Exam({ examMode = "certification" }) {
         }
 
         if (screenVideoTrack) {
-          const localScreenTrack = new LocalVideoTrack(screenVideoTrack, {
+          const clonedScreenVideoTrack = screenVideoTrack.clone();
+          const localScreenTrack = new LocalVideoTrack(clonedScreenVideoTrack, {
             name: "student-screen",
           });
           await room.localParticipant.publishTrack(localScreenTrack, {

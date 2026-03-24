@@ -1530,7 +1530,25 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     try {
       const exam = examsById[slot.exam_id];
       let session = sessionByBookingId[booking.id];
-      if (!session) {
+      const existingStatus = String(session?.status || '').toLowerCase();
+      const needsFreshSession = !session || ['terminated', 'disconnected', 'completed', 'cancelled'].includes(existingStatus);
+      const startedAt = session?.started_at || nowIso();
+      const activeSessionSnapshot = {
+        ...session,
+        slot_id: slot.id,
+        booking_id: booking.id,
+        exam_id: slot.exam_id,
+        student_id: profile.id,
+        status: 'active',
+        attendance_status: 'present',
+        started_at: startedAt,
+        ended_at: null,
+        termination_reason: null,
+        last_heartbeat_at: nowIso(),
+        updated_at: nowIso(),
+        monitor_room_name: roomNameForSlot(slot, exam),
+      };
+      if (needsFreshSession) {
         const { data, error: sessionError } = await supabase
           .from('exam_live_sessions')
           .insert({
@@ -1554,12 +1572,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           .update({
             status: 'active',
             attendance_status: 'present',
-            started_at: session.started_at || nowIso(),
-            last_heartbeat_at: nowIso(),
-            updated_at: nowIso(),
+            started_at: startedAt,
+            ended_at: null,
+            termination_reason: null,
+            last_heartbeat_at: activeSessionSnapshot.last_heartbeat_at,
+            updated_at: activeSessionSnapshot.updated_at,
           })
           .eq('id', session.id);
         if (sessionError) throw sessionError;
+        session = {
+          ...activeSessionSnapshot,
+          id: session.id,
+        };
       }
 
       const { error: bookingError } = await supabase
@@ -1567,6 +1591,25 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         .update({ status: 'active', updated_at: nowIso() })
         .eq('id', booking.id);
       if (bookingError) throw bookingError;
+
+      setBookings((prev) =>
+        prev.map((row) => (
+          String(row.id) === String(booking.id)
+            ? {
+                ...row,
+                status: 'active',
+                updated_at: nowIso(),
+                cancelled_at: null,
+                cancellation_reason: null,
+              }
+            : row
+        ))
+      );
+      setSessions((prev) => {
+        const nextRows = prev.filter((row) => String(row.id) !== String(session.id));
+        return [...nextRows, session];
+      });
+      setSelectedMonitoringSessionId(session.id);
 
       try {
         sessionStorage.setItem(
@@ -2411,7 +2454,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       </div>
                       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {slotBookings.length === 0 ? <p className="text-sm text-slate-500">No students booked for this slot yet.</p> : slotBookings.map((booking) => {
-                          const session = sessionByBookingId[booking.id];
+                          const rawSession = sessionByBookingId[booking.id];
+                          const sessionStatus = String(rawSession?.status || '').toLowerCase();
+                          const session =
+                            rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
+                              ? rawSession
+                              : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
                           const student = profilesById[booking.student_id];
                           return (
                             <div
@@ -2450,6 +2498,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               {session ? (
                                 <div className="mt-4">
                                   <LiveExamStreamMonitor
+                                    key={`${session.id}:${session.updated_at || session.started_at || session.created_at || ''}:${session.camera_connected ? 'cam1' : 'cam0'}:${session.screen_share_connected ? 'scr1' : 'scr0'}`}
                                     slotId={selectedSlot.id}
                                     session={session}
                                     viewerId={profile?.id}
@@ -2518,7 +2567,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       </div>
                       <div className="mt-4 space-y-3">
                         {slotBookings.length === 0 ? <p className="text-sm text-slate-500">No students booked yet.</p> : slotBookings.map((booking) => {
-                          const session = sessionByBookingId[booking.id];
+                          const rawSession = sessionByBookingId[booking.id];
+                          const sessionStatus = String(rawSession?.status || '').toLowerCase();
+                          const session =
+                            rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
+                              ? rawSession
+                              : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
                           const student = profilesById[booking.student_id];
                           const violationCount = violations.filter((row) => String(row.slot_id) === String(selectedSlot.id) && String(row.student_id) === String(booking.student_id)).length;
                           return (
