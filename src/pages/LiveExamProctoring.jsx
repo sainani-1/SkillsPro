@@ -2013,7 +2013,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       <p className="mt-1 text-sm text-slate-500">Monitoring room: {roomNameForSlot(selectedSlot, selectedExam)}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => handleJoinRoom(selectedSlot)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Open Room</button>
                       {isAdmin ? <button type="button" onClick={() => handleLoadSlotIntoEditor(selectedSlot)} className="rounded-xl border border-teal-300 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50">Edit Slot</button> : null}
                       {isAdmin ? <button type="button" onClick={() => handleCancelSlot(selectedSlot)} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Cancel Slot</button> : null}
                       {isAdmin ? <button type="button" onClick={() => handleDeleteSlot(selectedSlot)} className="rounded-xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete Slot</button> : null}
@@ -2262,7 +2261,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
                               <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
                               <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
-                              <button type="button" onClick={() => handleJoinRoom(selectedSlot)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Open Live Room</button>
                             </div>
                             <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950">
                               {embeddedMonitoringUrl ? (

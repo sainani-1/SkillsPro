@@ -207,6 +207,7 @@ export default function Exam({ examMode = "certification" }) {
   const [showBackSwipeConfirm, setShowBackSwipeConfirm] = useState(false);
   const [backSwipeLocking, setBackSwipeLocking] = useState(false);
   const [resumeWarningMessage, setResumeWarningMessage] = useState("");
+  const [invigilatorWarningMessage, setInvigilatorWarningMessage] = useState("");
   const [invigilatorPauseMessage, setInvigilatorPauseMessage] = useState("");
   const [submitReady, setSubmitReady] = useState(false);
   const [submitCountdown, setSubmitCountdown] = useState(6);
@@ -330,6 +331,7 @@ export default function Exam({ examMode = "certification" }) {
       const actionMessage = String(action.message || '').trim();
 
       if (actionType === 'warning') {
+        setInvigilatorWarningMessage(actionMessage || 'Invigilator warning received.');
         setInfoMsg(actionMessage || 'Invigilator warning received.');
         return;
       }
@@ -3040,6 +3042,26 @@ export default function Exam({ examMode = "certification" }) {
               className="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold"
             >
               OK
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {invigilatorWarningMessage && (phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING) ? (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="max-w-lg w-full bg-white rounded-2xl p-6 border border-amber-200 shadow-xl space-y-4 text-center">
+            <h2 className="text-xl font-bold text-amber-700">Warning From Invigilator</h2>
+            <p className="text-sm text-slate-700">
+              {invigilatorWarningMessage}
+            </p>
+            <p className="text-xs text-slate-500">
+              This warning was sent from the live monitoring panel. Continue only after following the instruction.
+            </p>
+            <button
+              onClick={() => setInvigilatorWarningMessage("")}
+              className="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold"
+            >
+              I Understand
             </button>
           </div>
         </div>
