@@ -364,56 +364,70 @@ const Sidebar = () => {
       </button>
 
       <nav className="flex-1 p-4 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col">
-        <NavLink to="/app" end className={navItemClass} title="Dashboard">
-          <LayoutDashboard size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
-        </NavLink>
-        <NavLink to="/app/logic-building-contest" className={navItemClass} title="Logic Building Contest">
-          <Sparkles size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Logic Building</span>}
-        </NavLink>
-        {role === 'admin' && (
-          <NavLink to="/app/admin/logic-building-admin-scoreboard" className={navItemClass} title="Logic Building Admin Scoreboard">
-            <Award size={28} />
-            {shouldShowText && <span className="truncate text-sm font-medium">Admin Scoreboard</span>}
-          </NavLink>
+        {role === 'instructor' ? (
+          <>
+            <NavLink to="/app" end className={navItemClass} title="Dashboard">
+              <LayoutDashboard size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
+            </NavLink>
+            <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
+            </NavLink>
+          </>
+        ) : (
+          <>
+            <NavLink to="/app" end className={navItemClass} title="Dashboard">
+              <LayoutDashboard size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
+            </NavLink>
+            <NavLink to="/app/logic-building-contest" className={navItemClass} title="Logic Building Contest">
+              <Sparkles size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Logic Building</span>}
+            </NavLink>
+            {role === 'admin' && (
+              <NavLink to="/app/admin/logic-building-admin-scoreboard" className={navItemClass} title="Logic Building Admin Scoreboard">
+                <Award size={28} />
+                {shouldShowText && <span className="truncate text-sm font-medium">Admin Scoreboard</span>}
+              </NavLink>
+            )}
+
+            <NavLink to="/app/courses" className={navItemClass} title="Courses">
+              <BookOpen size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Courses</span>}
+            </NavLink>
+
+            <NavLink to="/app/verify" className={navItemClass} title="Verify Certificate">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Verify Certificate</span>}
+            </NavLink>
+
+            <NavLink to="/app/profile" className={navItemClass} title="Profile">
+              <User size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Profile</span>}
+            </NavLink>
+
+            <NavLink to="/app/guidance-sessions" className={navItemClass} title="Mentorship Sessions">
+              <Calendar size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Mentorship Sessions</span>}
+              {role === 'admin' && newGuidanceRequests > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {newGuidanceRequests > 9 ? '9+' : newGuidanceRequests}
+                </span>
+              )}
+            </NavLink>
+
+            <NavLink to="/app/notifications" className={navItemClass} title="Notifications">
+              <Bell size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Notifications</span>}
+              {unreadNotifications > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                </span>
+              )}
+            </NavLink>
+          </>
         )}
-
-        <NavLink to="/app/courses" className={navItemClass} title="Courses">
-          <BookOpen size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Courses</span>}
-        </NavLink>
-
-        <NavLink to="/app/verify" className={navItemClass} title="Verify Certificate">
-          <ShieldCheck size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Verify Certificate</span>}
-        </NavLink>
-
-        <NavLink to="/app/profile" className={navItemClass} title="Profile">
-          <User size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Profile</span>}
-        </NavLink>
-
-
-        <NavLink to="/app/guidance-sessions" className={navItemClass} title="Mentorship Sessions">
-          <Calendar size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Mentorship Sessions</span>}
-          {role === 'admin' && newGuidanceRequests > 0 && (
-            <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-              {newGuidanceRequests > 9 ? '9+' : newGuidanceRequests}
-            </span>
-          )}
-        </NavLink>
-
-        <NavLink to="/app/notifications" className={navItemClass} title="Notifications">
-          <Bell size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Notifications</span>}
-          {unreadNotifications > 0 && (
-            <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-              {unreadNotifications > 9 ? '9+' : unreadNotifications}
-            </span>
-          )}
-        </NavLink>
 
         {/* Student Specific */}
         {role === 'student' && (
@@ -485,6 +499,10 @@ const Sidebar = () => {
         {/* Teacher Specific */}
         {role === 'teacher' && (
           <>
+            <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
+            </NavLink>
             <NavLink to="/app/teacher/tests" className={navItemClass} title="Conduct Tests">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Conduct Tests</span>}
@@ -541,6 +559,34 @@ const Sidebar = () => {
         {/* Admin Specific */}
         {role === 'admin' && (
           <>
+            <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
+            </NavLink>
+            <NavLink to="/app/live-exam-slots" className={navItemClass} title="Live Exam Slots">
+              <Calendar size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Exam Slots</span>}
+            </NavLink>
+            <NavLink to="/app/live-monitoring" className={navItemClass} title="Live Monitoring">
+              <Video size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Monitoring</span>}
+            </NavLink>
+            <NavLink to="/app/live-attendance" className={navItemClass} title="Live Attendance">
+              <ClipboardList size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Exam Attendance</span>}
+            </NavLink>
+            <NavLink to="/app/faculty-attendance" className={navItemClass} title="Faculty Attendance">
+              <Users size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Faculty Att</span>}
+            </NavLink>
+            <NavLink to="/app/live-alerts" className={navItemClass} title="Live Alerts">
+              <Bell size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Violation Alerts</span>}
+            </NavLink>
+            <NavLink to="/app/live-messages" className={navItemClass} title="Exam Messages">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Exam Messages</span>}
+            </NavLink>
             <NavLink to="/app/admin/logic-building-setup" className={navItemClass} title="Logic Building Setup">
               <Sparkles size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Logic Building Setup</span>}
@@ -713,11 +759,12 @@ const Sidebar = () => {
           </>
         )}
 
-        {/* Settings - Available for all roles */}
-        <NavLink to="/app/settings" className={navItemClass} title="Settings">
-          <Settings size={28} />
-          {shouldShowText && <span className="truncate text-sm font-medium">Settings</span>}
-        </NavLink>
+        {role !== 'instructor' ? (
+          <NavLink to="/app/settings" className={navItemClass} title="Settings">
+            <Settings size={28} />
+            {shouldShowText && <span className="truncate text-sm font-medium">Settings</span>}
+          </NavLink>
+        ) : null}
 
         <div className="pt-8 mt-8 border-t border-white/10 flex-shrink-0">
           <button onClick={signOut} className={`flex min-h-[56px] items-center ${isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} text-red-400 hover:text-red-300 w-full rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-7 [&>svg]:w-7 [&>svg]:shrink-0 hover:bg-white/5`} title="Sign Out">

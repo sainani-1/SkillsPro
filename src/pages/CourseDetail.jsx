@@ -365,13 +365,19 @@ const CourseDetail = () => {
 
                                 {activeTab === 'exam' && (
                                     <div>
-                                        <h2 className="text-2xl font-bold text-slate-900 mb-6">Course Exam</h2>
+                                        <h2 className="text-2xl font-bold text-slate-900">Exam Slot Booking</h2>
+                                        <p className="mt-2 text-slate-600">
+                                            {course.title}
+                                        </p>
+                                        <p className="mt-2 mb-6 text-sm text-slate-500">
+                                            Book your exam slot first. After booking, you can write the exam only on your scheduled slot date and time.
+                                        </p>
                                         <Link
-                                            to={`/exam/${courseId}`}
+                                            to={`/app/live-exams?courseId=${courseId}`}
                                             className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
                                         >
                                             <Award size={20} className="mr-2" />
-                                            Final Exam - {course.title}
+                                            Book Exam Slot
                                         </Link>
                                     </div>
                                 )}

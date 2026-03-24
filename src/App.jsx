@@ -97,6 +97,8 @@ import SkillBadges from './pages/SkillBadges';
 import AdminWebsiteProtection from './pages/AdminWebsiteProtection';
 import UniversalAssistant from './pages/UniversalAssistant';
 import AdminUserAccess from './pages/AdminUserAccess';
+import LiveExamProctoring from './pages/LiveExamProctoring';
+import FacultyAttendance from './pages/FacultyAttendance';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -237,6 +239,16 @@ const TeacherRoute = ({ children }) => {
   return children;
 };
 
+const InstructorRoute = ({ children }) => {
+  const { profile, loading } = useAuth();
+
+  if (loading) return <LoadingSpinner message="Loading dashboard..." />;
+  if (!profile || profile.role !== "instructor")
+    return <Navigate to="/app" />;
+
+  return children;
+};
+
 function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -281,6 +293,13 @@ function App() {
           <Route path="assigned-classes" element={<AssignedClasses />} />
           <Route path="class-schedule" element={<ClassSchedule />} />
           <Route path="assistant" element={<UniversalAssistant />} />
+          <Route path="live-exams" element={<LiveExamProctoring />} />
+          <Route path="live-exam-slots" element={<LiveExamProctoring forcedPanel="slots" />} />
+          <Route path="live-monitoring" element={<LiveExamProctoring forcedPanel="monitoring" />} />
+          <Route path="live-attendance" element={<LiveExamProctoring forcedPanel="attendance" />} />
+          <Route path="live-alerts" element={<LiveExamProctoring forcedPanel="alerts" />} />
+          <Route path="live-messages" element={<LiveExamProctoring forcedPanel="messages" />} />
+          <Route path="faculty-attendance" element={<AdminRoute><FacultyAttendance /></AdminRoute>} />
           <Route path="career-chatbot" element={<CareerChatbot />} />
           <Route path="learning-path" element={<AILearningPath />} />
           <Route path="interview-prep" element={<InterviewPrep />} />
@@ -307,6 +326,12 @@ function App() {
           <Route path="admin/teacher-progress" element={<AdminRoute><TeacherProgress /></AdminRoute>} />
           <Route path="admin/courses" element={<AdminRoute><AdminCourses /></AdminRoute>} />
           <Route path="teacher/tests" element={<TeacherRoute><TeacherConductTests /></TeacherRoute>} />
+          <Route path="instructor/live-exams" element={<InstructorRoute><LiveExamProctoring /></InstructorRoute>} />
+          <Route path="instructor/live-exam-slots" element={<InstructorRoute><LiveExamProctoring forcedPanel="slots" /></InstructorRoute>} />
+          <Route path="instructor/live-monitoring" element={<InstructorRoute><LiveExamProctoring forcedPanel="monitoring" /></InstructorRoute>} />
+          <Route path="instructor/live-attendance" element={<InstructorRoute><LiveExamProctoring forcedPanel="attendance" /></InstructorRoute>} />
+          <Route path="instructor/live-alerts" element={<InstructorRoute><LiveExamProctoring forcedPanel="alerts" /></InstructorRoute>} />
+          <Route path="instructor/live-messages" element={<InstructorRoute><LiveExamProctoring forcedPanel="messages" /></InstructorRoute>} />
           <Route path="admin/student-progress" element={<AdminRoute><StudentProgress /></AdminRoute>} />
           <Route path="admin/student/:studentId" element={<AdminRoute><StudentDetail /></AdminRoute>} />
           <Route path="admin/user-access" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
@@ -342,6 +367,7 @@ function App() {
         {/* Exam is outside layout for fullscreen enforcement */}
         <Route path="/exam/:courseId" element={<ProtectedRoute><Exam /></ProtectedRoute>} />
         <Route path="/test-exam/:examId" element={<ProtectedRoute><TestExam /></ProtectedRoute>} />
+        <Route path="/live-test/:examId" element={<ProtectedRoute><Exam examMode="live-proctored" /></ProtectedRoute>} />
 
         {/* Live Class is outside layout for fullscreen */}
         <Route path="/live-class/:sessionId" element={<ProtectedRoute><LiveClass /></ProtectedRoute>} />

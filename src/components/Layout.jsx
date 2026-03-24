@@ -67,6 +67,7 @@ const Layout = () => {
 
     const studentTargets = [
       ...common,
+      { label: 'Live Exams', path: '/app/live-exams' },
       { label: 'Write Test', path: '/app/write-test' },
       { label: 'My Certificates', path: '/app/my-certificates' },
       { label: 'Live Classes', path: '/app/class-schedule' },
@@ -89,6 +90,11 @@ const Layout = () => {
 
     const teacherTargets = [
       ...common,
+      { label: 'Live Exams', path: '/app/live-exams' },
+      { label: 'Live Monitoring', path: '/app/live-monitoring' },
+      { label: 'Exam Attendance', path: '/app/live-attendance' },
+      { label: 'Violation Alerts', path: '/app/live-alerts' },
+      { label: 'Exam Messages', path: '/app/live-messages' },
       { label: 'Conduct Tests', path: '/app/teacher/tests' },
       { label: 'Clear Doubts', path: '/app/clear-doubts' },
       { label: 'Attendance', path: '/app/attendance' },
@@ -103,6 +109,13 @@ const Layout = () => {
 
     const adminTargets = [
       ...common,
+      { label: 'Live Exams', path: '/app/live-exams' },
+      { label: 'Live Exam Slots', path: '/app/live-exam-slots' },
+      { label: 'Live Monitoring', path: '/app/live-monitoring' },
+      { label: 'Exam Attendance', path: '/app/live-attendance' },
+      { label: 'Faculty Attendance', path: '/app/faculty-attendance' },
+      { label: 'Violation Alerts', path: '/app/live-alerts' },
+      { label: 'Exam Messages', path: '/app/live-messages' },
       { label: 'Admin Scoreboard', path: '/app/admin/logic-building-admin-scoreboard' },
       { label: 'Logic Building Setup', path: '/app/admin/logic-building-setup' },
       { label: 'Change Course', path: '/app/admin/change-course' },
@@ -141,7 +154,19 @@ const Layout = () => {
       { label: 'Startup Collaborations', path: '/app/admin/startup-collaborations' },
     ];
 
-    const targets = role === 'admin' ? adminTargets : role === 'teacher' ? teacherTargets : studentTargets;
+    const instructorTargets = [
+      { label: 'Dashboard', path: '/app' },
+      { label: 'Live Exams', path: '/app/live-exams' },
+    ];
+
+    const targets =
+      role === 'admin'
+        ? adminTargets
+        : role === 'teacher'
+          ? teacherTargets
+          : role === 'instructor'
+            ? instructorTargets
+            : studentTargets;
     return targets.filter((item, index, arr) => arr.findIndex((x) => x.path === item.path) === index);
   };
 
