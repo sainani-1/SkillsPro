@@ -1,0 +1,35 @@
+import { supabase } from '../supabaseClient';
+
+export const liveKitRoomNameForSession = (sessionId) => `skillpro-live-exam-session-${sessionId}`;
+
+export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId }) => {
+  if (!requesterId) {
+    throw new Error('LiveKit auth failed: requester id is missing.');
+  }
+
+  const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/livekit-token`;
+  const response = await fetch(functionUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({
+      sessionId,
+      mode,
+      requesterId,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `LiveKit token failed with status ${response.status}.`);
+  }
+
+  if (!payload?.token || !payload?.url || !payload?.roomName) {
+    throw new Error('LiveKit token response is incomplete.');
+  }
+
+  return payload;
+};

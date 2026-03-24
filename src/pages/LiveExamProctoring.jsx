@@ -29,6 +29,18 @@ const slotIsBookable = (slot) => {
   return startsAt >= Date.now() && startsAt <= cutoff;
 };
 
+const slotIsStillLiveVisible = (slot) => {
+  if (!slot?.ends_at) return true;
+  if (slot.status === 'cancelled' || slot.status === 'completed') return false;
+  return new Date(slot.ends_at).getTime() >= Date.now();
+};
+
+const slotIsOngoingWindow = (slot) => {
+  if (!slot?.starts_at || !slot?.ends_at) return false;
+  const now = Date.now();
+  return new Date(slot.starts_at).getTime() <= now && new Date(slot.ends_at).getTime() >= now;
+};
+
 const roomNameForSlot = (slot, exam) =>
   slot?.monitor_room_name || `SkillPro_Exam_${exam?.id || slot?.exam_id || 'slot'}_${slot?.id || Date.now()}`;
 
@@ -226,8 +238,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const [studentCalendarMonth, setStudentCalendarMonth] = useState(() => getMonthStart());
   const [selectedMonitoringSessionId, setSelectedMonitoringSessionId] = useState(null);
   const [monitorFeedTab, setMonitorFeedTab] = useState('screen');
+  const [showBigLiveModal, setShowBigLiveModal] = useState(false);
+  const [popupState, setPopupState] = useState(null);
   const activeLoadIdRef = useRef(0);
   const reloadTimerRef = useRef(null);
+  const bigLiveMonitorRef = useRef(null);
+  const popupResolverRef = useRef(null);
 
   const role = profile?.role || 'student';
   const isAdmin = role === 'admin';
@@ -265,16 +281,37 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const sessionByBookingId = useMemo(() => {
     const map = {};
     sessions.forEach((session) => {
-      map[session.booking_id] = session;
+      const existing = map[session.booking_id];
+      if (!existing) {
+        map[session.booking_id] = session;
+        return;
+      }
+      const existingStatus = String(existing.status || '').toLowerCase();
+      const nextStatus = String(session.status || '').toLowerCase();
+      const existingPriority = existingStatus === 'active' ? 4 : existingStatus === 'paused' ? 3 : existingStatus === 'scheduled' ? 2 : existingStatus === 'disconnected' ? 1 : 0;
+      const nextPriority = nextStatus === 'active' ? 4 : nextStatus === 'paused' ? 3 : nextStatus === 'scheduled' ? 2 : nextStatus === 'disconnected' ? 1 : 0;
+      const existingStamp = new Date(existing.updated_at || existing.started_at || existing.created_at || 0).getTime();
+      const nextStamp = new Date(session.updated_at || session.started_at || session.created_at || 0).getTime();
+      if (nextPriority > existingPriority || (nextPriority === existingPriority && nextStamp >= existingStamp)) {
+        map[session.booking_id] = session;
+      }
     });
     return map;
   }, [sessions]);
 
   const visibleSlots = useMemo(() => {
     if (!isStudent) {
-      return slots
+      let nextSlots = slots
+        .filter((slot) => slotIsStillLiveVisible(slot))
         .filter((slot) => slot.status !== 'cancelled')
         .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+      if (isInstructor) {
+        nextSlots = nextSlots.filter((slot) => {
+          const hasBooking = bookings.some((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled');
+          return hasBooking || slotIsOngoingWindow(slot);
+        });
+      }
+      return nextSlots;
     }
     return slots
       .filter((slot) => {
@@ -285,7 +322,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       .filter((slot) => slot.status !== 'cancelled')
       .filter((slot) => slotIsBookable(slot) || bookingBySlotId[slot.id])
       .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  }, [slots, isStudent, bookingBySlotId, requestedCourseId, examsById]);
+  }, [slots, isStudent, isInstructor, bookings, bookingBySlotId, requestedCourseId, examsById]);
 
   const selectedSlot = useMemo(
     () => visibleSlots.find((slot) => String(slot.id) === String(selectedSlotId)) || null,
@@ -301,6 +338,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     () => sessions.filter((session) => String(session.slot_id) === String(selectedSlot?.id || '')),
     [sessions, selectedSlot?.id]
   );
+  const currentSlotSessions = useMemo(() => {
+    const seenSessionIds = new Set();
+    return slotBookings
+      .map((booking) => sessionByBookingId[booking.id])
+      .filter((session) => {
+        if (!session?.id) return false;
+        const key = String(session.id);
+        if (seenSessionIds.has(key)) return false;
+        seenSessionIds.add(key);
+        return true;
+      });
+  }, [slotBookings, sessionByBookingId]);
 
   const slotViolations = useMemo(
     () =>
@@ -344,13 +393,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
 
   const counts = useMemo(() => {
     const relevantBookings = selectedSlot ? slotBookings : bookings;
-    const relevantSessions = selectedSlot ? slotSessions : sessions;
+    const relevantSessions = selectedSlot ? currentSlotSessions : sessions;
     return {
       totalStudents: relevantBookings.filter((row) => row.status !== 'cancelled').length,
       activeStudents: relevantSessions.filter((row) => row.status === 'active').length,
       disconnectedStudents: relevantSessions.filter((row) => row.status === 'disconnected' || row.status === 'terminated').length,
     };
-  }, [selectedSlot, slotBookings, bookings, slotSessions, sessions]);
+  }, [selectedSlot, slotBookings, bookings, currentSlotSessions, sessions]);
 
   const studentAvailableDates = useMemo(() => (
     Array.from(new Set(
@@ -401,10 +450,74 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       return !term || haystack.includes(term);
     });
   }, [allActiveSessions, slotSearch, slots, examsById, coursesById, profilesById]);
-  const selectedMonitoringSession = useMemo(
-    () => slotSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) || null,
-    [slotSessions, selectedMonitoringSessionId]
-  );
+  const instructorPanelCards = useMemo(() => {
+    const term = String(slotSearch || '').trim().toLowerCase();
+    return visibleSlots
+      .map((slot) => {
+        const exam = examsById[slot.exam_id];
+        const course = coursesById[exam?.course_id];
+        const teacher = profilesById[slot.teacher_id];
+        const assignedInstructorCount = slotInstructors.filter((row) => String(row.slot_id) === String(slot.id)).length;
+        const slotBookingRows = bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled');
+        const slotSessionRows = sessions.filter((row) => String(row.slot_id) === String(slot.id));
+        const activeSlotSessions = slotSessionRows.filter((row) => row.status === 'active');
+        const studentNames = slotBookingRows
+          .map((row) => profilesById[row.student_id]?.full_name || profilesById[row.student_id]?.email || '')
+          .filter(Boolean);
+        const haystack = [
+          getSlotHeadline(slot, exam, course),
+          formatDateTime(slot.starts_at),
+          teacher?.full_name,
+          teacher?.email,
+          studentNames.join(' '),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return {
+          slot,
+          exam,
+          course,
+          teacher,
+          assignedInstructorCount,
+          slotBookingRows,
+          activeSlotSessions,
+          totalSessions: slotSessionRows.length,
+          studentNames,
+          haystack,
+        };
+      })
+      .filter((card) => !term || card.haystack.includes(term));
+  }, [visibleSlots, slotSearch, examsById, coursesById, profilesById, slotInstructors, bookings, sessions]);
+  const latestUsableSessionByStudentId = useMemo(() => {
+    const map = {};
+    const sortedSessions = [...currentSlotSessions].sort(
+      (a, b) =>
+        new Date(b.updated_at || b.started_at || b.created_at || 0) -
+        new Date(a.updated_at || a.started_at || a.created_at || 0)
+    );
+    sortedSessions.forEach((session) => {
+      const studentKey = String(session.student_id || '');
+      if (!studentKey || map[studentKey]) return;
+      const status = String(session.status || '').toLowerCase();
+      if (['active', 'paused', 'scheduled'].includes(status)) {
+        map[studentKey] = session;
+      }
+    });
+    return map;
+  }, [currentSlotSessions]);
+  const selectedMonitoringSession = useMemo(() => {
+    const directSession =
+      currentSlotSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
+      slotSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
+      null;
+    if (!directSession) return null;
+    const directStatus = String(directSession.status || '').toLowerCase();
+    if (!['terminated', 'disconnected'].includes(directStatus)) {
+      return directSession;
+    }
+    return latestUsableSessionByStudentId[String(directSession.student_id || '')] || directSession;
+  }, [currentSlotSessions, slotSessions, selectedMonitoringSessionId, latestUsableSessionByStudentId]);
   const selectedMonitoringBooking = useMemo(
     () => slotBookings.find((booking) => String(booking.id) === String(selectedMonitoringSession?.booking_id || '')) || null,
     [slotBookings, selectedMonitoringSession?.booking_id]
@@ -412,6 +525,15 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const selectedMonitoringStudent = useMemo(
     () => profilesById[selectedMonitoringSession?.student_id] || null,
     [profilesById, selectedMonitoringSession?.student_id]
+  );
+  const monitorableSessions = useMemo(() => (
+    currentSlotSessions
+      .filter((session) => ['active', 'paused', 'scheduled'].includes(String(session.status || '').toLowerCase()))
+      .sort((a, b) => new Date(a.started_at || a.created_at || 0) - new Date(b.started_at || b.created_at || 0))
+  ), [currentSlotSessions]);
+  const selectedMonitoringIndex = useMemo(
+    () => monitorableSessions.findIndex((session) => String(session.id) === String(selectedMonitoringSessionId)),
+    [monitorableSessions, selectedMonitoringSessionId]
   );
   const monitoredViolations = useMemo(
     () => slotViolations.filter((violation) => String(violation.student_id) === String(selectedMonitoringSession?.student_id || '')),
@@ -421,10 +543,21 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     () => slotMessages.filter((message) => String(message.recipient_id || '') === String(selectedMonitoringSession?.student_id || '') || String(message.sender_id || '') === String(selectedMonitoringSession?.student_id || '')),
     [slotMessages, selectedMonitoringSession?.student_id]
   );
-  const activeMonitoringSessions = useMemo(
-    () => slotSessions.filter((session) => session.status === 'active'),
-    [slotSessions]
-  );
+  const activeMonitoringSessions = useMemo(() => {
+    const sortedSessions = [...currentSlotSessions].sort(
+      (a, b) =>
+        new Date(b.updated_at || b.started_at || b.created_at || 0) -
+        new Date(a.updated_at || a.started_at || a.created_at || 0)
+    );
+    const seenStudentIds = new Set();
+    return sortedSessions.filter((session) => {
+      const status = String(session.status || '').toLowerCase();
+      if (!['active', 'scheduled', 'paused'].includes(status)) return false;
+      if (seenStudentIds.has(String(session.student_id))) return false;
+      seenStudentIds.add(String(session.student_id));
+      return true;
+    });
+  }, [currentSlotSessions]);
   const examSearchResults = useMemo(() => {
     const term = String(examSearch || '').trim().toLowerCase();
     return Object.values(examsById)
@@ -511,6 +644,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setSelectedMonitoringSessionId(activeMonitoringSessions[0].id);
     }
   }, [selectedSlot, activeMonitoringSessions, selectedMonitoringSessionId]);
+
+  useEffect(() => {
+    if (!selectedMonitoringSession) return;
+    const selectedStatus = String(selectedMonitoringSession.status || '').toLowerCase();
+    if (selectedStatus !== 'terminated' && selectedStatus !== 'disconnected') return;
+    const replacementSession = activeMonitoringSessions.find(
+      (session) => String(session.student_id) === String(selectedMonitoringSession.student_id)
+    );
+    if (replacementSession && String(replacementSession.id) !== String(selectedMonitoringSession.id)) {
+      setSelectedMonitoringSessionId(replacementSession.id);
+    }
+  }, [selectedMonitoringSession, activeMonitoringSessions]);
 
   useEffect(() => {
     if (!isStudent) return;
@@ -1057,8 +1202,51 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           reason: 'Allowed while registrations are paused.',
         }, { onConflict: 'slot_id,student_id' });
       if (overrideError) throw overrideError;
+      const targetBooking = bookings.find(
+        (row) => String(row.slot_id) === String(selectedSlot.id) && String(row.student_id) === String(overrideStudentId)
+      );
+      if (targetBooking) {
+        const { error: bookingResetError } = await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'booked',
+            cancelled_at: null,
+            cancellation_reason: null,
+            updated_at: nowIso(),
+          })
+          .eq('id', targetBooking.id);
+        if (bookingResetError) throw bookingResetError;
+
+        const targetSessions = sessions.filter((row) => String(row.booking_id) === String(targetBooking.id));
+        if (targetSessions.length > 0) {
+          const { error: sessionResetError } = await supabase
+            .from('exam_live_sessions')
+            .update({
+              status: 'scheduled',
+              attendance_status: 'pending',
+              ended_at: null,
+              termination_reason: null,
+              camera_connected: false,
+              mic_connected: false,
+              screen_share_connected: false,
+              updated_at: nowIso(),
+            })
+            .eq('booking_id', targetBooking.id);
+          if (sessionResetError) throw sessionResetError;
+          const refreshedSession = targetSessions
+            .slice()
+            .sort(
+              (a, b) =>
+                new Date(b.updated_at || b.started_at || b.created_at || 0) -
+                new Date(a.updated_at || a.started_at || a.created_at || 0)
+            )[0];
+          if (refreshedSession) {
+            setSelectedMonitoringSessionId(refreshedSession.id);
+          }
+        }
+      }
       setOverrideStudentId('');
-      setInfo('Student override granted for this slot.');
+      setInfo('Student override granted for this slot and live status reset.');
       await loadData({ silent: true });
     } catch (actionError) {
       setError(actionError.message || 'Failed to grant override.');
@@ -1070,8 +1258,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const handleBookSlot = async (slot) => {
     const exam = examsById[slot.exam_id];
     const examLabel = getExamDisplayName(exam, coursesById[exam?.course_id]);
-    const confirmed = window.confirm(
-      `Confirm booking?\n\nExam: ${examLabel}\nDate & Time: ${formatDateTime(slot.starts_at)}`
+    const confirmed = await askConfirm(
+      'Confirm Booking',
+      `Exam: ${examLabel}\nDate & Time: ${formatDateTime(slot.starts_at)}`,
+      'Book Slot',
+      'Cancel'
     );
     if (!confirmed) return;
 
@@ -1150,7 +1341,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   };
 
   const handleCancelSlot = async (slot) => {
-    const reason = window.prompt('Reason for cancellation?', 'Slot cancelled by admin');
+    const reason = await askPrompt('Cancel Slot', 'Reason for cancellation?', 'Slot cancelled by admin', 'Cancel Slot', 'Back');
     if (reason === null) return;
     setSaving(true);
     setError('');
@@ -1192,7 +1383,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     const hasLinkedBookings = bookings.some((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled');
     const hasLinkedSessions = sessions.some((row) => String(row.slot_id) === String(slot.id));
     if (hasLinkedBookings || hasLinkedSessions) {
-      if (!window.confirm('This slot has linked exam activity. Hide it from all panels and cancel it?')) return;
+      if (!(await askConfirm('Hide Linked Slot', 'This slot has linked exam activity. Hide it from all panels and cancel it?', 'Hide Slot', 'Back'))) return;
       setSaving(true);
       setError('');
       setInfo('');
@@ -1228,7 +1419,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       }
       return;
     }
-    if (!window.confirm('Delete this slot permanently? This cannot be undone.')) return;
+    if (!(await askConfirm('Delete Slot Permanently', 'Delete this slot permanently? This cannot be undone.', 'Delete Slot', 'Back'))) return;
 
     setSaving(true);
     setError('');
@@ -1259,8 +1450,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
 
   const handleDeleteAllSlots = async () => {
     if (!isAdmin || visibleSlots.length === 0) return;
-    const confirmed = window.confirm(
-      'Delete all visible slots?\n\nSlots with bookings or sessions will be hidden/cancelled. Empty slots will be deleted permanently.'
+    const confirmed = await askConfirm(
+      'Delete All Visible Slots',
+      'Slots with bookings or sessions will be hidden/cancelled. Empty slots will be deleted permanently.',
+      'Delete All',
+      'Back'
     );
     if (!confirmed) return;
 
@@ -1505,12 +1699,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const handleSessionAction = async (session, actionType) => {
     const message =
       actionType === 'warning'
-        ? window.prompt('Warning message for student?', 'Strict exam rule violation detected. Return to a compliant state immediately.')
+        ? await askPrompt('Send Warning', 'Warning message for student?', 'Strict exam rule violation detected. Return to a compliant state immediately.', 'Send Warning', 'Back')
         : actionType === 'pause'
-          ? window.prompt('Pause reason?', 'Exam paused by invigilator.')
+          ? await askPrompt('Pause Exam', 'Pause reason?', 'Exam paused by invigilator.', 'Pause Exam', 'Back')
           : actionType === 'terminate'
-            ? window.prompt('Termination reason?', 'Exam terminated by invigilator.')
-            : window.prompt('Lock reason?', `Account locked by ${role}.`);
+            ? await askPrompt('Terminate Exam', 'Termination reason?', 'Exam terminated by invigilator.', 'Terminate Exam', 'Back')
+            : await askPrompt('Lock Account', 'Lock reason?', `Account locked by ${role}.`, 'Lock Account', 'Back');
     if (message === null) return;
 
     setSaving(true);
@@ -1625,12 +1819,98 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     }
   };
 
+  const handleSelectAdjacentMonitoringSession = (direction) => {
+    if (!monitorableSessions.length) return;
+    const safeIndex = selectedMonitoringIndex >= 0 ? selectedMonitoringIndex : 0;
+    const nextIndex = safeIndex + direction;
+    if (nextIndex < 0 || nextIndex >= monitorableSessions.length) return;
+    setSelectedMonitoringSessionId(monitorableSessions[nextIndex].id);
+  };
+
+  const openPopup = ({ mode = 'info', title, message, defaultValue = '', confirmLabel = 'Confirm', cancelLabel = 'Cancel' }) => (
+    new Promise((resolve) => {
+      popupResolverRef.current = resolve;
+      setPopupState({
+        mode,
+        title,
+        message,
+        value: defaultValue,
+        confirmLabel,
+        cancelLabel,
+      });
+    })
+  );
+
+  const resolvePopup = (result) => {
+    const resolver = popupResolverRef.current;
+    popupResolverRef.current = null;
+    setPopupState(null);
+    resolver?.(result);
+  };
+
+  const askConfirm = (title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel') =>
+    openPopup({ mode: 'confirm', title, message, confirmLabel, cancelLabel });
+
+  const askPrompt = (title, message, defaultValue = '', confirmLabel = 'Save', cancelLabel = 'Cancel') =>
+    openPopup({ mode: 'prompt', title, message, defaultValue, confirmLabel, cancelLabel });
+
+  const showPopupMessage = (title, message) =>
+    openPopup({ mode: 'info', title, message, confirmLabel: 'OK', cancelLabel: '' });
+
+  const handleOpenBigLiveView = (session, tab = 'screen') => {
+    if (!session?.id) return;
+    const status = String(session.status || '').toLowerCase();
+    if (!['active', 'paused', 'scheduled'].includes(status)) {
+      void showPopupMessage('Student Not Live', 'Student is not live right now.');
+      return;
+    }
+    setSelectedMonitoringSessionId(session.id);
+    setMonitorFeedTab(tab);
+    setShowBigLiveModal(true);
+    window.setTimeout(() => {
+      bigLiveMonitorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
+
   if (loading) {
     return <LoadingSpinner message="Loading live exam center..." />;
   }
 
   return (
     <div className="space-y-6">
+      {popupState ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[1.75rem] bg-white p-6 shadow-2xl">
+            <h3 className="text-xl font-semibold text-slate-900">{popupState.title}</h3>
+            <p className="mt-3 whitespace-pre-line text-sm text-slate-600">{popupState.message}</p>
+            {popupState.mode === 'prompt' ? (
+              <textarea
+                value={popupState.value}
+                onChange={(event) => setPopupState((prev) => ({ ...prev, value: event.target.value }))}
+                className="mt-4 min-h-[120px] w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900"
+              />
+            ) : null}
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              {popupState.mode !== 'info' ? (
+                <button
+                  type="button"
+                  onClick={() => resolvePopup(null)}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {popupState.cancelLabel || 'Cancel'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => resolvePopup(popupState.mode === 'prompt' ? popupState.value : true)}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                {popupState.confirmLabel || 'OK'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-6 text-white shadow-xl">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1945,28 +2225,72 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
             </div>
             <div className="mt-4 space-y-3">
               {isInstructor ? (
-                instructorActiveCards.length === 0 ? <p className="text-sm text-slate-500">No students are actively writing right now.</p> : instructorActiveCards.map((session) => {
-                  const slot = slots.find((row) => String(row.id) === String(session.slot_id));
-                  const exam = slot ? examsById[slot.exam_id] : null;
-                  const course = exam ? coursesById[exam.course_id] : null;
-                  const student = profilesById[session.student_id];
+                instructorPanelCards.length === 0 ? <p className="text-sm text-slate-500">No instructor slots are available right now.</p> : instructorPanelCards.map((card) => {
+                  const {
+                    slot,
+                    exam,
+                    course,
+                    teacher,
+                    assignedInstructorCount,
+                    slotBookingRows,
+                    activeSlotSessions,
+                    studentNames,
+                  } = card;
+                  const primarySession = activeSlotSessions[0] || null;
+                  const previewStudents = studentNames.slice(0, 2);
                   return (
                     <button
-                      key={session.id}
+                      key={slot.id}
                       type="button"
                       onClick={() => {
-                        setSelectedSlotId(session.slot_id);
-                        setSelectedMonitoringSessionId(session.id);
+                        setSelectedSlotId(slot.id);
+                        setSelectedMonitoringSessionId(primarySession?.id || null);
                       }}
-                      className={`w-full rounded-2xl border p-4 text-left transition ${String(selectedMonitoringSessionId) === String(session.id) ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                      className={`w-full rounded-2xl border p-4 text-left transition ${String(selectedSlotId) === String(slot.id) ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">{student?.full_name || student?.email || 'Student'}</p>
-                          <p className="mt-1 text-xs text-slate-600">{getSlotHeadline(slot, exam, course)}</p>
-                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(slot?.starts_at)}</p>
+                          <p className="text-sm font-semibold text-slate-900">{getSlotHeadline(slot, exam, course)}</p>
+                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(slot.starts_at)} to {formatDateTime(slot.ends_at)}</p>
+                          <p className="mt-1 text-xs text-slate-500">Assigned teacher: {teacher?.full_name || teacher?.email || 'None'}</p>
+                          <p className="mt-1 text-xs text-slate-500">Assigned instructor: {assignedInstructorCount}</p>
                         </div>
-                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">live</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeSlotSessions.length > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {activeSlotSessions.length > 0 ? 'live' : slot.status}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
+                        <span>Booked {slotBookingRows.length}</span>
+                        <span>Active {activeSlotSessions.length}</span>
+                        <span>Capacity {slot.max_capacity}</span>
+                      </div>
+                      <div className="mt-3 text-xs text-slate-500">
+                        {previewStudents.length > 0 ? `Students: ${previewStudents.join(', ')}${studentNames.length > 2 ? ` +${studentNames.length - 2} more` : ''}` : 'No students booked yet.'}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenMonitoring(slot);
+                          }}
+                          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                        >
+                          Open Live
+                        </button>
+                        {primarySession ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedSlotId(slot.id);
+                              setSelectedMonitoringSessionId(primarySession.id);
+                            }}
+                            className="rounded-xl border border-teal-300 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50"
+                          >
+                            View Active Student
+                          </button>
+                        ) : null}
                       </div>
                     </button>
                   );
@@ -2137,36 +2461,41 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                 <p className={`mt-4 text-xs ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-slate-300' : 'text-slate-500'}`}>{session ? 'Click to open live monitoring' : 'Student has not started the exam yet'}</p>
                               )}
                               {session ? (
+                                <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                                  <span className={`rounded-xl px-2 py-1 font-semibold ${session.camera_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Cam {session.camera_connected ? 'connected' : 'waiting'}</span>
+                                  <span className={`rounded-xl px-2 py-1 font-semibold ${session.mic_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Mic {session.mic_connected ? 'connected' : 'waiting'}</span>
+                                  <span className={`rounded-xl px-2 py-1 font-semibold ${session.screen_share_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Screen {session.screen_share_connected ? 'connected' : 'waiting'}</span>
+                                </div>
+                              ) : null}
+                              {session ? (
                                 <div className="mt-4 flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedMonitoringSessionId(session.id);
-                                      setMonitorFeedTab('screen');
-                                    }}
+                                    onClick={() => handleOpenBigLiveView(session, 'screen')}
                                     className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
                                   >
                                     Open Live
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedMonitoringSessionId(session.id);
-                                      setMonitorFeedTab('camera');
-                                    }}
+                                    onClick={() => handleOpenBigLiveView(session, 'camera')}
                                     className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                   >
                                     Camera
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedMonitoringSessionId(session.id);
-                                      setMonitorFeedTab('voice');
-                                    }}
+                                    onClick={() => handleOpenBigLiveView(session, 'voice')}
                                     className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                   >
                                     Mic
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenBigLiveView(session, 'screen')}
+                                    className="rounded-xl border border-teal-300 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100"
+                                  >
+                                    Open Big Live View
                                   </button>
                                 </div>
                               ) : null}
@@ -2247,27 +2576,48 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">Select a student from the monitoring list to open the detailed invigilation view.</div>
                       ) : (
                         <>
-                          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                          <div ref={bigLiveMonitorRef} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                             <div className="flex flex-wrap items-start justify-between gap-4">
                               <div>
                                 <h3 className="text-xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
                                 <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
                                 <p className="mt-1 text-sm text-slate-500">Joined: {formatDateTime(selectedMonitoringSession.started_at)}</p>
                               </div>
-                              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                selectedMonitoringSession.status === 'active'
-                                  ? 'bg-emerald-100 text-emerald-700'
-                                  : selectedMonitoringSession.status === 'terminated'
-                                    ? 'bg-rose-100 text-rose-700'
-                                    : 'bg-amber-100 text-amber-700'
-                              }`}>
-                                {selectedMonitoringSession.status}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectAdjacentMonitoringSession(-1)}
+                                  disabled={selectedMonitoringIndex <= 0}
+                                  className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  &lt;
+                                </button>
+                                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                  selectedMonitoringSession.status === 'active'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : selectedMonitoringSession.status === 'terminated'
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {selectedMonitoringSession.status}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectAdjacentMonitoringSession(1)}
+                                  disabled={selectedMonitoringIndex < 0 || selectedMonitoringIndex >= monitorableSessions.length - 1}
+                                  className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  &gt;
+                                </button>
+                              </div>
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
                               <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
                               <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
+                              <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
+                                {selectedMonitoringIndex >= 0 ? `${selectedMonitoringIndex + 1} / ${monitorableSessions.length}` : `1 / ${Math.max(monitorableSessions.length, 1)}`}
+                              </span>
                             </div>
                             <div className="mt-4">
                               <LiveExamStreamMonitor
@@ -2275,6 +2625,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                 session={selectedMonitoringSession}
                                 viewerId={profile?.id}
                                 viewerRole={role}
+                                large
                               />
                             </div>
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -2301,6 +2652,14 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                                 <p className="text-sm text-slate-600">Attendance</p>
                                 <p className="mt-1 text-sm font-semibold text-slate-900">{selectedMonitoringSession.attendance_status || selectedMonitoringBooking?.status || 'pending'}</p>
+                              </div>
+                              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                                <p className="text-sm text-slate-600">Media Permissions</p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
+                                  <span className={`rounded-full px-3 py-1 ${selectedMonitoringSession.camera_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Camera {selectedMonitoringSession.camera_connected ? 'connected' : 'waiting'}</span>
+                                  <span className={`rounded-full px-3 py-1 ${selectedMonitoringSession.mic_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Mic {selectedMonitoringSession.mic_connected ? 'connected' : 'waiting'}</span>
+                                  <span className={`rounded-full px-3 py-1 ${selectedMonitoringSession.screen_share_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Screen {selectedMonitoringSession.screen_share_connected ? 'connected' : 'waiting'}</span>
+                                </div>
                               </div>
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
@@ -2343,6 +2702,68 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                         </>
                       )}
                     </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {showBigLiveModal && selectedMonitoringSession ? (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+                    <div className="relative max-h-[94vh] w-full max-w-7xl overflow-auto rounded-[2rem] bg-white p-5 shadow-2xl">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
+                          <h3 className="mt-2 text-2xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
+                          <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAdjacentMonitoringSession(-1)}
+                            disabled={selectedMonitoringIndex <= 0}
+                            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            &lt;
+                          </button>
+                          <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                            {selectedMonitoringIndex >= 0 ? `${selectedMonitoringIndex + 1} / ${monitorableSessions.length}` : `1 / ${Math.max(1, monitorableSessions.length)}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAdjacentMonitoringSession(1)}
+                            disabled={selectedMonitoringIndex < 0 || selectedMonitoringIndex >= monitorableSessions.length - 1}
+                            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            &gt;
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowBigLiveModal(false)}
+                            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                          >
+                            X
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
+                        <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
+                        <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
+                      </div>
+                      <div className="mt-4">
+                        <LiveExamStreamMonitor
+                          slotId={selectedSlot?.id}
+                          session={selectedMonitoringSession}
+                          viewerId={profile?.id}
+                          viewerRole={role}
+                          large
+                        />
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800">Warn</button>
+                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">Pause</button>
+                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
+                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button>
+                      </div>
                     </div>
                   </div>
                 ) : null}

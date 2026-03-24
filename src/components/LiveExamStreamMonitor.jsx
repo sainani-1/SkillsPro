@@ -1,240 +1,208 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../supabaseClient';
-import {
-  LIVE_EXAM_SIGNAL_TABLE,
-  buildPeerKey,
-  createLiveExamPeer,
-  serializeIceCandidate,
-  serializeSessionDescription,
-} from '../lib/liveExamWebRTC';
+import { ConnectionState, Room, RoomEvent, Track } from 'livekit-client';
+import { getLiveKitTokenForSession } from '../lib/livekitSession';
 
-function attachStream(element, stream, { muted = false } = {}) {
-  if (!element) return;
-  if (element.srcObject !== stream) {
-    element.srcObject = stream;
-  }
-  element.muted = muted;
-  const playPromise = element.play?.();
-  if (playPromise?.catch) {
-    playPromise.catch(() => {});
+function detachTrack(track, element) {
+  try {
+    track?.detach?.(element);
+  } catch {
+    // ignore detach issues
   }
 }
 
 export default function LiveExamStreamMonitor({
-  slotId,
   session,
   viewerId,
-  viewerRole,
   compact = false,
-  showOnlyActive = true,
+  large = false,
 }) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Connecting live preview...');
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [debugState, setDebugState] = useState({
+    room: '-',
+    screen: 'waiting',
+    camera: 'waiting',
+    mic: 'waiting',
+  });
+  const roomRef = useRef(null);
+  const connectedSessionKeyRef = useRef('');
   const screenVideoRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const audioRef = useRef(null);
-  const pollTimerRef = useRef(null);
-  const peersRef = useRef(new Map());
-  const processedSignalIdsRef = useRef(new Set());
-  const connectionIdRef = useRef(`monitor-${Math.random().toString(36).slice(2, 10)}`);
-  const remoteStreamsRef = useRef({
-    screen: new MediaStream(),
-    camera: new MediaStream(),
-  });
-
-  const active = Boolean(session?.id && slotId && viewerId && (!showOnlyActive || session?.status === 'active'));
-  const sessionId = session?.id || null;
-  const studentId = session?.student_id || null;
 
   const streamCardClass = compact
     ? 'rounded-2xl border border-slate-800 bg-slate-950 p-2'
     : 'rounded-3xl border border-slate-200 bg-slate-950 p-3';
+  const screenHeightClass = compact ? 'h-36' : large ? 'h-[30rem]' : 'h-72';
+  const cameraHeightClass = compact ? 'h-36' : large ? 'h-[24rem]' : 'h-72';
+  const sessionStatus = String(session?.status || '').toLowerCase();
+  const connectionKey = `${viewerId || ''}:${session?.id || ''}`;
 
   useEffect(() => {
-    attachStream(screenVideoRef.current, remoteStreamsRef.current.screen, { muted: true });
-    attachStream(cameraVideoRef.current, remoteStreamsRef.current.camera, { muted: !audioEnabled });
-    attachStream(audioRef.current, remoteStreamsRef.current.camera, { muted: !audioEnabled });
-  }, [audioEnabled]);
-
-  useEffect(() => {
-    const closePeers = () => {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
+    if (!session?.id || !viewerId || !['active', 'paused', 'scheduled'].includes(sessionStatus)) {
+      if (roomRef.current) {
+        roomRef.current.disconnect?.();
+        roomRef.current = null;
+        connectedSessionKeyRef.current = '';
       }
-      peersRef.current.forEach((peer) => peer.close());
-      peersRef.current.clear();
-      remoteStreamsRef.current = {
-        screen: new MediaStream(),
-        camera: new MediaStream(),
-      };
+      setStatus('Student is not live right now.');
+      setError('');
+      setDebugState({
+        room: '-',
+        screen: 'waiting',
+        camera: 'waiting',
+        mic: 'waiting',
+      });
+      return undefined;
+    }
+
+    if (roomRef.current && connectedSessionKeyRef.current === connectionKey) {
+      return undefined;
+    }
+
+    let mounted = true;
+    const detachFns = [];
+
+    const cleanup = () => {
+      detachFns.forEach((fn) => fn());
+      detachFns.length = 0;
+      roomRef.current?.disconnect?.();
+      roomRef.current = null;
+      connectedSessionKeyRef.current = '';
       if (screenVideoRef.current) screenVideoRef.current.srcObject = null;
       if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
       if (audioRef.current) audioRef.current.srcObject = null;
     };
 
-    if (!active || !studentId) {
-      setStatus(session?.status === 'active' ? 'Waiting for live stream...' : 'Student is not live right now.');
-      setError('');
-      closePeers();
-      return undefined;
-    }
+    const attachPublication = (publication) => {
+      const subscribedTrack = publication?.track;
+      if (!subscribedTrack) return;
 
-    let cancelled = false;
-    processedSignalIdsRef.current = new Set();
-    setError('');
-    setStatus('Connecting live preview...');
-
-    const sendSignal = async ({ signalType, streamType, payload }) => {
-      const { error: signalError } = await supabase.from(LIVE_EXAM_SIGNAL_TABLE).insert({
-        slot_id: slotId,
-        session_id: sessionId,
-        from_user_id: viewerId,
-        from_role: viewerRole,
-        to_user_id: studentId,
-        signal_type: signalType,
-        stream_type: streamType,
-        payload: {
-          ...payload,
-          connectionId: connectionIdRef.current,
-        },
-      });
-      if (signalError && !cancelled) {
-        setError(signalError.message || 'Failed to send live-monitor signal.');
-      }
-    };
-
-    const setRemoteStream = (streamType, incomingStream) => {
-      const nextStream = remoteStreamsRef.current[streamType];
-      const trackIds = new Set(nextStream.getTracks().map((track) => track.id));
-      incomingStream.getTracks().forEach((track) => {
-        if (!trackIds.has(track.id)) {
-          nextStream.addTrack(track);
-        }
-      });
-      if (streamType === 'screen') {
-        attachStream(screenVideoRef.current, nextStream, { muted: true });
-      } else {
-        attachStream(cameraVideoRef.current, nextStream, { muted: !audioEnabled });
-        attachStream(audioRef.current, nextStream, { muted: !audioEnabled });
-      }
-    };
-
-    const ensurePeer = async (streamType) => {
-      const existing = peersRef.current.get(streamType);
-      if (existing) return existing;
-
-      const peer = createLiveExamPeer({
-        onIceCandidate: (candidate) =>
-          void sendSignal({
-            signalType: 'ice-candidate',
-            streamType,
-            payload: serializeIceCandidate(candidate),
-          }),
-        onTrack: (event) => {
-          const remoteStream =
-            event.streams?.[0] || new MediaStream([event.track]);
-          setRemoteStream(streamType, remoteStream);
-          setStatus('Live stream connected.');
-        },
-      });
-
-      peer.addTransceiver('video', { direction: 'recvonly' });
-      if (streamType === 'camera') {
-        peer.addTransceiver('audio', { direction: 'recvonly' });
-      }
-
-      peersRef.current.set(streamType, peer);
-      const offer = await peer.createOffer({
-        offerToReceiveVideo: true,
-        offerToReceiveAudio: streamType === 'camera',
-      });
-      await peer.setLocalDescription(offer);
-      await sendSignal({
-        signalType: 'offer',
-        streamType,
-        payload: serializeSessionDescription(peer.localDescription),
-      });
-      return peer;
-    };
-
-    const handleSignal = async (row) => {
-      if (!row || processedSignalIdsRef.current.has(row.id)) return;
-      if (String(row.session_id) !== String(sessionId)) return;
-      if (String(row.to_user_id || '') !== String(viewerId)) return;
-      if (String(row.from_user_id || '') !== String(studentId)) return;
-      if (String(row.payload?.connectionId || '') !== String(connectionIdRef.current)) return;
-      processedSignalIdsRef.current.add(row.id);
-
-      const streamType = row.stream_type === 'screen' ? 'screen' : 'camera';
-      const peer = peersRef.current.get(streamType);
-      if (!peer) return;
-
-      if (row.signal_type === 'answer' && row.payload?.sdp) {
-        await peer.setRemoteDescription(new RTCSessionDescription(row.payload));
-        setStatus('Live stream connected.');
+      if (publication.source === Track.Source.ScreenShare && subscribedTrack.kind === Track.Kind.Video) {
+        const element = screenVideoRef.current;
+        if (!element) return;
+        subscribedTrack.attach(element);
+        setDebugState((prev) => ({ ...prev, screen: 'connected' }));
+        detachFns.push(() => detachTrack(subscribedTrack, element));
         return;
       }
 
-      if (row.signal_type === 'ice-candidate' && row.payload?.candidate) {
-        try {
-          await peer.addIceCandidate(new RTCIceCandidate(row.payload));
-        } catch {
-          // ignore out-of-order candidates
-        }
+      if (publication.source === Track.Source.Camera && subscribedTrack.kind === Track.Kind.Video) {
+        const element = cameraVideoRef.current;
+        if (!element) return;
+        subscribedTrack.attach(element);
+        setDebugState((prev) => ({ ...prev, camera: 'connected' }));
+        detachFns.push(() => detachTrack(subscribedTrack, element));
+        return;
+      }
+
+      if (publication.source === Track.Source.Microphone && subscribedTrack.kind === Track.Kind.Audio) {
+        const element = audioRef.current;
+        if (!element) return;
+        subscribedTrack.attach(element);
+        element.muted = !audioEnabled;
+        setDebugState((prev) => ({ ...prev, mic: 'connected' }));
+        detachFns.push(() => detachTrack(subscribedTrack, element));
       }
     };
 
-    const channel = supabase
-      .channel(`live-exam-monitor-${sessionId}-${viewerId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: LIVE_EXAM_SIGNAL_TABLE },
-        (payload) => {
-          void handleSignal(payload?.new);
-        }
-      )
-      .subscribe();
-
-    const fetchRecentSignals = async () => {
-      const { data: recentSignals, error: recentError } = await supabase
-        .from(LIVE_EXAM_SIGNAL_TABLE)
-        .select('*')
-        .eq('session_id', sessionId)
-        .eq('to_user_id', viewerId)
-        .eq('from_user_id', studentId)
-        .order('created_at', { ascending: false })
-        .limit(40);
-      if (recentError) throw recentError;
-      (recentSignals || []).reverse().forEach((row) => {
-        void handleSignal(row);
-      });
-    };
-
-    const bootstrapSignals = async () => {
+    const connectRoom = async () => {
       try {
-        await Promise.all([ensurePeer('screen'), ensurePeer('camera')]);
-        await fetchRecentSignals();
-        pollTimerRef.current = window.setInterval(() => {
-          void fetchRecentSignals().catch(() => {});
-        }, 2000);
+        setError('');
+        setStatus('Connecting live preview...');
+        setDebugState({
+          room: 'fetching token',
+          screen: 'waiting',
+          camera: 'waiting',
+          mic: 'waiting',
+        });
+
+        const tokenData = await getLiveKitTokenForSession({
+          sessionId: session.id,
+          mode: 'observer',
+          requesterId: viewerId,
+        });
+        if (!mounted) return;
+
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+        roomRef.current = room;
+        connectedSessionKeyRef.current = connectionKey;
+
+        room
+          .on(RoomEvent.ConnectionStateChanged, (state) => {
+            setDebugState((prev) => ({ ...prev, room: state }));
+            setStatus(state === ConnectionState.Connected ? 'Live stream connected.' : 'Connecting live preview...');
+          })
+          .on(RoomEvent.TrackSubscribed, (track, publication) => {
+            attachPublication({ ...publication, track });
+          })
+          .on(RoomEvent.TrackUnsubscribed, (_, publication) => {
+            if (publication.source === Track.Source.ScreenShare) {
+              setDebugState((prev) => ({ ...prev, screen: 'waiting' }));
+            }
+            if (publication.source === Track.Source.Camera) {
+              setDebugState((prev) => ({ ...prev, camera: 'waiting' }));
+            }
+            if (publication.source === Track.Source.Microphone) {
+              setDebugState((prev) => ({ ...prev, mic: 'waiting' }));
+            }
+          });
+
+        await room.connect(tokenData.url, tokenData.token, {
+          autoSubscribe: true,
+        });
+        if (!mounted) return;
+
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((publication) => {
+            attachPublication(publication);
+          });
+        });
+
+        setStatus('Live stream connected.');
       } catch (connectionError) {
-        if (!cancelled) {
-          setError(connectionError.message || 'Failed to connect live stream.');
-          setStatus('Live stream is unavailable.');
-        }
+        if (!mounted) return;
+        setError(connectionError.message || 'Failed to connect LiveKit preview.');
+        setStatus('Live stream unavailable.');
       }
     };
 
-    void bootstrapSignals();
+    void connectRoom();
 
     return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-      closePeers();
+      mounted = false;
+      cleanup();
     };
-  }, [active, audioEnabled, session?.status, sessionId, slotId, studentId, viewerId, viewerRole]);
+  }, [session?.id, viewerId, connectionKey, sessionStatus]);
+
+  useEffect(() => {
+    if (!roomRef.current) return;
+    if (['active', 'paused', 'scheduled'].includes(sessionStatus)) return;
+    roomRef.current.disconnect?.();
+    roomRef.current = null;
+    connectedSessionKeyRef.current = '';
+    setStatus('Student is not live right now.');
+    setDebugState({
+      room: '-',
+      screen: 'waiting',
+      camera: 'waiting',
+      mic: 'waiting',
+    });
+  }, [sessionStatus]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.muted = !audioEnabled;
+      const playPromise = audioRef.current.play?.();
+      if (playPromise?.catch) {
+        playPromise.catch(() => {});
+      }
+    }
+  }, [audioEnabled]);
 
   const statusTone = useMemo(() => {
     if (error) return 'text-rose-300';
@@ -244,7 +212,7 @@ export default function LiveExamStreamMonitor({
 
   return (
     <div className="space-y-3">
-      <div className={`${streamCardClass}`}>
+      <div className={streamCardClass}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Screen Share</p>
           <span className={`text-[11px] ${statusTone}`}>{error || status}</span>
@@ -254,8 +222,11 @@ export default function LiveExamStreamMonitor({
           autoPlay
           muted
           playsInline
-          className={`w-full rounded-2xl bg-black object-contain ${compact ? 'h-36' : 'h-72'}`}
+          className={`w-full rounded-2xl bg-black object-contain ${screenHeightClass}`}
         />
+        {!compact ? (
+          <p className="mt-2 text-[11px] text-slate-400">Room: {debugState.room} | Screen: {debugState.screen}</p>
+        ) : null}
       </div>
 
       <div className={compact ? 'grid gap-3' : 'grid gap-3 lg:grid-cols-[1fr_0.36fr]'}>
@@ -275,11 +246,14 @@ export default function LiveExamStreamMonitor({
           <video
             ref={cameraVideoRef}
             autoPlay
-            muted={!audioEnabled}
+            muted
             playsInline
-            className={`w-full rounded-2xl bg-black object-cover ${compact ? 'h-36' : 'h-72'}`}
+            className={`w-full rounded-2xl bg-black object-cover ${cameraHeightClass}`}
           />
           <audio ref={audioRef} autoPlay muted={!audioEnabled} />
+          {!compact ? (
+            <p className="mt-2 text-[11px] text-slate-400">Camera: {debugState.camera} | Mic: {debugState.mic}</p>
+          ) : null}
         </div>
 
         {!compact ? (
@@ -289,7 +263,7 @@ export default function LiveExamStreamMonitor({
               {audioEnabled ? 'Live microphone monitoring enabled.' : 'Enable mic listening for this student.'}
             </p>
             <p className="mt-2 text-xs text-slate-500">
-              This free WebRTC monitor uses browser media directly. Without a paid TURN server, some restrictive networks may block the live feed.
+              LiveKit is now used for room transport. Make sure the `livekit-token` function is deployed and LiveKit env vars are configured.
             </p>
           </div>
         ) : null}
