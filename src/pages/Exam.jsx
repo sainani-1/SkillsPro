@@ -207,6 +207,7 @@ export default function Exam({ examMode = "certification" }) {
   const [showBackSwipeConfirm, setShowBackSwipeConfirm] = useState(false);
   const [backSwipeLocking, setBackSwipeLocking] = useState(false);
   const [resumeWarningMessage, setResumeWarningMessage] = useState("");
+  const [invigilatorPauseMessage, setInvigilatorPauseMessage] = useState("");
   const [submitReady, setSubmitReady] = useState(false);
   const [submitCountdown, setSubmitCountdown] = useState(6);
   const [submitDelaySeconds, setSubmitDelaySeconds] = useState(6);
@@ -315,6 +316,63 @@ export default function Exam({ examMode = "certification" }) {
       // ignore storage parse failures
     }
   }, []);
+
+  useEffect(() => {
+    if (!liveExamContext?.sessionId || !currentUserId) return undefined;
+
+    const handleLiveAction = async (payload) => {
+      const action = payload?.new;
+      if (!action) return;
+      if (String(action.session_id || '') !== String(liveExamContext.sessionId)) return;
+      if (String(action.target_student_id || '') !== String(currentUserId)) return;
+
+      const actionType = String(action.action_type || '').toLowerCase();
+      const actionMessage = String(action.message || '').trim();
+
+      if (actionType === 'warning') {
+        setInfoMsg(actionMessage || 'Invigilator warning received.');
+        return;
+      }
+
+      if (actionType === 'pause') {
+        setInvigilatorPauseMessage(actionMessage || 'Exam paused by invigilator.');
+        setInfoMsg(actionMessage || 'Exam paused by invigilator.');
+        await syncLiveExamSession({ status: 'paused' });
+        return;
+      }
+
+      if (actionType === 'terminate' || actionType === 'lock') {
+        await terminateExamForViolation(actionMessage || `Exam ${actionType}d by invigilator.`);
+      }
+    };
+
+    const channel = supabase
+      .channel(`live-exam-actions-${liveExamContext.sessionId}-${currentUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'exam_live_actions' },
+        (payload) => {
+          void handleLiveAction(payload);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'exam_live_messages' },
+        (payload) => {
+          const message = payload?.new;
+          if (!message) return;
+          if (String(message.session_id || '') !== String(liveExamContext.sessionId)) return;
+          if (message.recipient_id && String(message.recipient_id) !== String(currentUserId)) return;
+          if (String(message.sender_role || '').toLowerCase() === 'student') return;
+          setInfoMsg(String(message.content || 'New invigilator message received.'));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [liveExamContext?.sessionId, currentUserId]);
 
   useEffect(() => {
     // Immediate restore on mount to avoid flashing back to Step 1
@@ -2983,6 +3041,20 @@ export default function Exam({ examMode = "certification" }) {
             >
               OK
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {invigilatorPauseMessage && (phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING) ? (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="max-w-lg w-full bg-white rounded-2xl p-6 border border-slate-200 shadow-xl space-y-4 text-center">
+            <h2 className="text-xl font-bold text-slate-900">Exam Paused By Invigilator</h2>
+            <p className="text-sm text-slate-700">
+              {invigilatorPauseMessage}
+            </p>
+            <p className="text-xs text-slate-500">
+              This exam is paused from the monitoring panel. Wait for the invigilator to continue the session.
+            </p>
           </div>
         </div>
       ) : null}
