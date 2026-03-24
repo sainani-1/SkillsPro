@@ -236,6 +236,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const isStudent = role === 'student';
   const requestedPanel = forcedPanel || searchParams.get('panel') || 'overview';
   const requestedCourseId = searchParams.get('courseId') || '';
+  const requestedSlotId = searchParams.get('slotId') || '';
   const panelLabelMap = {
     overview: 'Overview',
     slots: 'Slot Management',
@@ -435,6 +436,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       .sort((a, b) => a.displayName.localeCompare(b.displayName))
       .slice(0, 8);
   }, [examsById, coursesById, examSearch]);
+
+  useEffect(() => {
+    if (requestedSlotId && !isStudent) {
+      setSelectedSlotId(requestedSlotId);
+    }
+  }, [requestedSlotId, isStudent]);
 
   useEffect(() => {
     if (!selectedSlotId && visibleSlots.length > 0 && !isStudent) {
@@ -1421,6 +1428,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     }
   };
 
+  const handleOpenMonitoring = (slot) => {
+    if (!slot?.id) return;
+    setSelectedSlotId(slot.id);
+    const basePath = isInstructor ? '/app/instructor/live-monitoring' : '/app/live-monitoring';
+    navigate(`${basePath}?slotId=${slot.id}`);
+  };
+
   const handleAttendance = async (session, status) => {
     setSaving(true);
     setError('');
@@ -1976,6 +1990,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${slot.status === 'cancelled' ? 'bg-rose-100 text-rose-700' : slot.status === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{slot.status}</span>
                     </div>
                     <div className="mt-3 flex gap-3 text-xs text-slate-600"><span>Total {bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled').length}</span><span>Active {activeCount}</span><span>Disconnected/Terminated {terminatedCount}</span></div>
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleOpenMonitoring(slot);
+                        }}
+                        className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                      >
+                        Open Live
+                      </button>
+                    </div>
                   </button>
                 );
               })}
@@ -1990,9 +2016,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                     <div>
                       <h2 className="text-2xl font-semibold text-slate-900">{selectedSlot.title || getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</h2>
                       <p className="mt-1 text-sm text-slate-500">{formatDateTime(selectedSlot.starts_at)} to {formatDateTime(selectedSlot.ends_at)}</p>
-                      <p className="mt-1 text-sm text-slate-500">Monitoring room: {roomNameForSlot(selectedSlot, selectedExam)}</p>
+                      <p className="mt-1 text-sm text-slate-500">Direct live proctor stream for this slot.</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => handleOpenMonitoring(selectedSlot)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Open Live</button>
                       {isAdmin ? <button type="button" onClick={() => handleLoadSlotIntoEditor(selectedSlot)} className="rounded-xl border border-teal-300 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50">Edit Slot</button> : null}
                       {isAdmin ? <button type="button" onClick={() => handleCancelSlot(selectedSlot)} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Cancel Slot</button> : null}
                       {isAdmin ? <button type="button" onClick={() => handleDeleteSlot(selectedSlot)} className="rounded-xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete Slot</button> : null}
