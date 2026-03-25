@@ -380,10 +380,18 @@ export default function Exam({ examMode = "certification" }) {
         expectedSessionId: liveExamContext.sessionId,
         expectedStudentId: currentUserId,
       });
-      if (String(action.session_id || '') !== String(liveExamContext.sessionId)) {
+      const actionTargetsCurrentLiveContext =
+        String(action.session_id || '') === String(liveExamContext.sessionId) ||
+        (
+          liveExamContext?.slotId &&
+          String(action.slot_id || '') === String(liveExamContext.slotId)
+        );
+      if (!actionTargetsCurrentLiveContext) {
         console.warn('[Exam] Ignored live action: session_id mismatch', {
           actionSessionId: action.session_id,
           expectedSessionId: liveExamContext.sessionId,
+          actionSlotId: action.slot_id,
+          expectedSlotId: liveExamContext.slotId,
         });
         return;
       }
@@ -446,7 +454,13 @@ export default function Exam({ examMode = "certification" }) {
         (payload) => {
           const message = payload?.new;
           if (!message) return;
-          if (String(message.session_id || '') !== String(liveExamContext.sessionId)) return;
+          const messageTargetsCurrentLiveContext =
+            String(message.session_id || '') === String(liveExamContext.sessionId) ||
+            (
+              liveExamContext?.slotId &&
+              String(message.slot_id || '') === String(liveExamContext.slotId)
+            );
+          if (!messageTargetsCurrentLiveContext) return;
           if (message.recipient_id && String(message.recipient_id) !== String(currentUserId)) return;
           if (String(message.sender_role || '').toLowerCase() === 'student') return;
           setInfoMsg(String(message.content || 'New invigilator message received.'));
