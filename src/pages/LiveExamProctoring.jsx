@@ -2070,6 +2070,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         ? await askPrompt('Send Warning', 'Warning message for student?', 'Strict exam rule violation detected. Return to a compliant state immediately.', 'Send Warning', 'Back')
         : actionType === 'pause'
           ? await askPrompt('Pause Exam', 'Pause reason?', 'Exam paused by invigilator.', 'Pause Exam', 'Back')
+          : actionType === 'resume'
+            ? await askPrompt('Resume Exam', 'Resume message?', 'Exam resumed by invigilator.', 'Resume Exam', 'Back')
           : actionType === 'terminate'
             ? await askPrompt('Terminate Exam', 'Termination reason?', 'Exam terminated by invigilator.', 'Terminate Exam', 'Back')
             : await askPrompt('Lock Account', 'Lock reason?', `Account locked by ${role}.`, 'Lock Account', 'Back');
@@ -2099,6 +2101,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const bookingPatch = { updated_at: nowIso() };
       if (actionType === 'pause') {
         sessionPatch.status = 'paused';
+      }
+      if (actionType === 'resume') {
+        sessionPatch.status = 'active';
+        sessionPatch.ended_at = null;
+        sessionPatch.termination_reason = null;
+        sessionPatch.last_heartbeat_at = nowIso();
+        bookingPatch.status = 'active';
       }
       if (actionType === 'terminate') {
         sessionPatch.status = 'terminated';
@@ -2150,7 +2159,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         const { error: sessionError } = await supabase.from('exam_live_sessions').update(sessionPatch).eq('id', targetSession.id);
         if (sessionError) throw sessionError;
       }
-      if (actionType === 'terminate' || actionType === 'lock') {
+      if (actionType === 'terminate' || actionType === 'lock' || actionType === 'resume') {
         const { error: bookingError } = await supabase.from('exam_slot_bookings').update(bookingPatch).eq('id', targetSession.booking_id);
         if (bookingError) throw bookingError;
       }
@@ -2226,7 +2235,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
             }
           : row
       )));
-      if (actionType === 'terminate' || actionType === 'lock') {
+      if (actionType === 'terminate' || actionType === 'lock' || actionType === 'resume') {
         setBookings((prev) => prev.map((row) => (
           String(row.id) === String(targetSession.booking_id)
             ? {
@@ -3015,6 +3024,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                     ? 'bg-slate-100 text-slate-600'
                                     : session.status === 'active'
                                       ? 'bg-emerald-100 text-emerald-700'
+                                      : session.status === 'paused'
+                                        ? 'bg-amber-100 text-amber-800'
                                       : session.status === 'terminated'
                                         ? 'bg-rose-100 text-rose-700'
                                         : 'bg-amber-100 text-amber-700'
@@ -3070,6 +3081,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                 <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
                                   selectedMonitoringSession.status === 'active'
                                     ? 'bg-emerald-100 text-emerald-700'
+                                    : selectedMonitoringSession.status === 'paused'
+                                      ? 'bg-amber-100 text-amber-800'
                                     : selectedMonitoringSession.status === 'terminated'
                                       ? 'bg-rose-100 text-rose-700'
                                       : 'bg-amber-100 text-amber-700'
@@ -3140,7 +3153,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-800">Send Warning</button>
-                              <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'pause')} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">Pause Exam</button>
+                              <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume Exam' : 'Pause Exam'}</button>
                               <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-800">Terminate</button>
                               {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white">Lock Account</button> : null}
                             </div>
@@ -3244,7 +3257,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       </div>
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800">Warn</button>
-                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">Pause</button>
+                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume' : 'Pause'}</button>
                         <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
                         {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button> : null}
                       </div>
@@ -3290,7 +3303,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <td className="px-3 py-3"><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{session?.status || booking.status}</span></td>
                               <td className="px-3 py-3"><div className="space-y-2"><p className="text-slate-700">{session?.attendance_status || 'pending'}</p>{session ? <div className="flex gap-2"><button type="button" onClick={() => handleAttendance(session, 'present')} className="rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Present</button><button type="button" onClick={() => handleAttendance(session, 'absent')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Absent</button></div> : null}</div></td>
                               <td className="px-3 py-3 text-slate-600">{marker ? `${marker.full_name || marker.email} (${session?.attendance_marked_role || '-'})` : '-'}</td>
-                              <td className="px-3 py-3">{session ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleSessionAction(session, 'warning')} className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Warn</button><button type="button" onClick={() => handleSessionAction(session, 'pause')} className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">Pause</button><button type="button" onClick={() => handleSessionAction(session, 'terminate')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Terminate</button>{isAdmin ? <button type="button" onClick={() => handleSessionAction(session, 'lock')} className="rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white">Lock</button> : null}{isAdmin ? <button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button> : null}</div> : isAdmin ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button></div> : <span className="text-xs text-slate-500">Not joined yet</span>}</td>
+                              <td className="px-3 py-3">{session ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleSessionAction(session, 'warning')} className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Warn</button><button type="button" onClick={() => handleSessionAction(session, session.status === 'paused' ? 'resume' : 'pause')} className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{session.status === 'paused' ? 'Resume' : 'Pause'}</button><button type="button" onClick={() => handleSessionAction(session, 'terminate')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Terminate</button>{isAdmin ? <button type="button" onClick={() => handleSessionAction(session, 'lock')} className="rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white">Lock</button> : null}{isAdmin ? <button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button> : null}</div> : isAdmin ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button></div> : <span className="text-xs text-slate-500">Not joined yet</span>}</td>
                             </tr>
                           );
                         })}

@@ -259,26 +259,51 @@ export default function Exam({ examMode = "certification" }) {
   const liveKitPublishedTracksRef = useRef([]);
   const getSessionKey = (userId = null) =>
     `${EXAM_SESSION_PREFIX}:${examMode}:${routeIdentity}:${userId || "anon"}`;
-  const safeSessionGet = (key) => {
+  const safeStorageGet = (storage, key) => {
     try {
-      return sessionStorage.getItem(key);
+      return storage.getItem(key);
     } catch {
       return null;
     }
   };
-  const safeSessionSet = (key, value) => {
+  const safeStorageSet = (storage, key, value) => {
     try {
-      sessionStorage.setItem(key, value);
+      storage.setItem(key, value);
     } catch {
       // ignore storage write errors
     }
   };
-  const safeSessionRemove = (key) => {
+  const safeStorageRemove = (storage, key) => {
     try {
-      sessionStorage.removeItem(key);
+      storage.removeItem(key);
     } catch {
       // ignore storage remove errors
     }
+  };
+  const safeSessionGet = (key) => safeStorageGet(sessionStorage, key);
+  const safeSessionSet = (key, value) => safeStorageSet(sessionStorage, key, value);
+  const safeSessionRemove = (key) => safeStorageRemove(sessionStorage, key);
+  const safeLocalGet = (key) => safeStorageGet(localStorage, key);
+  const safeLocalSet = (key, value) => safeStorageSet(localStorage, key, value);
+  const safeLocalRemove = (key) => safeStorageRemove(localStorage, key);
+  const getSavedExamProgress = (key) => safeLocalGet(key) || safeSessionGet(key);
+  const setSavedExamProgress = (key, value) => {
+    safeSessionSet(key, value);
+    safeLocalSet(key, value);
+  };
+  const clearSavedExamProgress = (key) => {
+    safeSessionRemove(key);
+    safeLocalRemove(key);
+  };
+  const getStoredLiveExamContext = () =>
+    safeLocalGet(LIVE_EXAM_CONTEXT_KEY) || safeSessionGet(LIVE_EXAM_CONTEXT_KEY);
+  const setStoredLiveExamContext = (value) => {
+    safeSessionSet(LIVE_EXAM_CONTEXT_KEY, value);
+    safeLocalSet(LIVE_EXAM_CONTEXT_KEY, value);
+  };
+  const clearStoredLiveExamContext = () => {
+    safeSessionRemove(LIVE_EXAM_CONTEXT_KEY);
+    safeLocalRemove(LIVE_EXAM_CONTEXT_KEY);
   };
   const answeredCount = useMemo(
     () => Object.values(answers).filter(isAnswered).length,
@@ -287,6 +312,7 @@ export default function Exam({ examMode = "certification" }) {
   const activeQuestion = questions[activeQuestionIndex];
   const isLiveManagedExam = Boolean(liveExamContext?.sessionId);
   const isInvigilatorPaused = Boolean(invigilatorPauseMessage);
+  const isExamInteractionBlocked = needsFullscreenResume || isInvigilatorPaused;
 
   const getCodingAnswer = (question) => {
     const answer = answers[question.id];
@@ -333,7 +359,7 @@ export default function Exam({ examMode = "certification" }) {
 
   useEffect(() => {
     try {
-      const rawLiveContext = sessionStorage.getItem(LIVE_EXAM_CONTEXT_KEY);
+      const rawLiveContext = getStoredLiveExamContext();
       if (rawLiveContext) {
         const parsed = JSON.parse(rawLiveContext);
         if (parsed?.sessionId) {
@@ -389,12 +415,21 @@ export default function Exam({ examMode = "certification" }) {
         expectedSlotId: activeLiveSlotId,
         expectedStudentId: currentUserId,
       });
-      const actionTargetsCurrentLiveContext =
+      let actionTargetsCurrentLiveContext =
         String(action.session_id || '') === String(activeLiveSessionId || '') ||
         (
           activeLiveSlotId &&
           String(action.slot_id || '') === String(activeLiveSlotId)
         );
+      if (!actionTargetsCurrentLiveContext) {
+        const refreshedContext = await ensureLiveSessionContext({ force: true });
+        actionTargetsCurrentLiveContext =
+          String(action.session_id || '') === String(refreshedContext?.sessionId || '') ||
+          (
+            refreshedContext?.slotId &&
+            String(action.slot_id || '') === String(refreshedContext.slotId)
+          );
+      }
       if (!actionTargetsCurrentLiveContext) {
         console.warn('[Exam] Ignored live action: session_id mismatch', {
           actionSessionId: action.session_id,
@@ -430,6 +465,14 @@ export default function Exam({ examMode = "certification" }) {
         setInvigilatorPauseMessage(actionMessage || 'Exam paused by invigilator.');
         setInfoMsg(actionMessage || 'Exam paused by invigilator.');
         await syncLiveExamSession({ status: 'paused' });
+        return;
+      }
+
+      if (actionType === 'resume') {
+        console.debug('[Exam] Handling invigilator resume:', actionMessage);
+        setInvigilatorPauseMessage('');
+        setInfoMsg(actionMessage || 'Exam resumed by invigilator.');
+        await syncLiveExamSession({ status: 'active' });
         return;
       }
 
@@ -499,8 +542,8 @@ export default function Exam({ examMode = "certification" }) {
         .limit(20);
 
       const [{ data: recentActions }, { data: recentMessages }] = await Promise.all([
-        activeLiveSlotId ? actionsQuery.eq('slot_id', activeLiveSlotId) : actionsQuery,
-        activeLiveSlotId ? messagesQuery.eq('slot_id', activeLiveSlotId) : messagesQuery,
+        actionsQuery,
+        messagesQuery,
       ]);
 
       (recentActions || [])
@@ -823,7 +866,7 @@ export default function Exam({ examMode = "certification" }) {
 
   useEffect(() => {
     // Immediate restore on mount to avoid flashing back to Step 1
-    const raw = safeSessionGet(getSessionKey()) || safeSessionGet(getSessionKey(currentUserId));
+    const raw = getSavedExamProgress(getSessionKey()) || getSavedExamProgress(getSessionKey(currentUserId));
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw);
@@ -848,6 +891,9 @@ export default function Exam({ examMode = "certification" }) {
       }
       if (Number.isInteger(parsed?.tabSwitchWarnings)) {
         setTabSwitchWarnings(parsed.tabSwitchWarnings);
+      }
+      if (parsed?.invigilatorPauseMessage) {
+        setInvigilatorPauseMessage(String(parsed.invigilatorPauseMessage));
       }
       if (parsed?.phase === EXAM_PHASES.RUNNING || parsed?.phase === EXAM_PHASES.SUBMITTING) {
         if (requiresLiveMedia) {
@@ -933,7 +979,7 @@ export default function Exam({ examMode = "certification" }) {
       }
       if (!isTeacherTestMode && !isLiveProctoredMode && courseRow?.is_free) {
         setDemoCourseBlocked(true);
-        safeSessionRemove(getSessionKey());
+        clearSavedExamProgress(getSessionKey());
         return;
       }
 
@@ -975,8 +1021,8 @@ export default function Exam({ examMode = "certification" }) {
             ? `Account blocked until ${lockUntilDate.toLocaleDateString("en-IN")} due to strict proctoring violation.`
             : "Account is locked due to strict proctoring violation."
         );
-        safeSessionRemove(getSessionKey(userData.user.id));
-        safeSessionRemove(getSessionKey());
+        clearSavedExamProgress(getSessionKey(userData.user.id));
+        clearSavedExamProgress(getSessionKey());
         return;
       }
       const [
@@ -1046,8 +1092,8 @@ export default function Exam({ examMode = "certification" }) {
         setPhase(EXAM_PHASES.TERMINATED);
         setTerminateReason("Suspicious activity detected in previous attempt.");
         setErrorMsg("This test is blocked for you until teacher updates questions.");
-        safeSessionRemove(getSessionKey(userData.user.id));
-        safeSessionRemove(getSessionKey());
+        clearSavedExamProgress(getSessionKey(userData.user.id));
+        clearSavedExamProgress(getSessionKey());
         return;
       }
 
@@ -1091,8 +1137,8 @@ export default function Exam({ examMode = "certification" }) {
           scorePercent: latestSubmission.score_percent ?? null,
           certificatePreviewId,
         });
-        safeSessionRemove(getSessionKey(userData.user.id));
-        safeSessionRemove(getSessionKey());
+        clearSavedExamProgress(getSessionKey(userData.user.id));
+        clearSavedExamProgress(getSessionKey());
         return;
       }
 
@@ -1109,8 +1155,8 @@ export default function Exam({ examMode = "certification" }) {
 
       if (!hasRestoredSessionRef.current) {
         const raw =
-          safeSessionGet(getSessionKey(userData.user.id)) ||
-          safeSessionGet(getSessionKey());
+          getSavedExamProgress(getSessionKey(userData.user.id)) ||
+          getSavedExamProgress(getSessionKey());
         if (raw) {
           try {
             const parsed = JSON.parse(raw);
@@ -1129,6 +1175,9 @@ export default function Exam({ examMode = "certification" }) {
             }
             if (Number.isInteger(parsed?.tabSwitchWarnings)) {
               setTabSwitchWarnings(parsed.tabSwitchWarnings);
+            }
+            if (parsed?.invigilatorPauseMessage) {
+              setInvigilatorPauseMessage(String(parsed.invigilatorPauseMessage));
             }
             const resumablePhases = new Set([
               EXAM_PHASES.RULES,
@@ -1225,10 +1274,12 @@ export default function Exam({ examMode = "certification" }) {
       phase,
       fullscreenWarnings,
       tabSwitchWarnings,
+      invigilatorPauseMessage,
       updatedAt: Date.now(),
     };
-    safeSessionSet(sessionKey, JSON.stringify(payload));
-    safeSessionSet(sessionKeyAnon, JSON.stringify(payload));
+    const serialized = JSON.stringify(payload);
+    setSavedExamProgress(sessionKey, serialized);
+    setSavedExamProgress(sessionKeyAnon, serialized);
   }, [
     currentUserId,
     routeIdentity,
@@ -1240,6 +1291,7 @@ export default function Exam({ examMode = "certification" }) {
     phase,
     fullscreenWarnings,
     tabSwitchWarnings,
+    invigilatorPauseMessage,
   ]);
 
   useEffect(() => {
@@ -1278,7 +1330,7 @@ export default function Exam({ examMode = "certification" }) {
   }, [phase, examEndsAt, isInvigilatorPaused]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) {
+    if (phase !== EXAM_PHASES.RUNNING) {
       examAutoSubmitTriggeredRef.current = false;
       return;
     }
@@ -1288,7 +1340,7 @@ export default function Exam({ examMode = "certification" }) {
     examAutoSubmitTriggeredRef.current = true;
     setInfoMsg("Time is up. Submitting your exam automatically.");
     void submitExam();
-  }, [phase, remainingExamSeconds, isInvigilatorPaused]);
+  }, [phase, remainingExamSeconds]);
 
   useEffect(() => {
     if (!isLiveManagedExam || phase !== EXAM_PHASES.RUNNING) return undefined;
@@ -1504,7 +1556,7 @@ export default function Exam({ examMode = "certification" }) {
   }, [phase, needsFullscreenResume, cameraStream, submissionFinalized, isInvigilatorPaused]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) return;
+    if (phase !== EXAM_PHASES.RUNNING) return;
     if (needsFullscreenResume) return;
 
     const clearTabSwitchTimer = () => {
@@ -1667,11 +1719,10 @@ export default function Exam({ examMode = "certification" }) {
       clearTabSwitchTimer();
       clearFullscreenTimer();
     };
-  }, [phase, needsFullscreenResume, isInvigilatorPaused]);
+  }, [phase, needsFullscreenResume]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
-    if (isInvigilatorPaused) return;
     if (needsFullscreenResume) return;
     const isCodingQuestionActive = resolveQuestionType(activeQuestion) === "coding";
 
@@ -1754,10 +1805,10 @@ export default function Exam({ examMode = "certification" }) {
       document.removeEventListener("keydown", preventCopyKeys, true);
       window.removeEventListener("keydown", preventCopyKeys, true);
     };
-  }, [phase, needsFullscreenResume, activeQuestion, isInvigilatorPaused]);
+  }, [phase, needsFullscreenResume, activeQuestion]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) return;
+    if (phase !== EXAM_PHASES.RUNNING) return;
     if (needsFullscreenResume) return;
 
     const handleTouchStart = (event) => {
@@ -1777,7 +1828,7 @@ export default function Exam({ examMode = "certification" }) {
       document.removeEventListener("touchstart", handleTouchStart);
       document.removeEventListener("gesturestart", handleGestureStart);
     };
-  }, [phase, needsFullscreenResume, isInvigilatorPaused]);
+  }, [phase, needsFullscreenResume]);
 
   useEffect(() => {
     const inStrictPhase =
@@ -1951,11 +2002,7 @@ export default function Exam({ examMode = "certification" }) {
 
   function clearLiveExamContext() {
     setLiveExamContext(null);
-    try {
-      sessionStorage.removeItem(LIVE_EXAM_CONTEXT_KEY);
-    } catch {
-      // ignore storage cleanup failures
-    }
+    clearStoredLiveExamContext();
   }
 
   async function syncLiveExamSession(patch = {}) {
@@ -2055,11 +2102,12 @@ export default function Exam({ examMode = "certification" }) {
     };
 
     setLiveExamContext(nextContext);
-    try {
-      sessionStorage.setItem(LIVE_EXAM_CONTEXT_KEY, JSON.stringify(nextContext));
-    } catch {
-      // ignore storage failures
-    }
+    setInvigilatorPauseMessage(
+      String(preferredSession.status || "").toLowerCase() === "paused"
+        ? "Exam paused by invigilator."
+        : ""
+    );
+    setStoredLiveExamContext(JSON.stringify(nextContext));
     return nextContext;
   }
 
@@ -2347,8 +2395,8 @@ export default function Exam({ examMode = "certification" }) {
       });
       await syncLiveExamBooking({ status: "terminated" });
       setPhase(EXAM_PHASES.TERMINATED);
-      safeSessionRemove(getSessionKey(currentUserId));
-      safeSessionRemove(getSessionKey());
+      clearSavedExamProgress(getSessionKey(currentUserId));
+      clearSavedExamProgress(getSessionKey());
       clearLiveExamContext();
       setRetakeLockedUntil(shouldLockAccount ? lockUntil : null);
       setErrorMsg(
@@ -2408,8 +2456,8 @@ export default function Exam({ examMode = "certification" }) {
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => {});
     }
-    safeSessionRemove(getSessionKey(currentUserId));
-    safeSessionRemove(getSessionKey());
+    clearSavedExamProgress(getSessionKey(currentUserId));
+    clearSavedExamProgress(getSessionKey());
     setTerminateReason(reason);
     setRetakeLockedUntil(lockUntil.toISOString());
   }
@@ -2756,8 +2804,8 @@ export default function Exam({ examMode = "certification" }) {
     }
     setResultData(pendingResultData);
     setPendingResultData(null);
-    safeSessionRemove(getSessionKey(currentUserId));
-    safeSessionRemove(getSessionKey());
+    clearSavedExamProgress(getSessionKey(currentUserId));
+    clearSavedExamProgress(getSessionKey());
     clearLiveExamContext();
     setPhase(EXAM_PHASES.RESULT);
   }
@@ -3243,7 +3291,7 @@ export default function Exam({ examMode = "certification" }) {
                         <label className="text-xs font-semibold text-slate-200">Language</label>
                         <select
                           className="border border-slate-300 rounded px-2 py-1 text-sm text-slate-900 bg-white"
-                          disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume}
+                          disabled={phase !== EXAM_PHASES.RUNNING || isExamInteractionBlocked}
                           value={
                             typeof answers[activeQuestion.id] === "object" &&
                             answers[activeQuestion.id]?.language
@@ -3343,7 +3391,7 @@ export default function Exam({ examMode = "certification" }) {
                         <p className="text-xs text-slate-600">Detected <b>while</b>. Insert loop snippet?</p>
                         <button
                           type="button"
-                          disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume}
+                          disabled={phase !== EXAM_PHASES.RUNNING || isExamInteractionBlocked}
                           onClick={() =>
                             setAnswers((prev) => {
                               const prevAnswer =
@@ -3373,7 +3421,7 @@ export default function Exam({ examMode = "certification" }) {
                     <button
                       type="button"
                       onClick={runActiveCodingQuestion}
-                      disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume || codingRuns[activeQuestion.id]?.running}
+                      disabled={phase !== EXAM_PHASES.RUNNING || isExamInteractionBlocked || codingRuns[activeQuestion.id]?.running}
                       className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-60"
                     >
                       {codingRuns[activeQuestion.id]?.running ? "Running..." : "Run Code"}
@@ -3428,7 +3476,7 @@ export default function Exam({ examMode = "certification" }) {
                         name={`q_${activeQuestion.id}`}
                         value={option}
                         checked={answers[activeQuestion.id] === option}
-                        disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume}
+                        disabled={phase !== EXAM_PHASES.RUNNING || isExamInteractionBlocked}
                         onChange={(event) => {
                           setAnswers((prev) => ({
                             ...prev,
@@ -3444,7 +3492,7 @@ export default function Exam({ examMode = "certification" }) {
                 <textarea
                   className="w-full min-h-[140px] border rounded-lg p-3 outline-none focus:ring-2 focus:ring-slate-300"
                   placeholder="Write your answer..."
-                  disabled={phase !== EXAM_PHASES.RUNNING || needsFullscreenResume}
+                  disabled={phase !== EXAM_PHASES.RUNNING || isExamInteractionBlocked}
                   value={answers[activeQuestion.id] || ""}
                   onChange={(event) =>
                     setAnswers((prev) => ({
@@ -3467,7 +3515,8 @@ export default function Exam({ examMode = "certification" }) {
                 onClick={() =>
                   setActiveQuestionIndex((prev) => Math.max(prev - 1, 0))
                 }
-                className="px-4 py-2 rounded-lg border border-slate-300 font-medium"
+                disabled={isExamInteractionBlocked}
+                className="px-4 py-2 rounded-lg border border-slate-300 font-medium disabled:opacity-60"
               >
                 Previous
               </button>
@@ -3477,13 +3526,14 @@ export default function Exam({ examMode = "certification" }) {
                     Math.min(prev + 1, Math.max(questions.length - 1, 0))
                   )
                 }
-                className="px-4 py-2 rounded-lg border border-slate-300 font-medium"
+                disabled={isExamInteractionBlocked}
+                className="px-4 py-2 rounded-lg border border-slate-300 font-medium disabled:opacity-60"
               >
                 Next
               </button>
               <button
                 onClick={() => setShowSubmitConfirm(true)}
-                disabled={phase === EXAM_PHASES.SUBMITTING || needsFullscreenResume}
+                disabled={phase === EXAM_PHASES.SUBMITTING || isExamInteractionBlocked}
                 className="ml-auto px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold disabled:opacity-60"
               >
                 {phase === EXAM_PHASES.SUBMITTING ? "Submitting..." : "Submit Exam"}
