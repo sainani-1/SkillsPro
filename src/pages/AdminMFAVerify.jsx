@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || "/skillpro-logo.png";
 import { supabase } from "../supabaseClient";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AlertModal from "../components/AlertModal";
 import Toast from "../components/Toast";
 
@@ -13,8 +13,12 @@ export default function AdminMFAVerify() {
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const inputRefs = useRef([]);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const codeStr = code.join("");
+  const scope = searchParams.get("scope") || "";
+  const nextPath = searchParams.get("next") || "/app";
+  const isSensitivePasswordScope = scope === "sensitive-passwords";
 
   const resetCodeAndFocusFirst = () => {
     setCode(["", "", "", "", "", ""]);
@@ -128,9 +132,17 @@ export default function AdminMFAVerify() {
       sessionStorage.setItem("admin_mfa_verified", "true");
       if (userResp?.user?.id) {
         sessionStorage.setItem("admin_mfa_verified_user", userResp.user.id);
+        if (isSensitivePasswordScope) {
+          sessionStorage.setItem("admin_sensitive_mfa_verified_user", userResp.user.id);
+          sessionStorage.setItem("admin_sensitive_mfa_verified_at", String(Date.now()));
+        }
       }
-      setToast({ show: true, message: "MFA Verified! Redirecting...", type: "success" });
-      setTimeout(() => navigate("/app"), 1200);
+      setToast({
+        show: true,
+        message: isSensitivePasswordScope ? "Secure access verified. Redirecting..." : "MFA Verified! Redirecting...",
+        type: "success",
+      });
+      setTimeout(() => navigate(nextPath, { replace: true }), 1200);
     } catch (err) {
       console.error(err);
       setAlert({ show: true, title: "Verification Failed", message: err.message || "Could not verify MFA code.", type: "error" });
@@ -151,8 +163,12 @@ export default function AdminMFAVerify() {
         <span className="text-2xl font-extrabold text-nani-dark tracking-tight">SkillPro</span>
       </div>
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md flex flex-col items-center gap-6 border-t-8 border-blue-500 animate-fade-in">
-        <h2 className="text-2xl font-bold text-blue-700">Verify MFA</h2>
-        <p className="text-slate-600 text-center">Enter the 6-digit code from your authenticator app to continue.</p>
+        <h2 className="text-2xl font-bold text-blue-700">{isSensitivePasswordScope ? "Confirm Secure Access" : "Verify MFA"}</h2>
+        <p className="text-slate-600 text-center">
+          {isSensitivePasswordScope
+            ? "Enter the 6-digit code from your authenticator app before opening password tools."
+            : "Enter the 6-digit code from your authenticator app to continue."}
+        </p>
         <div className="flex justify-center gap-3 mt-2 w-full">
           {[...Array(6)].map((_, i) => (
             <input

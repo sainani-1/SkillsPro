@@ -9,6 +9,7 @@ import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAdminMFA from './components/RequireAdminMFA';
+import RequireSensitiveAdminMFA from './components/RequireSensitiveAdminMFA';
 import { supabase } from './supabaseClient';
 import AdminMFASetup from "./pages/AdminMFASetup";
 import AdminMFAVerify from "./pages/AdminMFAVerify";
@@ -72,6 +73,8 @@ import TeacherRequests from './pages/TeacherRequests';
 import AdminTeacherRequests from './pages/AdminTeacherRequests';
 import CertificateBlocks from './pages/CertificateBlocks';
 import AdminResetPassword from './pages/AdminResetPassword';
+import AdminUserPasswordResetPage from './pages/AdminUserPasswordResetPage';
+import AdminSeePasswordsPage from './pages/AdminSeePasswordsPage';
 import StartupIdeas from './pages/StartupIdeas';
 import AdminStartupIdeas from './pages/AdminStartupIdeas';
 import StartupCollaborations from './pages/StartupCollaborations';
@@ -270,6 +273,30 @@ function App() {
         <Route path="/verify/:id" element={<VerifyCertificate />} />
         <Route path="/verify" element={<VerifyCertificate />} />
         <Route path="/certificate-preview/:id" element={<CertificatePreview />} />
+        <Route
+          path="/admin-reset-pass"
+          element={
+            <ProtectedRoute>
+              <AdminRoute>
+                <RequireSensitiveAdminMFA>
+                  <AdminUserPasswordResetPage />
+                </RequireSensitiveAdminMFA>
+              </AdminRoute>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin-see-pass"
+          element={
+            <ProtectedRoute>
+              <AdminRoute>
+                <RequireSensitiveAdminMFA>
+                  <AdminSeePasswordsPage />
+                </RequireSensitiveAdminMFA>
+              </AdminRoute>
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<NotFound />} />
 
         {/* Protected Routes */}

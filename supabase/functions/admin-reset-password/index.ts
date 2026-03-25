@@ -6,6 +6,12 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const isMissingTrackingTableError = (error: { code?: string; message?: string } | null) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01" || message.includes("admin_managed_user_passwords");
+};
+
 type ResetPayload = {
   user_id?: string;
   email?: string;
@@ -27,9 +33,7 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-
-    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+    if (!supabaseUrl || !serviceRoleKey) {
       return new Response("Missing required Supabase environment variables.", {
         status: 500,
         headers: corsHeaders,
@@ -46,11 +50,7 @@ Deno.serve(async (req: Request) => {
     const callerJwt = authHeader.replace("Bearer ", "").trim();
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const callerAuthClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${callerJwt}` } },
-    });
-
-    const { data: callerData, error: callerError } = await callerAuthClient.auth.getUser();
+    const { data: callerData, error: callerError } = await adminClient.auth.getUser(callerJwt);
     if (callerError || !callerData?.user?.id) {
       return new Response("Invalid admin session token.", {
         status: 401,
@@ -98,6 +98,22 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: corsHeaders,
       });
+    }
+
+    const { error: trackingError } = await adminClient.from("admin_managed_user_passwords").upsert(
+      {
+        user_id: userId,
+        auth_user_id: userId,
+        email: body.email || null,
+        password_plain: newPassword,
+        password_source: "admin-reset-password",
+        updated_by: callerId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+    if (trackingError && !isMissingTrackingTableError(trackingError)) {
+      console.error("Password tracking upsert failed:", trackingError.message);
     }
 
     // Optional audit trail; ignore if table/permission is absent.
