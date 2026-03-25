@@ -10,7 +10,7 @@ import { logAdminNavigation } from '../utils/adminActivityLogger';
 import { useNotifications } from '../context/NotificationContext';
 
 const Layout = () => {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const { unreadNotifications, incrementUnreadNotifications } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,6 +63,7 @@ const Layout = () => {
       { label: 'Notifications', path: '/app/notifications' },
       { label: 'Report Issue', path: '/app/report-issue' },
       { label: 'Settings', path: '/app/settings' },
+      { label: 'Sign Out', path: '__signout__' },
     ];
 
     const studentTargets = [
@@ -139,6 +140,8 @@ const Layout = () => {
       { label: 'Post Notifications', path: '/app/admin/notifications' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
       { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
+      { label: 'Live Slot Wait Days', path: '/app/admin/live-exam-booking-controls' },
+      { label: 'Live Slot Cancellations', path: '/app/live-cancellations' },
       { label: 'Release Terminated Exams', path: '/app/admin/exam-retakes' },
       { label: 'Exam Settings', path: '/app/admin/exam-settings' },
       { label: 'Admin Settings', path: '/app/admin/settings' },
@@ -176,6 +179,15 @@ const Layout = () => {
     : panelTargets
         .filter((item) => item.label.toLowerCase().includes(panelSearch.trim().toLowerCase()))
         .slice(0, 8);
+
+  const handlePanelTargetSelect = async (item) => {
+    if (!item) return;
+    if (item.path === '__signout__') {
+      await signOut();
+      return;
+    }
+    navigate(item.path);
+  };
 
   useEffect(() => {
     if (profile?.role !== 'admin' || !profile?.id) return;
@@ -455,8 +467,9 @@ const Layout = () => {
               onChange={(e) => setPanelSearch(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && filteredTargets.length > 0) {
-                  navigate(filteredTargets[0].path);
+                  void handlePanelTargetSelect(filteredTargets[0]);
                   setPanelSearch('');
+                  setShowPanelSearch(false);
                 }
               }}
               placeholder="Search panel pages..."
@@ -469,7 +482,7 @@ const Layout = () => {
                     key={item.path}
                     type="button"
                     onMouseDown={() => {
-                      navigate(item.path);
+                      void handlePanelTargetSelect(item);
                       setPanelSearch('');
                       setShowPanelSearch(false);
                     }}

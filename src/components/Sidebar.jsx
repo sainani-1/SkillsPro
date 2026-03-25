@@ -698,6 +698,14 @@ const Sidebar = () => {
               <Clock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Exam Retake Overrides</span>}
             </NavLink>
+            <NavLink to="/app/admin/live-exam-booking-controls" className={navItemClass} title="Live Slot Wait Days">
+              <KeyRound size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Slot Wait Days</span>}
+            </NavLink>
+            <NavLink to="/app/live-cancellations" className={navItemClass} title="Live Slot Cancellations">
+              <Trash2 size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Live Slot Cancellations</span>}
+            </NavLink>
             <NavLink to="/app/admin/exam-retakes" className={navItemClass} title="Release Terminated Exams">
               <Unlock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Release Exams</span>}

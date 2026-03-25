@@ -240,6 +240,8 @@ export default function Exam({ examMode = "certification" }) {
   const lastAppSwitchEventRef = useRef(0);
   const fullscreenWarningsRef = useRef(0);
   const hasRestoredSessionRef = useRef(false);
+  const processedLiveActionIdsRef = useRef(new Set());
+  const processedLiveMessageIdsRef = useRef(new Set());
   const resumeTimerRef = useRef(null);
   const tabSwitchTimerRef = useRef(null);
   const tabSwitchGraceActiveRef = useRef(false);
@@ -361,10 +363,13 @@ export default function Exam({ examMode = "certification" }) {
   }, [currentUserId, isLiveProctoredMode, routeExamId]);
 
   useEffect(() => {
+    const activeLiveSessionId = liveExamContext?.sessionId || null;
+    const activeLiveSlotId = liveExamContext?.slotId || null;
 
-    if (!liveExamContext?.sessionId || !currentUserId) {
+    if ((!activeLiveSessionId && !activeLiveSlotId) || !currentUserId) {
       console.debug('[Exam] Live action handler not active: missing sessionId or currentUserId', {
-        sessionId: liveExamContext?.sessionId,
+        sessionId: activeLiveSessionId,
+        slotId: activeLiveSlotId,
         currentUserId,
       });
       return undefined;
@@ -376,22 +381,26 @@ export default function Exam({ examMode = "certification" }) {
         console.debug('[Exam] Ignored live action: no action payload', payload);
         return;
       }
+      if (action.id && processedLiveActionIdsRef.current.has(String(action.id))) {
+        return;
+      }
       console.debug('[Exam] Received live action:', action, {
-        expectedSessionId: liveExamContext.sessionId,
+        expectedSessionId: activeLiveSessionId,
+        expectedSlotId: activeLiveSlotId,
         expectedStudentId: currentUserId,
       });
       const actionTargetsCurrentLiveContext =
-        String(action.session_id || '') === String(liveExamContext.sessionId) ||
+        String(action.session_id || '') === String(activeLiveSessionId || '') ||
         (
-          liveExamContext?.slotId &&
-          String(action.slot_id || '') === String(liveExamContext.slotId)
+          activeLiveSlotId &&
+          String(action.slot_id || '') === String(activeLiveSlotId)
         );
       if (!actionTargetsCurrentLiveContext) {
         console.warn('[Exam] Ignored live action: session_id mismatch', {
           actionSessionId: action.session_id,
-          expectedSessionId: liveExamContext.sessionId,
+          expectedSessionId: activeLiveSessionId,
           actionSlotId: action.slot_id,
-          expectedSlotId: liveExamContext.slotId,
+          expectedSlotId: activeLiveSlotId,
         });
         return;
       }
@@ -402,11 +411,14 @@ export default function Exam({ examMode = "certification" }) {
         });
         return;
       }
+      if (action.id) {
+        processedLiveActionIdsRef.current.add(String(action.id));
+      }
 
       const actionType = String(action.action_type || '').toLowerCase();
       const actionMessage = String(action.message || '').trim();
 
-      if (actionType === 'warning') {
+      if (actionType === 'warning' || actionType === 'warn') {
         console.debug('[Exam] Handling invigilator warning:', actionMessage);
         setInvigilatorWarningMessage(actionMessage || 'Invigilator warning received.');
         setInfoMsg(actionMessage || 'Invigilator warning received.');
@@ -440,7 +452,7 @@ export default function Exam({ examMode = "certification" }) {
     };
 
     const channel = supabase
-      .channel(`live-exam-actions-${liveExamContext.sessionId}-${currentUserId}`)
+      .channel(`live-exam-actions-${activeLiveSessionId || activeLiveSlotId}-${currentUserId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'exam_live_actions' },
@@ -454,24 +466,89 @@ export default function Exam({ examMode = "certification" }) {
         (payload) => {
           const message = payload?.new;
           if (!message) return;
+          if (message.id && processedLiveMessageIdsRef.current.has(String(message.id))) return;
           const messageTargetsCurrentLiveContext =
-            String(message.session_id || '') === String(liveExamContext.sessionId) ||
+            String(message.session_id || '') === String(activeLiveSessionId || '') ||
             (
-              liveExamContext?.slotId &&
-              String(message.slot_id || '') === String(liveExamContext.slotId)
-            );
+              activeLiveSlotId &&
+              String(message.slot_id || '') === String(activeLiveSlotId)
+          );
           if (!messageTargetsCurrentLiveContext) return;
           if (message.recipient_id && String(message.recipient_id) !== String(currentUserId)) return;
           if (String(message.sender_role || '').toLowerCase() === 'student') return;
+          if (message.id) {
+            processedLiveMessageIdsRef.current.add(String(message.id));
+          }
           setInfoMsg(String(message.content || 'New invigilator message received.'));
         }
       )
       .subscribe();
 
+    const pollRecentLiveSignals = async () => {
+      const actionsQuery = supabase
+        .from('exam_live_actions')
+        .select('*')
+        .eq('target_student_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      const messagesQuery = supabase
+        .from('exam_live_messages')
+        .select('*')
+        .eq('recipient_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      const [{ data: recentActions }, { data: recentMessages }] = await Promise.all([
+        activeLiveSlotId ? actionsQuery.eq('slot_id', activeLiveSlotId) : actionsQuery,
+        activeLiveSlotId ? messagesQuery.eq('slot_id', activeLiveSlotId) : messagesQuery,
+      ]);
+
+      (recentActions || [])
+        .slice()
+        .reverse()
+        .forEach((action) => {
+          if (action?.id && processedLiveActionIdsRef.current.has(String(action.id))) return;
+          void handleLiveAction({ new: action });
+        });
+
+      (recentMessages || [])
+        .slice()
+        .reverse()
+        .forEach((message) => {
+          if (!message) return;
+          if (message.id && processedLiveMessageIdsRef.current.has(String(message.id))) return;
+          const messageTargetsCurrentLiveContext =
+            String(message.session_id || '') === String(activeLiveSessionId || '') ||
+            (
+              activeLiveSlotId &&
+              String(message.slot_id || '') === String(activeLiveSlotId)
+            );
+          if (!messageTargetsCurrentLiveContext) return;
+          if (String(message.sender_role || '').toLowerCase() === 'student') return;
+          if (message.id) {
+            processedLiveMessageIdsRef.current.add(String(message.id));
+          }
+          setInfoMsg(String(message.content || 'New invigilator message received.'));
+        });
+    };
+
+    void pollRecentLiveSignals();
+    const pollTimer = window.setInterval(() => {
+      void pollRecentLiveSignals();
+    }, 4000);
+    const repollNow = () => {
+      void pollRecentLiveSignals();
+    };
+    window.addEventListener('focus', repollNow);
+    document.addEventListener('visibilitychange', repollNow);
+
     return () => {
+      window.clearInterval(pollTimer);
+      window.removeEventListener('focus', repollNow);
+      document.removeEventListener('visibilitychange', repollNow);
       supabase.removeChannel(channel);
     };
-  }, [liveExamContext?.sessionId, currentUserId]);
+  }, [liveExamContext?.sessionId, liveExamContext?.slotId, currentUserId]);
 
   useEffect(() => {
     if (USE_LIVEKIT_TRANSPORT) return undefined;
@@ -2108,6 +2185,9 @@ export default function Exam({ examMode = "certification" }) {
     setExamStartedAt((prev) => prev || new Date().toISOString());
     setExamEndsAt((prev) => {
       if (prev) return prev;
+      if (liveExamContext?.slotId && liveExamContext?.slotEndsAt) {
+        return liveExamContext.slotEndsAt;
+      }
       return new Date(Date.now() + Math.max(1, examDurationMinutes) * 60 * 1000).toISOString();
     });
     setNeedsFullscreenResume(false);
@@ -2180,6 +2260,17 @@ export default function Exam({ examMode = "certification" }) {
     if (error) throw new Error(error.message);
     return userData.user.id;
   }
+
+  useEffect(() => {
+    if (!isLiveProctoredMode || !liveExamContext?.slotEndsAt) return;
+    setExamEndsAt((prev) => {
+      const slotEndTime = new Date(liveExamContext.slotEndsAt).getTime();
+      if (!Number.isFinite(slotEndTime)) return prev;
+      if (!prev) return liveExamContext.slotEndsAt;
+      const currentEndTime = new Date(prev).getTime();
+      return currentEndTime > slotEndTime ? liveExamContext.slotEndsAt : prev;
+    });
+  }, [isLiveProctoredMode, liveExamContext?.slotEndsAt]);
 
   async function terminateExamForViolation(reason, options = {}) {
     if (isTerminatingRef.current) return;

@@ -100,6 +100,7 @@ import AdminUserAccess from './pages/AdminUserAccess';
 import LiveExamProctoring from './pages/LiveExamProctoring';
 import FacultyAttendance from './pages/FacultyAttendance';
 import AdminAccessCodes from './pages/AdminAccessCodes';
+import AdminLiveExamBookingControls from './pages/AdminLiveExamBookingControls';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -300,6 +301,7 @@ function App() {
           <Route path="live-attendance" element={<LiveExamProctoring forcedPanel="attendance" />} />
           <Route path="live-alerts" element={<LiveExamProctoring forcedPanel="alerts" />} />
           <Route path="live-messages" element={<LiveExamProctoring forcedPanel="messages" />} />
+          <Route path="live-cancellations" element={<AdminRoute><LiveExamProctoring forcedPanel="cancellations" /></AdminRoute>} />
           <Route path="faculty-attendance" element={<AdminRoute><FacultyAttendance /></AdminRoute>} />
           <Route path="career-chatbot" element={<CareerChatbot />} />
           <Route path="learning-path" element={<AILearningPath />} />
@@ -346,6 +348,7 @@ function App() {
           <Route path="admin/access-codes" element={<AdminRoute><AdminAccessCodes /></AdminRoute>} />
           <Route path="admin/notifications" element={<AdminRoute><AdminNotifications /></AdminRoute>} />
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
+          <Route path="admin/live-exam-booking-controls" element={<AdminRoute><AdminLiveExamBookingControls /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/website-protection" element={<AdminRoute><AdminWebsiteProtection /></AdminRoute>} />
