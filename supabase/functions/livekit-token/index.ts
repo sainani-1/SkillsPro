@@ -11,6 +11,7 @@ type TokenPayload = {
   sessionId?: number | string;
   mode?: "student" | "observer";
   requesterId?: string;
+  viewerInstanceId?: string;
 };
 
 const roomNameForSession = (sessionId: number | string) => `skillpro-live-exam-session-${sessionId}`;
@@ -42,6 +43,7 @@ Deno.serve(async (req: Request) => {
     const sessionId = Number(body.sessionId || 0);
     const mode = body.mode === "observer" ? "observer" : "student";
     const requesterId = String(body.requesterId || "").trim();
+    const viewerInstanceId = String(body.viewerInstanceId || "").trim();
     if (!sessionId) {
       return new Response("sessionId is required.", { status: 400, headers: corsHeaders });
     }
@@ -118,7 +120,7 @@ Deno.serve(async (req: Request) => {
     const identity =
       mode === "student"
         ? `student:${sessionRow.student_id}:session:${sessionId}`
-        : `${callerProfile.role}:${requesterId}:watch:${sessionId}`;
+        : `${callerProfile.role}:${requesterId}:watch:${sessionId}${viewerInstanceId ? `:${viewerInstanceId}` : ""}`;
 
     const token = new AccessToken(livekitApiKey, livekitApiSecret, {
       identity,

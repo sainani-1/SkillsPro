@@ -2,7 +2,7 @@ import { supabase } from '../supabaseClient';
 
 export const liveKitRoomNameForSession = (sessionId) => `skillpro-live-exam-session-${sessionId}`;
 
-export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId }) => {
+export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId, viewerInstanceId = '' }) => {
   if (!requesterId) {
     throw new Error('LiveKit auth failed: requester id is missing.');
   }
@@ -19,6 +19,7 @@ export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId }
       sessionId,
       mode,
       requesterId,
+      viewerInstanceId,
     }),
   });
 

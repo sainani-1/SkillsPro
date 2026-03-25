@@ -3,6 +3,9 @@ import { ConnectionState, Room, RoomEvent, Track } from 'livekit-client';
 import { getLiveKitTokenForSession } from '../lib/livekitSession';
 import { supabase } from '../supabaseClient';
 
+const ROOM_IDLE_DISCONNECT_MS = 30000;
+const sharedRoomRegistry = new Map();
+
 function detachTrack(track, element) {
   try {
     track?.detach?.(element);
@@ -49,9 +52,158 @@ function resolvePreferredSession(currentSession, nextSession) {
   return nextSession;
 }
 
+function createDefaultDebugState(room = '-') {
+  return {
+    room,
+    screen: 'waiting',
+    camera: 'waiting',
+    mic: 'waiting',
+  };
+}
+
+function createDefaultSharedState() {
+  return {
+    debugState: createDefaultDebugState(),
+    status: 'Connecting live preview...',
+    error: '',
+  };
+}
+
+function createSharedRoomEntry(connectionKey) {
+  return {
+    connectionKey,
+    room: null,
+    connectPromise: null,
+    refCount: 0,
+    idleTimer: null,
+    listenersBound: false,
+    state: createDefaultSharedState(),
+    subscribers: new Set(),
+  };
+}
+
+function getSharedRoomEntry(connectionKey) {
+  if (!sharedRoomRegistry.has(connectionKey)) {
+    sharedRoomRegistry.set(connectionKey, createSharedRoomEntry(connectionKey));
+  }
+  return sharedRoomRegistry.get(connectionKey);
+}
+
+function emitSharedRoomState(entry, nextPartialState) {
+  entry.state = {
+    ...entry.state,
+    ...nextPartialState,
+    debugState: {
+      ...entry.state.debugState,
+      ...(nextPartialState?.debugState || {}),
+    },
+  };
+  entry.subscribers.forEach((subscriber) => subscriber(entry.state));
+}
+
+function subscribeToSharedRoom(entry, subscriber) {
+  entry.subscribers.add(subscriber);
+  subscriber(entry.state);
+  return () => {
+    entry.subscribers.delete(subscriber);
+  };
+}
+
+function clearSharedRoomIdleTimer(entry) {
+  if (entry.idleTimer) {
+    window.clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+}
+
+function scheduleSharedRoomDisconnect(entry) {
+  clearSharedRoomIdleTimer(entry);
+  entry.idleTimer = window.setTimeout(() => {
+    if (entry.refCount > 0) return;
+    entry.room?.disconnect?.();
+    entry.room = null;
+    entry.connectPromise = null;
+    entry.listenersBound = false;
+    emitSharedRoomState(entry, {
+      debugState: createDefaultDebugState('-'),
+      status: 'Student is not live right now.',
+      error: '',
+    });
+    sharedRoomRegistry.delete(entry.connectionKey);
+  }, ROOM_IDLE_DISCONNECT_MS);
+}
+
+function disconnectSharedRoomNow(connectionKey, nextStatus = 'Live session ended.') {
+  const entry = sharedRoomRegistry.get(connectionKey);
+  if (!entry) return;
+  clearSharedRoomIdleTimer(entry);
+  entry.room?.disconnect?.();
+  entry.room = null;
+  entry.connectPromise = null;
+  entry.listenersBound = false;
+  emitSharedRoomState(entry, {
+    debugState: createDefaultDebugState('-'),
+    status: nextStatus,
+    error: '',
+  });
+  sharedRoomRegistry.delete(connectionKey);
+}
+
+function bindSharedRoomStateListeners(entry) {
+  if (!entry.room || entry.listenersBound) return;
+  entry.listenersBound = true;
+
+  entry.room.on(RoomEvent.ConnectionStateChanged, (state) => {
+    const normalized = String(state || '');
+    const isConnected = normalized.toLowerCase() === String(ConnectionState.Connected).toLowerCase();
+    emitSharedRoomState(entry, {
+      debugState: { room: state },
+      status: isConnected ? 'Waiting for student media...' : 'Connecting live preview...',
+      error: '',
+    });
+  });
+
+  entry.room.on(RoomEvent.TrackSubscribed, (track, publication) => {
+    if (publication?.source === Track.Source.ScreenShare && track?.kind === Track.Kind.Video) {
+      emitSharedRoomState(entry, {
+        debugState: { screen: 'connected' },
+      });
+    }
+    if (publication?.source === Track.Source.Camera && track?.kind === Track.Kind.Video) {
+      emitSharedRoomState(entry, {
+        debugState: { camera: 'connected' },
+      });
+    }
+    if (publication?.source === Track.Source.Microphone && track?.kind === Track.Kind.Audio) {
+      emitSharedRoomState(entry, {
+        debugState: { mic: 'connected' },
+      });
+    }
+  });
+
+  entry.room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+    if (publication?.source === Track.Source.ScreenShare) {
+      emitSharedRoomState(entry, {
+        debugState: { screen: 'waiting' },
+      });
+    }
+    if (publication?.source === Track.Source.Camera) {
+      emitSharedRoomState(entry, {
+        debugState: { camera: 'waiting' },
+      });
+    }
+    if (publication?.source === Track.Source.Microphone) {
+      emitSharedRoomState(entry, {
+        debugState: { mic: 'waiting' },
+      });
+    }
+  });
+}
+
 export default function LiveExamStreamMonitor({
   session,
   viewerId,
+  viewerInstanceId = '',
   compact = false,
   large = false,
 }) {
@@ -59,14 +211,8 @@ export default function LiveExamStreamMonitor({
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Connecting live preview...');
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [debugState, setDebugState] = useState({
-    room: '-',
-    screen: 'waiting',
-    camera: 'waiting',
-    mic: 'waiting',
-  });
-  const roomRef = useRef(null);
-  const connectedSessionKeyRef = useRef('');
+  const [debugState, setDebugState] = useState(createDefaultDebugState());
+  const sharedEntryRef = useRef(null);
   const screenVideoRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const audioRef = useRef(null);
@@ -113,54 +259,49 @@ export default function LiveExamStreamMonitor({
 
   useEffect(() => {
     if (!resolvedSession?.id || !viewerId) {
-      if (roomRef.current) {
-        roomRef.current.disconnect?.();
-        roomRef.current = null;
-        connectedSessionKeyRef.current = '';
+      if (sharedEntryRef.current) {
+        sharedEntryRef.current.refCount = Math.max(0, sharedEntryRef.current.refCount - 1);
+        scheduleSharedRoomDisconnect(sharedEntryRef.current);
+        sharedEntryRef.current = null;
       }
       setStatus('Student is not live right now.');
       setError('');
-      setDebugState({
-        room: '-',
-        screen: 'waiting',
-        camera: 'waiting',
-        mic: 'waiting',
-      });
+      setDebugState(createDefaultDebugState());
       return undefined;
     }
 
     if (!hasStartedSession) {
-      if (roomRef.current) {
-        roomRef.current.disconnect?.();
-        roomRef.current = null;
-        connectedSessionKeyRef.current = '';
+      if (sharedEntryRef.current) {
+        sharedEntryRef.current.refCount = Math.max(0, sharedEntryRef.current.refCount - 1);
+        scheduleSharedRoomDisconnect(sharedEntryRef.current);
+        sharedEntryRef.current = null;
       }
       setStatus('Student has not joined yet.');
       setError('');
-      setDebugState({
-        room: '-',
-        screen: 'waiting',
-        camera: 'waiting',
-        mic: 'waiting',
-      });
-      return undefined;
-    }
-
-    if (roomRef.current && connectedSessionKeyRef.current === connectionKey) {
+      setDebugState(createDefaultDebugState());
       return undefined;
     }
 
     let mounted = true;
-    const detachFns = [];
     const attachedTrackSids = new Set();
+    const localDetachFns = [];
+    const sharedEntry = getSharedRoomEntry(connectionKey);
+    sharedEntryRef.current = sharedEntry;
+    sharedEntry.refCount += 1;
+    clearSharedRoomIdleTimer(sharedEntry);
 
-    const cleanup = () => {
-      detachFns.forEach((fn) => fn());
-      detachFns.length = 0;
+    const syncSharedState = (nextState) => {
+      if (!mounted) return;
+      setError(nextState.error || '');
+      setStatus(nextState.status || 'Connecting live preview...');
+      setDebugState(nextState.debugState || createDefaultDebugState());
+    };
+    const unsubscribeSharedState = subscribeToSharedRoom(sharedEntry, syncSharedState);
+
+    const cleanupLocalBindings = () => {
+      localDetachFns.forEach((fn) => fn());
+      localDetachFns.length = 0;
       attachedTrackSids.clear();
-      roomRef.current?.disconnect?.();
-      roomRef.current = null;
-      connectedSessionKeyRef.current = '';
       if (screenVideoRef.current) screenVideoRef.current.srcObject = null;
       if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
       if (audioRef.current) audioRef.current.srcObject = null;
@@ -182,8 +323,7 @@ export default function LiveExamStreamMonitor({
         subscribedTrack.attach(element);
         await playMediaElement(element);
         attachedTrackSids.add(trackSid);
-        setDebugState((prev) => ({ ...prev, screen: 'connected' }));
-        detachFns.push(() => detachTrack(subscribedTrack, element));
+        localDetachFns.push(() => detachTrack(subscribedTrack, element));
         return;
       }
 
@@ -197,8 +337,7 @@ export default function LiveExamStreamMonitor({
         subscribedTrack.attach(element);
         await playMediaElement(element);
         attachedTrackSids.add(trackSid);
-        setDebugState((prev) => ({ ...prev, camera: 'connected' }));
-        detachFns.push(() => detachTrack(subscribedTrack, element));
+        localDetachFns.push(() => detachTrack(subscribedTrack, element));
         return;
       }
 
@@ -212,8 +351,7 @@ export default function LiveExamStreamMonitor({
         element.muted = !audioEnabled;
         await playMediaElement(element);
         attachedTrackSids.add(trackSid);
-        setDebugState((prev) => ({ ...prev, mic: 'connected' }));
-        detachFns.push(() => detachTrack(subscribedTrack, element));
+        localDetachFns.push(() => detachTrack(subscribedTrack, element));
       }
     };
 
@@ -226,95 +364,113 @@ export default function LiveExamStreamMonitor({
 
     const connectRoom = async () => {
       try {
-        setError('');
-        setStatus('Connecting live preview...');
-        setDebugState({
-          room: 'fetching token',
-          screen: 'waiting',
-          camera: 'waiting',
-          mic: 'waiting',
+        emitSharedRoomState(sharedEntry, {
+          error: '',
+          status: 'Connecting live preview...',
+          debugState: createDefaultDebugState('fetching token'),
         });
 
         const tokenData = await getLiveKitTokenForSession({
           sessionId: resolvedSession.id,
           mode: 'observer',
           requesterId: viewerId,
+          viewerInstanceId,
         });
-        if (!mounted) return;
+        if (sharedEntry.refCount <= 0 && sharedEntry.subscribers.size === 0) return;
 
         const room = new Room({
           adaptiveStream: true,
           dynacast: true,
         });
-        roomRef.current = room;
-        connectedSessionKeyRef.current = connectionKey;
-
-        room
-          .on(RoomEvent.ConnectionStateChanged, (state) => {
-            setDebugState((prev) => ({ ...prev, room: state }));
-            setStatus(state === ConnectionState.Connected ? 'Waiting for student media...' : 'Connecting live preview...');
-          })
-          .on(RoomEvent.ParticipantConnected, (participant) => {
-            subscribeParticipantTracks(participant);
-          })
-          .on(RoomEvent.TrackPublished, (_, publication, participant) => {
-            publication?.setSubscribed?.(true);
-            subscribeParticipantTracks(participant);
-          })
-          .on(RoomEvent.TrackSubscribed, (track, publication) => {
-            void attachPublication({ ...publication, track });
-          })
-          .on(RoomEvent.TrackUnsubscribed, (track, publication) => {
-            const trackSid = publication?.trackSid || track?.sid || `${publication?.source || 'unknown'}-${track?.kind || 'track'}`;
-            attachedTrackSids.delete(trackSid);
-            if (publication.source === Track.Source.ScreenShare) {
-              setDebugState((prev) => ({ ...prev, screen: 'waiting' }));
-            }
-            if (publication.source === Track.Source.Camera) {
-              setDebugState((prev) => ({ ...prev, camera: 'waiting' }));
-            }
-            if (publication.source === Track.Source.Microphone) {
-              setDebugState((prev) => ({ ...prev, mic: 'waiting' }));
-            }
-          });
+        sharedEntry.room = room;
+        bindSharedRoomStateListeners(sharedEntry);
 
         await room.connect(tokenData.url, tokenData.token, {
           autoSubscribe: true,
         });
-        if (!mounted) return;
+        if (sharedEntry.refCount <= 0 && sharedEntry.subscribers.size === 0) {
+          room.disconnect?.();
+          sharedEntry.room = null;
+          sharedEntry.listenersBound = false;
+          return;
+        }
 
-        room.remoteParticipants.forEach((participant) => {
-          subscribeParticipantTracks(participant);
-        });
+        room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
       } catch (connectionError) {
-        if (!mounted) return;
-        setError(connectionError.message || 'Failed to connect LiveKit preview.');
-        setStatus('Live stream unavailable.');
+        emitSharedRoomState(sharedEntry, {
+          error: connectionError.message || 'Failed to connect LiveKit preview.',
+          status: 'Live stream unavailable.',
+        });
+        sharedEntry.room = null;
+        sharedEntry.connectPromise = null;
+        sharedEntry.listenersBound = false;
       }
     };
 
-    void connectRoom();
+    const room = sharedEntry.room;
+    const participantConnectedHandler = (participant) => {
+      subscribeParticipantTracks(participant);
+    };
+    const trackPublishedHandler = (_, publication, participant) => {
+      publication?.setSubscribed?.(true);
+      subscribeParticipantTracks(participant);
+    };
+    const trackSubscribedHandler = (track, publication) => {
+      void attachPublication({ ...publication, track });
+    };
+    const trackUnsubscribedHandler = (track, publication) => {
+      const trackSid = publication?.trackSid || track?.sid || `${publication?.source || 'unknown'}-${track?.kind || 'track'}`;
+      attachedTrackSids.delete(trackSid);
+    };
+
+    if (room) {
+      room.on(RoomEvent.ParticipantConnected, participantConnectedHandler);
+      room.on(RoomEvent.TrackPublished, trackPublishedHandler);
+      room.on(RoomEvent.TrackSubscribed, trackSubscribedHandler);
+      room.on(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+      room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
+    }
+
+    if (!sharedEntry.room && !sharedEntry.connectPromise) {
+      sharedEntry.connectPromise = connectRoom().finally(() => {
+        sharedEntry.connectPromise = null;
+      });
+    } else if (sharedEntry.connectPromise) {
+      void sharedEntry.connectPromise.then(() => {
+        if (!mounted || !sharedEntry.room) return;
+        sharedEntry.room.on(RoomEvent.ParticipantConnected, participantConnectedHandler);
+        sharedEntry.room.on(RoomEvent.TrackPublished, trackPublishedHandler);
+        sharedEntry.room.on(RoomEvent.TrackSubscribed, trackSubscribedHandler);
+        sharedEntry.room.on(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+        sharedEntry.room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
+      });
+    }
 
     return () => {
       mounted = false;
-      cleanup();
+      unsubscribeSharedState();
+      cleanupLocalBindings();
+      if (sharedEntry.room) {
+        sharedEntry.room.off(RoomEvent.ParticipantConnected, participantConnectedHandler);
+        sharedEntry.room.off(RoomEvent.TrackPublished, trackPublishedHandler);
+        sharedEntry.room.off(RoomEvent.TrackSubscribed, trackSubscribedHandler);
+        sharedEntry.room.off(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+      }
+      sharedEntry.refCount = Math.max(0, sharedEntry.refCount - 1);
+      scheduleSharedRoomDisconnect(sharedEntry);
+      if (sharedEntryRef.current === sharedEntry) {
+        sharedEntryRef.current = null;
+      }
     };
-  }, [resolvedSession?.id, viewerId, connectionKey, hasStartedSession]);
+  }, [resolvedSession?.id, viewerId, connectionKey, hasStartedSession, viewerInstanceId]);
 
   useEffect(() => {
-    if (!roomRef.current) return;
+    if (!connectionKey) return;
     if (!['terminated', 'disconnected', 'completed', 'cancelled'].includes(sessionStatus)) return;
-    roomRef.current.disconnect?.();
-    roomRef.current = null;
-    connectedSessionKeyRef.current = '';
+    disconnectSharedRoomNow(connectionKey, 'Live session ended.');
     setStatus('Live session ended.');
-    setDebugState({
-      room: '-',
-      screen: 'waiting',
-      camera: 'waiting',
-      mic: 'waiting',
-    });
-  }, [sessionStatus]);
+    setDebugState(createDefaultDebugState());
+  }, [connectionKey, sessionStatus]);
 
   useEffect(() => {
     if (audioRef.current) {

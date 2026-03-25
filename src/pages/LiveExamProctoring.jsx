@@ -1740,6 +1740,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   };
 
   const handleSessionAction = async (session, actionType) => {
+    if (!session?.id) return;
     const message =
       actionType === 'warning'
         ? await askPrompt('Send Warning', 'Warning message for student?', 'Strict exam rule violation detected. Return to a compliant state immediately.', 'Send Warning', 'Back')
@@ -1753,6 +1754,23 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setSaving(true);
     setError('');
     try {
+      let targetSession = session;
+      if (session.booking_id) {
+        const { data: latestSessions, error: latestSessionError } = await supabase
+          .from('exam_live_sessions')
+          .select('*')
+          .eq('booking_id', session.booking_id)
+          .order('updated_at', { ascending: false })
+          .limit(10);
+        if (latestSessionError) throw latestSessionError;
+        const preferredSession =
+          (latestSessions || []).find((row) => ['active', 'paused', 'scheduled'].includes(String(row.status || '').toLowerCase())) ||
+          (latestSessions || [])[0];
+        if (preferredSession) {
+          targetSession = preferredSession;
+        }
+      }
+
       const sessionPatch = { updated_at: nowIso() };
       const bookingPatch = { updated_at: nowIso() };
       if (actionType === 'pause') {
@@ -1777,27 +1795,27 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
             locked_until: lockUntil,
             lock_reason: message || 'Account locked due to exam violation.',
           })
-          .eq('id', session.student_id);
+          .eq('id', targetSession.student_id);
         if (profileError) throw profileError;
       }
 
       if (actionType !== 'warning') {
-        const { error: sessionError } = await supabase.from('exam_live_sessions').update(sessionPatch).eq('id', session.id);
+        const { error: sessionError } = await supabase.from('exam_live_sessions').update(sessionPatch).eq('id', targetSession.id);
         if (sessionError) throw sessionError;
       }
       if (actionType === 'terminate' || actionType === 'lock') {
-        const { error: bookingError } = await supabase.from('exam_slot_bookings').update(bookingPatch).eq('id', session.booking_id);
+        const { error: bookingError } = await supabase.from('exam_slot_bookings').update(bookingPatch).eq('id', targetSession.booking_id);
         if (bookingError) throw bookingError;
       }
 
       const { error: actionError } = await supabase
         .from('exam_live_actions')
         .insert({
-          slot_id: session.slot_id,
-          session_id: session.id,
+          slot_id: targetSession.slot_id,
+          session_id: targetSession.id,
           actor_id: profile.id,
           actor_role: role,
-          target_student_id: session.student_id,
+          target_student_id: targetSession.student_id,
           action_type: actionType,
           message: message || null,
           lock_days: actionType === 'lock' ? Math.min(60, Math.max(1, Number(lockDays) || DEFAULT_LOCK_DAYS)) : null,
@@ -1807,27 +1825,27 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const { error: messageError } = await supabase
         .from('exam_live_messages')
         .insert({
-          slot_id: session.slot_id,
-          session_id: session.id,
+          slot_id: targetSession.slot_id,
+          session_id: targetSession.id,
           sender_id: profile.id,
           sender_role: role,
-          recipient_id: session.student_id,
+          recipient_id: targetSession.student_id,
           is_broadcast: false,
           content: message || `${actionType} issued by ${role}.`,
         });
       if (messageError) throw messageError;
 
-      const slot = slots.find((row) => String(row.id) === String(session.slot_id));
-      const targetStudentProfile = profilesById[session.student_id] || null;
+      const slot = slots.find((row) => String(row.id) === String(targetSession.slot_id));
+      const targetStudentProfile = profilesById[targetSession.student_id] || null;
       const assignedTeacherId = targetStudentProfile?.assigned_teacher_id || slot?.teacher_id || null;
       const slotInstructorIds = slotInstructors
-        .filter((row) => String(row.slot_id) === String(session.slot_id))
+        .filter((row) => String(row.slot_id) === String(targetSession.slot_id))
         .map((row) => row.instructor_id)
         .filter(Boolean);
       const actionNotificationRows = [
         {
           title: `Live Exam ${actionType}`,
-          content: `${profilesById[session.student_id]?.full_name || 'Student'}: ${message || actionType}`,
+          content: `${profilesById[targetSession.student_id]?.full_name || 'Student'}: ${message || actionType}`,
           type: actionType === 'warning' ? 'warning' : 'info',
           target_role: 'admin',
           target_user_id: null,
@@ -1836,7 +1854,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       if (assignedTeacherId) {
         actionNotificationRows.push({
           title: `Live Exam ${actionType}`,
-          content: `${profilesById[session.student_id]?.full_name || 'Student'}: ${message || actionType}`,
+          content: `${profilesById[targetSession.student_id]?.full_name || 'Student'}: ${message || actionType}`,
           type: actionType === 'warning' ? 'warning' : 'info',
           target_role: 'teacher',
           target_user_id: assignedTeacherId,
@@ -1845,7 +1863,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       slotInstructorIds.forEach((instructorId) => {
         actionNotificationRows.push({
           title: `Live Exam ${actionType}`,
-          content: `${profilesById[session.student_id]?.full_name || 'Student'}: ${message || actionType}`,
+          content: `${profilesById[targetSession.student_id]?.full_name || 'Student'}: ${message || actionType}`,
           type: actionType === 'warning' ? 'warning' : 'info',
           target_role: 'instructor',
           target_user_id: instructorId,
@@ -1853,6 +1871,25 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       });
       await insertNotifications(actionNotificationRows).catch(() => null);
 
+      setSessions((prev) => prev.map((row) => (
+        String(row.id) === String(targetSession.id)
+          ? {
+              ...row,
+              ...sessionPatch,
+            }
+          : row
+      )));
+      if (actionType === 'terminate' || actionType === 'lock') {
+        setBookings((prev) => prev.map((row) => (
+          String(row.id) === String(targetSession.booking_id)
+            ? {
+                ...row,
+                ...bookingPatch,
+              }
+            : row
+        )));
+      }
+      setSelectedMonitoringSessionId(targetSession.id);
       setInfo(`Student ${actionType} action completed.`);
       await loadData({ silent: true });
     } catch (actionError) {
@@ -2498,10 +2535,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               {session ? (
                                 <div className="mt-4">
                                   <LiveExamStreamMonitor
-                                    key={`${session.id}:${session.updated_at || session.started_at || session.created_at || ''}:${session.camera_connected ? 'cam1' : 'cam0'}:${session.screen_share_connected ? 'scr1' : 'scr0'}`}
+                                    key={`compact-${session.id}`}
                                     slotId={selectedSlot.id}
                                     session={session}
                                     viewerId={profile?.id}
+                                    viewerInstanceId={`compact-${booking.id}`}
                                     viewerRole={role}
                                     compact
                                   />
@@ -2678,6 +2716,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                 slotId={selectedSlot.id}
                                 session={selectedMonitoringSession}
                                 viewerId={profile?.id}
+                                viewerInstanceId={`detail-${selectedMonitoringSession?.id || 'none'}`}
                                 viewerRole={role}
                                 large
                               />
@@ -2808,6 +2847,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                           slotId={selectedSlot?.id}
                           session={selectedMonitoringSession}
                           viewerId={profile?.id}
+                          viewerInstanceId={`modal-${selectedMonitoringSession?.id || 'none'}`}
                           viewerRole={role}
                           large
                         />
