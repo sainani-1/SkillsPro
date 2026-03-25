@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
 import { logAdminActivity } from '../utils/adminActivityLogger';
 import { useNavigate } from 'react-router-dom';
+import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
@@ -265,6 +266,7 @@ const AccountManagement = () => {
             reason: premiumReason.trim(),
           });
         if (grantLogError) throw grantLogError;
+        await assignBalancedTeacherToStudent(supabase, selectedUser.id);
       }
       if (!data) throw new Error('Update failed — no rows returned');
 

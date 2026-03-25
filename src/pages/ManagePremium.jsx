@@ -4,6 +4,7 @@ import { Award, Search, Clock3 } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { logAdminActivity } from '../utils/adminActivityLogger';
+import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
@@ -137,6 +138,8 @@ const ManagePremium = () => {
         premium_until: effectiveValidUntil
       }).eq('id', selectedUser.id);
       if (profileUpdateError) throw profileUpdateError;
+
+      await assignBalancedTeacherToStudent(supabase, selectedUser.id);
 
       const { error: grantInsertError } = await supabase.from('premium_grants').insert({
         user_id: selectedUser.id,

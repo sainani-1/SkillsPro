@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assignBalancedTeacherToStudent } from "../_shared/teacherAssignment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,6 +96,8 @@ Deno.serve(async (req: Request) => {
   if (profileUpdateError) {
     return errorResponse("Failed to activate premium pass.", 500);
   }
+
+  await assignBalancedTeacherToStudent(adminClient, user.id);
 
   const { error: claimError } = await adminClient
     .from("premium_pass_claims")

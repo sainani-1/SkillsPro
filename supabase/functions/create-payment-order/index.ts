@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assignBalancedTeacherToStudent } from "../_shared/teacherAssignment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -282,6 +283,8 @@ Deno.serve(async (req: Request) => {
         .eq("id", payment.id);
       return errorResponse("Payment was recorded but premium activation failed.", 500);
     }
+
+    await assignBalancedTeacherToStudent(adminClient, user.id);
 
     if (selectedOffer?.id) {
       await adminClient.from("offer_redemptions").upsert(
