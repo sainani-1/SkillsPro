@@ -238,6 +238,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const [liveExamRebookingWaitDays, setLiveExamRebookingWaitDays] = useState(7);
   const [retakeOverrides, setRetakeOverrides] = useState([]);
   const [passedSubmissions, setPassedSubmissions] = useState([]);
+  const [latestSubmissions, setLatestSubmissions] = useState([]);
   const [createForm, setCreateForm] = useState({
     examId: '',
     teacherId: '',
@@ -397,6 +398,38 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     });
     return { passedExamIdSet, passedCourseIdSet };
   }, [passedSubmissions, examsById]);
+
+  const latestSubmissionByExamId = useMemo(() => {
+    const map = {};
+    latestSubmissions.forEach((row) => {
+      if (!row?.exam_id) return;
+      const examKey = String(row.exam_id);
+      const nextStamp = new Date(row.submitted_at || 0).getTime();
+      const existing = map[examKey];
+      const existingStamp = existing ? new Date(existing.submitted_at || 0).getTime() : 0;
+      if (!existing || nextStamp >= existingStamp) {
+        map[examKey] = row;
+      }
+    });
+    return map;
+  }, [latestSubmissions]);
+
+  const latestSubmissionByCourseId = useMemo(() => {
+    const map = {};
+    latestSubmissions.forEach((row) => {
+      const exam = examsById[row?.exam_id];
+      const courseId = exam?.course_id;
+      if (!courseId) return;
+      const courseKey = String(courseId);
+      const nextStamp = new Date(row.submitted_at || 0).getTime();
+      const existing = map[courseKey];
+      const existingStamp = existing ? new Date(existing.submitted_at || 0).getTime() : 0;
+      if (!existing || nextStamp >= existingStamp) {
+        map[courseKey] = row;
+      }
+    });
+    return map;
+  }, [latestSubmissions, examsById]);
 
   const sessionByBookingId = useMemo(() => {
     const map = {};
@@ -919,6 +952,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         staffResp,
         retakeOverrideResp,
         passedSubmissionResp,
+        latestSubmissionResp,
       ] = await Promise.all([
         slotIds.length
           ? loadOptionalQuery(isStudent
@@ -961,6 +995,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         isStudent
           ? loadOptionalQuery(supabase.from('exam_submissions').select('exam_id, submitted_at, score_percent, passed').eq('user_id', profile.id).eq('passed', true), [])
           : Promise.resolve({ data: [], error: null }),
+        isStudent
+          ? loadOptionalQuery(supabase.from('exam_submissions').select('exam_id, submitted_at, score_percent, passed, next_attempt_allowed_at').eq('user_id', profile.id), [])
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       const bookingRows = bookingResp.data || [];
@@ -975,6 +1012,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const staffRows = staffResp.data || [];
       const retakeOverrideRows = retakeOverrideResp.data || [];
       const passedSubmissionRows = passedSubmissionResp.data || [];
+      const latestSubmissionRows = latestSubmissionResp.data || [];
 
       const profileIds = new Set();
       slotRows.forEach((slot) => {
@@ -1067,6 +1105,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setProfilesById(profileMap);
       setRetakeOverrides(retakeOverrideRows);
       setPassedSubmissions(passedSubmissionRows);
+      setLatestSubmissions(latestSubmissionRows);
       if (isAdmin) {
         setTeacherOptions(staffRows.filter((row) => row.role === 'teacher'));
         setInstructorOptions(staffRows.filter((row) => row.role === 'instructor'));
@@ -1452,11 +1491,22 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         throw new Error('You have already booked a slot for this exam. Use Start on the booked slot.');
       }
       const exam = examsById[slot.exam_id];
+      const latestSubmission =
+        latestSubmissionByExamId[String(slot.exam_id)] ||
+        (exam?.course_id ? latestSubmissionByCourseId[String(exam.course_id)] : null);
       if (
         passedExamIds.passedExamIdSet.has(String(slot.exam_id)) ||
         (exam?.course_id && passedExamIds.passedCourseIdSet.has(String(exam.course_id)))
       ) {
         throw new Error('You have already passed this exam. Booking another session is not allowed.');
+      }
+      if (
+        latestSubmission &&
+        latestSubmission.passed === false &&
+        latestSubmission.next_attempt_allowed_at &&
+        new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now()
+      ) {
+        throw new Error(`You failed this exam. Wait until ${formatDateTime(latestSubmission.next_attempt_allowed_at)} before booking again.`);
       }
       const rebookingBlock = liveExamRebookingBlocksByExamId[slot.exam_id];
       if (rebookingBlock && String(rebookingBlock.lastSlotId) !== String(slot.id)) {
@@ -2594,16 +2644,29 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
               const teacher = profilesById[slot.teacher_id];
               const myBooking = bookingBySlotId[slot.id];
               const examLevelBooking = bookingByExamId[slot.exam_id];
+              const latestSubmission =
+                latestSubmissionByExamId[String(slot.exam_id)] ||
+                (exam?.course_id ? latestSubmissionByCourseId[String(exam.course_id)] : null);
               const hasAnotherBookingForSameExam = examLevelBooking && String(examLevelBooking.slot_id) !== String(slot.id);
               const hasPassedExamAlready =
                 passedExamIds.passedExamIdSet.has(String(slot.exam_id)) ||
                 (exam?.course_id && passedExamIds.passedCourseIdSet.has(String(exam.course_id)));
+              const hasFailedExamWait =
+                latestSubmission &&
+                latestSubmission.passed === false &&
+                latestSubmission.next_attempt_allowed_at &&
+                new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now();
               const rebookingBlock = liveExamRebookingBlocksByExamId[slot.exam_id];
               const isRebookingBlocked = !myBooking && Boolean(rebookingBlock) && String(rebookingBlock.lastSlotId) !== String(slot.id);
               const effectiveBookingStatus = myBooking ? getEffectiveBookingStatus(myBooking, slot) : '';
               const bookingCount = bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled').length;
               const slotFull = bookingCount >= Number(slot.max_capacity || 0) && !myBooking;
               const hasOverride = slotOverrides.some((row) => String(row.slot_id) === String(slot.id) && String(row.student_id) === String(profile?.id));
+              const resultLabel = hasPassedExamAlready
+                ? 'Completed - Passed'
+                : hasFailedExamWait
+                  ? 'Completed - Failed'
+                  : null;
               return (
                 <div key={slot.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
@@ -2612,7 +2675,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       <h2 className="mt-2 text-xl font-semibold text-slate-900">{slot.title || exam?.test_name || 'Exam Slot'}</h2>
                       <p className="mt-1 text-sm text-slate-500">Slot Time: {formatDateTime(slot.starts_at)} to {formatDateTime(slot.ends_at)}</p>
                     </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${effectiveBookingStatus === 'completed' ? 'bg-sky-100 text-sky-700' : slot.status === 'cancelled' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{effectiveBookingStatus || slot.status}</span>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      hasPassedExamAlready
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : hasFailedExamWait
+                          ? 'bg-amber-100 text-amber-800'
+                          : effectiveBookingStatus === 'completed'
+                            ? 'bg-sky-100 text-sky-700'
+                            : slot.status === 'cancelled'
+                              ? 'bg-rose-100 text-rose-700'
+                              : 'bg-emerald-100 text-emerald-700'
+                    }`}>{resultLabel || effectiveBookingStatus || slot.status}</span>
                   </div>
                   <div className="mt-4 space-y-2 text-sm text-slate-600">
                     <p>Exam: <span className="font-medium text-slate-900">{getExamDisplayName(exam, coursesById[exam?.course_id])}</span></p>
@@ -2620,6 +2693,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                     <p>Booking Window: up to 2 months in advance</p>
                     <p>Start Rule: <span className="font-medium text-slate-900">Only at the exact booked slot date and time</span></p>
                     <p>Override while paused: <span className="font-medium text-slate-900">{hasOverride ? 'Allowed' : 'No'}</span></p>
+                    {hasPassedExamAlready && latestSubmission ? <p>Result: <span className="font-medium text-emerald-700">Passed with {Math.round(Number(latestSubmission.score_percent) || 0)}%</span></p> : null}
+                    {hasFailedExamWait ? <p>Result: <span className="font-medium text-amber-800">Failed. Wait until {formatDateTime(latestSubmission.next_attempt_allowed_at)}</span></p> : null}
                   </div>
                   {slot.notes ? <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{slot.notes}</div> : null}
                   <div className="mt-5 flex flex-wrap gap-2">
@@ -2885,11 +2960,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="flex items-start gap-3">
-                                    {student?.avatar_url ? (
-                                      <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-11 w-11 rounded-full object-cover ring-2 ring-white/20" />
-                                    ) : (
-                                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-[10px] font-semibold text-slate-200">No Photo</div>
-                                    )}
+                                    <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-11 w-11 rounded-full object-cover ring-2 ring-white/20" />
                                     <div>
                                       <p className={`text-base font-semibold ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-white' : 'text-slate-900'}`}>{student?.full_name || student?.email || 'Student'}</p>
                                       <p className={`mt-1 text-xs ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-slate-300' : 'text-slate-500'}`}>{session ? `Status: ${session.status}` : `Booking: ${booking.status}`}</p>
@@ -3004,11 +3075,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-start gap-3">
-                                  {student?.avatar_url ? (
-                                    <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-11 w-11 rounded-full object-cover" />
-                                  ) : (
-                                    <div className={`flex h-11 w-11 items-center justify-center rounded-full text-[10px] font-semibold ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-500'}`}>No Photo</div>
-                                  )}
+                                  <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-11 w-11 rounded-full object-cover" />
                                   <div>
                                     <p className="text-sm font-semibold">{student?.full_name || student?.email || 'Student'}</p>
                                     <p className={`mt-1 text-xs ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-slate-300' : 'text-slate-500'}`}>
@@ -3058,11 +3125,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                           <div ref={bigLiveMonitorRef} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                             <div className="flex flex-wrap items-start justify-between gap-4">
                               <div className="flex items-start gap-3">
-                                {selectedMonitoringStudent?.avatar_url ? (
-                                  <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-14 w-14 rounded-full object-cover" />
-                                ) : (
-                                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-500">No Photo</div>
-                                )}
+                                <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-14 w-14 rounded-full object-cover" />
                                 <div>
                                   <h3 className="text-xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
                                   <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
@@ -3200,11 +3263,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                     <div className="relative max-h-[94vh] w-full max-w-7xl overflow-auto rounded-[2rem] bg-white p-5 shadow-2xl">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
-                          {selectedMonitoringStudent?.avatar_url ? (
-                            <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-16 w-16 rounded-full object-cover" />
-                          ) : (
-                            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-500">No Photo</div>
-                          )}
+                          <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-16 w-16 rounded-full object-cover" />
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
                             <h3 className="mt-2 text-2xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
@@ -3291,11 +3350,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             <tr key={booking.id} className="border-t border-slate-200">
                               <td className="px-3 py-3">
                                 <div className="flex items-center gap-3">
-                                  {student?.avatar_url ? (
-                                    <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-10 w-10 rounded-full object-cover" />
-                                  ) : (
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-500">No Photo</div>
-                                  )}
+                                  <AvatarImage userId={student?.id} avatarUrl={student?.avatar_url} fallbackName={student?.full_name || student?.email || 'Student'} alt={student?.full_name || 'Student'} className="h-10 w-10 rounded-full object-cover" />
                                   <div><p className="font-medium text-slate-900">{student?.full_name || student?.email || 'Student'}</p><p className="text-xs text-slate-500">{student?.role || 'student'}</p></div>
                                 </div>
                               </td>

@@ -988,9 +988,10 @@ export default function Exam({ examMode = "certification" }) {
       setExamId(resolvedExamId);
       setResolvedCourseId(targetCourseId);
       setExamDurationMinutes(Math.max(1, Number(examRow?.duration_minutes) || 60));
-      setExamPassPercent(Number(examRow?.pass_percent) || 40);
+      const resolvedPassPercent = Number(examRow?.pass_percent) || 40;
+      setExamPassPercent(isLiveProctoredMode ? Math.max(70, resolvedPassPercent) : resolvedPassPercent);
       setStrictProctorLockDays(Math.max(1, Number(strictLockSetting?.value) || RETAKE_LOCK_DAYS));
-      setExamGenerateCertificate(isTeacherTestMode || isLiveProctoredMode ? false : examRow?.generate_certificate !== false);
+      setExamGenerateCertificate(!isTeacherTestMode && examRow?.generate_certificate !== false);
       setExamQuestionSetUpdatedAt(examRow?.question_set_updated_at || null);
 
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -2606,6 +2607,10 @@ export default function Exam({ examMode = "certification" }) {
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(null);
     }
+    if (screenShareStream) {
+      screenShareStream.getTracks().forEach((track) => track.stop());
+      setScreenShareStream(null);
+    }
     try {
       navigator.keyboard?.unlock?.();
     } catch {
@@ -3550,7 +3555,7 @@ export default function Exam({ examMode = "certification" }) {
                     : "bg-gradient-to-r from-rose-600 to-red-500"
                 }`}
               >
-                <h2 className="text-3xl font-extrabold tracking-tight">Final Exam Result</h2>
+                <h2 className="text-3xl font-extrabold tracking-tight">{isLiveProctoredMode ? 'Live Exam Result' : 'Final Exam Result'}</h2>
                 <p className="text-sm mt-1 opacity-90">
                   {resultData.passed
                     ? "Congratulations, you have successfully passed."
@@ -3563,7 +3568,7 @@ export default function Exam({ examMode = "certification" }) {
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center">
                     <p className="text-xs font-semibold text-slate-500">STATUS</p>
                     <p className={`text-3xl font-extrabold mt-1 ${resultData.passed ? "text-emerald-700" : "text-red-700"}`}>
-                      {resultData.passed ? "PASS" : "FAIL"}
+                      {resultData.passed ? "COMPLETED - PASSED" : "FAIL"}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center">
