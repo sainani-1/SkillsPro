@@ -100,6 +100,13 @@ function hasActiveVideoTrack(stream) {
   return tracks.some((track) => track.readyState === "live" && track.enabled);
 }
 
+function isEntireScreenShareStream(stream) {
+  const [track] = stream?.getVideoTracks?.() || [];
+  if (!track) return false;
+  const displaySurface = String(track.getSettings?.().displaySurface || "").toLowerCase();
+  return displaySurface === "monitor";
+}
+
 function formatDisplaySubmissionId(rawId) {
   const now = new Date();
   const dd = String(now.getDate()).padStart(2, "0");
@@ -277,6 +284,7 @@ export default function Exam({ examMode = "certification" }) {
   );
   const activeQuestion = questions[activeQuestionIndex];
   const isLiveManagedExam = Boolean(liveExamContext?.sessionId);
+  const isInvigilatorPaused = Boolean(invigilatorPauseMessage);
 
   const getCodingAnswer = (question) => {
     const answer = answers[question.id];
@@ -405,9 +413,21 @@ export default function Exam({ examMode = "certification" }) {
         return;
       }
 
-      if (actionType === 'terminate' || actionType === 'lock') {
-        console.debug('[Exam] Handling invigilator terminate/lock:', actionType, actionMessage);
-        await terminateExamForViolation(actionMessage || `Exam ${actionType}d by invigilator.`);
+      if (actionType === 'terminate') {
+        console.debug('[Exam] Handling invigilator terminate:', actionMessage);
+        await terminateExamForViolation(actionMessage || 'Exam terminated by invigilator.', {
+          lockAccountOverride: false,
+          preserveRetakeAccess: true,
+        });
+        return;
+      }
+
+      if (actionType === 'lock') {
+        console.debug('[Exam] Handling invigilator lock:', actionMessage, action?.lock_days);
+        await terminateExamForViolation(actionMessage || 'Account locked by invigilator.', {
+          lockAccountOverride: true,
+          lockDaysOverride: action?.lock_days,
+        });
       }
     };
 
@@ -1143,6 +1163,9 @@ export default function Exam({ examMode = "certification" }) {
       setRemainingExamSeconds(null);
       return;
     }
+    if (isInvigilatorPaused) {
+      return undefined;
+    }
 
     const updateRemainingTime = () => {
       const remaining = Math.max(0, Math.ceil((new Date(examEndsAt).getTime() - Date.now()) / 1000));
@@ -1161,10 +1184,10 @@ export default function Exam({ examMode = "certification" }) {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [phase, examEndsAt]);
+  }, [phase, examEndsAt, isInvigilatorPaused]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING) {
+    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) {
       examAutoSubmitTriggeredRef.current = false;
       return;
     }
@@ -1174,18 +1197,18 @@ export default function Exam({ examMode = "certification" }) {
     examAutoSubmitTriggeredRef.current = true;
     setInfoMsg("Time is up. Submitting your exam automatically.");
     void submitExam();
-  }, [phase, remainingExamSeconds]);
+  }, [phase, remainingExamSeconds, isInvigilatorPaused]);
 
   useEffect(() => {
     if (!isLiveManagedExam || phase !== EXAM_PHASES.RUNNING) return undefined;
     const interval = window.setInterval(() => {
       void syncLiveExamSession({
-        status: "active",
+        status: isInvigilatorPaused ? "paused" : "active",
         last_heartbeat_at: new Date().toISOString(),
       });
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [isLiveManagedExam, phase]);
+  }, [isLiveManagedExam, phase, isInvigilatorPaused]);
 
   useEffect(() => {
     if (questions.length === 0) return;
@@ -1228,7 +1251,7 @@ export default function Exam({ examMode = "certification" }) {
   }, [cameraStream, screenShareStream, liveExamContext?.sessionId]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING || !cameraStream || !videoRef.current) {
+    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused || !cameraStream || !videoRef.current) {
       blankScreenWarnedRef.current = false;
       blankScreenTerminatedRef.current = false;
       blankScreenStartedAtRef.current = 0;
@@ -1367,10 +1390,11 @@ export default function Exam({ examMode = "certification" }) {
       videoTrack?.removeEventListener?.("mute", handleTrackMute);
       videoTrack?.removeEventListener?.("unmute", handleTrackUnmute);
     };
-  }, [cameraStream, phase, showBlankScreenWarning, terminateExamForViolation]);
+  }, [cameraStream, phase, showBlankScreenWarning, terminateExamForViolation, isInvigilatorPaused]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
+    if (isInvigilatorPaused) return;
     if (phase === EXAM_PHASES.SUBMITTING && submissionFinalized) return;
     if (!needsFullscreenResume && hasActiveVideoTrack(cameraStream)) return;
     let cancelled = false;
@@ -1386,10 +1410,10 @@ export default function Exam({ examMode = "certification" }) {
     return () => {
       cancelled = true;
     };
-  }, [phase, needsFullscreenResume, cameraStream, submissionFinalized]);
+  }, [phase, needsFullscreenResume, cameraStream, submissionFinalized, isInvigilatorPaused]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING) return;
+    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) return;
     if (needsFullscreenResume) return;
 
     const clearTabSwitchTimer = () => {
@@ -1552,10 +1576,11 @@ export default function Exam({ examMode = "certification" }) {
       clearTabSwitchTimer();
       clearFullscreenTimer();
     };
-  }, [phase, needsFullscreenResume]);
+  }, [phase, needsFullscreenResume, isInvigilatorPaused]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
+    if (isInvigilatorPaused) return;
     if (needsFullscreenResume) return;
     const isCodingQuestionActive = resolveQuestionType(activeQuestion) === "coding";
 
@@ -1638,10 +1663,10 @@ export default function Exam({ examMode = "certification" }) {
       document.removeEventListener("keydown", preventCopyKeys, true);
       window.removeEventListener("keydown", preventCopyKeys, true);
     };
-  }, [phase, needsFullscreenResume, activeQuestion]);
+  }, [phase, needsFullscreenResume, activeQuestion, isInvigilatorPaused]);
 
   useEffect(() => {
-    if (phase !== EXAM_PHASES.RUNNING) return;
+    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused) return;
     if (needsFullscreenResume) return;
 
     const handleTouchStart = (event) => {
@@ -1661,7 +1686,7 @@ export default function Exam({ examMode = "certification" }) {
       document.removeEventListener("touchstart", handleTouchStart);
       document.removeEventListener("gesturestart", handleGestureStart);
     };
-  }, [phase, needsFullscreenResume]);
+  }, [phase, needsFullscreenResume, isInvigilatorPaused]);
 
   useEffect(() => {
     const inStrictPhase =
@@ -1816,12 +1841,19 @@ export default function Exam({ examMode = "certification" }) {
 
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: {
+          displaySurface: "monitor",
+        },
         audio: true,
       });
+      if (!isEntireScreenShareStream(stream)) {
+        stream.getTracks().forEach((track) => track.stop());
+        setErrorMsg("Share the entire screen only. Tab share or app-window share is not allowed.");
+        return null;
+      }
       return stream;
     } catch {
-      setErrorMsg("Entire-screen sharing is required to start this live exam.");
+      setErrorMsg("Entire-screen sharing is required to start this live exam. Choose Entire Screen, not a tab or app window.");
       return null;
     }
   }
@@ -2046,6 +2078,10 @@ export default function Exam({ examMode = "certification" }) {
     if (phase !== EXAM_PHASES.FULLSCREEN) return;
     setErrorMsg("");
     setInfoMsg("");
+    if (requiresLiveMedia && !isEntireScreenShareStream(screenShareStream)) {
+      setErrorMsg("Share the entire screen first. Tab share or app-window share is not allowed.");
+      return;
+    }
     if (requiresLiveMedia) {
       await ensureLiveSessionContext({ reactivate: true, force: true });
     }
@@ -2086,6 +2122,10 @@ export default function Exam({ examMode = "certification" }) {
   }
 
   async function reEnterFullscreen() {
+    if (requiresLiveMedia && !isEntireScreenShareStream(screenShareStream)) {
+      setErrorMsg("Entire-screen sharing is required before returning to fullscreen.");
+      return;
+    }
     const ok = await enterFullscreen();
     if (!ok) return;
     setNeedsFullscreenResume(false);
@@ -2106,20 +2146,52 @@ export default function Exam({ examMode = "certification" }) {
     }
   }
 
-  async function terminateExamForViolation(reason) {
+  async function upsertFailedSubmission(nextAttemptAllowedAt = null) {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user?.id) {
+      throw new Error("User not authenticated.");
+    }
+
+    const payload = {
+      user_id: userData.user.id,
+      exam_id: examId ?? routeCourseId ?? routeExamId,
+      score_percent: 0,
+      passed: false,
+      submitted_at: new Date().toISOString(),
+      next_attempt_allowed_at: nextAttemptAllowedAt,
+    };
+    const { error } = await supabase
+      .from("exam_submissions")
+      .upsert([payload], { onConflict: "exam_id,user_id" });
+    if (error) throw new Error(error.message);
+    return userData.user.id;
+  }
+
+  async function terminateExamForViolation(reason, options = {}) {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
-    const shouldLockAccount = isLiveManagedExam || !isTeacherTestMode;
+    const {
+      lockAccountOverride = null,
+      lockDaysOverride = null,
+      preserveRetakeAccess = false,
+    } = options;
+    const shouldLockAccount =
+      typeof lockAccountOverride === "boolean"
+        ? lockAccountOverride
+        : isLiveManagedExam || !isTeacherTestMode;
     setIsBlockingAccount(shouldLockAccount);
     setTerminateReason(reason);
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData?.user?.id) {
-        throw new Error("User not authenticated.");
-      }
+      const failedAt = new Date().toISOString();
+      const lockDays = Math.max(1, Number(lockDaysOverride) || strictProctorLockDays);
+      const lockUntil = new Date(
+        Date.now() + lockDays * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const userId = await upsertFailedSubmission(shouldLockAccount ? lockUntil : null);
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop());
+        setCameraStream(null);
       }
       if (screenShareStream) {
         screenShareStream.getTracks().forEach((track) => track.stop());
@@ -2130,17 +2202,14 @@ export default function Exam({ examMode = "certification" }) {
         await document.exitFullscreen().catch(() => {});
       }
 
-      const lockUntil = new Date(
-        Date.now() + strictProctorLockDays * 24 * 60 * 60 * 1000
-      ).toISOString();
-      if (!shouldLockAccount) {
+      if (!shouldLockAccount && !preserveRetakeAccess) {
         const blockCheckpoint = examQuestionSetUpdatedAt || new Date().toISOString();
         const { error: blockErr } = await supabase
           .from("exam_attempt_blocks")
           .upsert(
             [
               {
-                user_id: userData.user.id,
+                user_id: userId,
                 exam_id: examId ?? routeCourseId,
                 unblock_after_question_update_at: blockCheckpoint,
                 reason,
@@ -2158,15 +2227,15 @@ export default function Exam({ examMode = "certification" }) {
             locked_until: lockUntil,
             lock_reason: reason,
           })
-          .eq("id", userData.user.id);
+          .eq("id", userId);
         if (profileLockError) throw new Error(profileLockError.message);
-        await fetchProfile(userData.user.id, { background: true });
+        await fetchProfile(userId, { background: true });
       }
       await syncLiveExamSession({
         status: "terminated",
-        ended_at: new Date().toISOString(),
+        ended_at: failedAt,
         termination_reason: reason,
-        last_heartbeat_at: new Date().toISOString(),
+        last_heartbeat_at: failedAt,
         camera_connected: false,
         mic_connected: false,
         screen_share_connected: false,
@@ -2179,8 +2248,8 @@ export default function Exam({ examMode = "certification" }) {
       setRetakeLockedUntil(shouldLockAccount ? lockUntil : null);
       setErrorMsg(
         !shouldLockAccount
-          ? "Test terminated. You cannot write this test again until the teacher updates the questions."
-          : "Exam terminated. Your account has been locked due to suspicious activity."
+          ? "Exam terminated by invigilator. Your attempt has been marked as failed."
+          : `Exam terminated. Your account has been locked for ${lockDays} day${lockDays === 1 ? "" : "s"}.`
       );
     } catch (error) {
       setErrorMsg("Failed to terminate exam: " + error.message);
@@ -3539,17 +3608,17 @@ export default function Exam({ examMode = "certification" }) {
 
       {invigilatorWarningMessage && (phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING) ? (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="max-w-lg w-full bg-white rounded-2xl p-6 border border-amber-200 shadow-xl space-y-4 text-center">
-            <h2 className="text-xl font-bold text-amber-700">Warning From Invigilator</h2>
-            <p className="text-sm text-slate-700">
+          <div className="max-w-lg w-full rounded-2xl border border-red-300 bg-red-50 p-6 shadow-xl space-y-4 text-center">
+            <h2 className="text-xl font-bold text-red-700">Warning From Invigilator</h2>
+            <p className="text-sm font-medium text-red-900">
               {invigilatorWarningMessage}
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-red-700">
               This warning was sent from the live monitoring panel. Continue only after following the instruction.
             </p>
             <button
               onClick={() => setInvigilatorWarningMessage("")}
-              className="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold"
+              className="px-4 py-2 rounded-lg bg-red-700 text-white font-semibold"
             >
               I Understand
             </button>
@@ -3558,14 +3627,14 @@ export default function Exam({ examMode = "certification" }) {
       ) : null}
 
       {invigilatorPauseMessage && (phase === EXAM_PHASES.RUNNING || phase === EXAM_PHASES.SUBMITTING) ? (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="max-w-lg w-full bg-white rounded-2xl p-6 border border-slate-200 shadow-xl space-y-4 text-center">
-            <h2 className="text-xl font-bold text-slate-900">Exam Paused By Invigilator</h2>
-            <p className="text-sm text-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white p-4">
+          <div className="max-w-2xl w-full rounded-3xl border border-slate-200 bg-white p-10 shadow-xl space-y-5 text-center">
+            <h2 className="text-3xl font-bold text-slate-900">Your Exam Was Paused</h2>
+            <p className="text-base text-slate-700">
               {invigilatorPauseMessage}
             </p>
-            <p className="text-xs text-slate-500">
-              This exam is paused from the monitoring panel. Wait for the invigilator to continue the session.
+            <p className="text-sm text-slate-500">
+              Your timer is stopped and questions are hidden. Wait for the invigilator to continue the session.
             </p>
           </div>
         </div>

@@ -1781,13 +1781,25 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         sessionPatch.ended_at = nowIso();
         sessionPatch.termination_reason = message || 'Terminated by invigilator';
         bookingPatch.status = 'terminated';
+        const { error: failResultError } = await supabase
+          .from('exam_submissions')
+          .upsert({
+            exam_id: targetSession.exam_id,
+            user_id: targetSession.student_id,
+            score_percent: 0,
+            passed: false,
+            submitted_at: nowIso(),
+            next_attempt_allowed_at: null,
+          }, { onConflict: 'exam_id,user_id' });
+        if (failResultError) throw failResultError;
       }
       if (actionType === 'lock') {
         sessionPatch.status = 'terminated';
         sessionPatch.ended_at = nowIso();
         sessionPatch.termination_reason = message || 'Account locked by invigilator';
         bookingPatch.status = 'terminated';
-        const lockUntil = new Date(Date.now() + Math.min(60, Math.max(1, Number(lockDays) || DEFAULT_LOCK_DAYS)) * 24 * 60 * 60 * 1000).toISOString();
+        const lockDurationDays = Math.min(60, Math.max(1, Number(lockDays) || DEFAULT_LOCK_DAYS));
+        const lockUntil = new Date(Date.now() + lockDurationDays * 24 * 60 * 60 * 1000).toISOString();
         const { error: profileError } = await supabase
           .from('profiles')
           .update({
@@ -1797,6 +1809,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           })
           .eq('id', targetSession.student_id);
         if (profileError) throw profileError;
+        const { error: failResultError } = await supabase
+          .from('exam_submissions')
+          .upsert({
+            exam_id: targetSession.exam_id,
+            user_id: targetSession.student_id,
+            score_percent: 0,
+            passed: false,
+            submitted_at: nowIso(),
+            next_attempt_allowed_at: lockUntil,
+          }, { onConflict: 'exam_id,user_id' });
+        if (failResultError) throw failResultError;
       }
 
       if (actionType !== 'warning') {
