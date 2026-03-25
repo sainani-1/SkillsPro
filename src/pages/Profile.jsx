@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { prepareAvatarFile } from '../utils/imageUtils';
 import { buildAvatarPublicUrl } from '../utils/avatarUtils';
 import AvatarImage from '../components/AvatarImage';
+import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
 
 const Profile = () => {
   const { profile, user, fetchProfile } = useAuth();
@@ -258,7 +259,13 @@ const Profile = () => {
         <InfoCard label="Diploma / Board" value={profile.diploma_certificate || 'Not provided'} />
         <InfoCard 
           label="Premium Status" 
-          value={premiumActive ? `Active until ${new Date(profile.premium_until).toLocaleDateString()}` : 'Not Premium'}
+          value={
+            premiumActive
+              ? isLifetimePremium(profile.premium_until)
+                ? 'Lifetime Premium'
+                : `Active until ${formatPremiumLabel(profile.premium_until)}`
+              : 'Not Premium'
+          }
         />
       </div>
 

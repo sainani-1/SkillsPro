@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import AvatarImage from '../components/AvatarImage';
 import { MessageCircle, Shield, Users, BookOpen, Calendar, UserCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
 
 const ROLE_OPTIONS = [
   { value: 'student', label: 'Students' },
@@ -382,10 +383,10 @@ const AdminUserAccess = () => {
                     onClick={openUserView}
                     className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                   >
-                    Open Full User View
+                    Open Full User Access
                   </button>
                   <p className="text-xs text-slate-500 self-center">
-                    This switches the app shell into that user's role/view. Some actions can still be limited by backend permissions.
+                    This switches the app into that user's role and identity view so admin can use their flows from the normal app.
                   </p>
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
@@ -403,7 +404,9 @@ const AdminUserAccess = () => {
                     <p className="text-slate-500">Premium</p>
                     <p className="font-semibold text-slate-800">
                       {selectedUser.premium_until && new Date(selectedUser.premium_until) > new Date()
-                        ? `Until ${new Date(selectedUser.premium_until).toLocaleDateString('en-IN')}`
+                        ? isLifetimePremium(selectedUser.premium_until)
+                          ? 'Lifetime'
+                          : `Until ${formatPremiumLabel(selectedUser.premium_until)}`
                         : 'No'}
                     </p>
                   </div>

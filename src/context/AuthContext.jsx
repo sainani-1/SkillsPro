@@ -349,12 +349,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   const effectiveProfile = impersonationProfile || profile;
+  const effectiveUser = impersonationProfile
+    ? {
+        ...(user || {}),
+        id: impersonationProfile.id,
+        email: impersonationProfile.email || user?.email || '',
+      }
+    : user;
   const isImpersonating = Boolean(impersonationProfile);
 
   return (
     <AuthContext.Provider
       value={{
-        user,
+        user: effectiveUser,
+        realUser: user,
         profile: effectiveProfile,
         realProfile: profile,
         impersonationProfile,

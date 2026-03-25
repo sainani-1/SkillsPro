@@ -9,6 +9,7 @@ import StudentExperienceHub from '../components/StudentExperienceHub';
 import { ensureReferralCode } from '../utils/referrals';
 import { copyText, trackPremiumEvent } from '../utils/growth';
 import { getPublicAppUrl } from '../utils/appUrl';
+import { isLifetimePremium } from '../utils/premium';
 
 // Offer congrats widget
 const OfferCongrats = ({ offer }) => (
@@ -203,7 +204,9 @@ const StudentDashboard = () => {
     if (profile.premium_until && isPremium(profile)) {
       const premiumDate = new Date(profile.premium_until);
       const today = new Date();
-      const daysRemaining = Math.ceil((premiumDate - today) / (1000 * 60 * 60 * 24));
+      const daysRemaining = isLifetimePremium(profile.premium_until)
+        ? 0
+        : Math.ceil((premiumDate - today) / (1000 * 60 * 60 * 24));
       
       // Check if this is a new premium grant by comparing dates
       const lastPremiumDate = localStorage.getItem(`last_premium_date_${profile.id}`);
@@ -378,7 +381,9 @@ const StudentDashboard = () => {
           <h1 className="text-3xl font-bold mb-2">Welcome back, {profile.full_name}! 👋</h1>
           <p className="text-slate-200 opacity-90">
             {isPremium(profile)
-              ? `You have Premium Access valid until ${format(new Date(profile.premium_until || new Date()), 'MMM dd, yyyy')}` 
+              ? isLifetimePremium(profile?.premium_until)
+                ? 'You have Lifetime Premium Access.'
+                : `You have Premium Access valid until ${format(new Date(profile.premium_until || new Date()), 'MMM dd, yyyy')}`
               : "Upgrade to Premium to access all courses, exams, and guidance."}
           </p>
           {!isPremium(profile) && (

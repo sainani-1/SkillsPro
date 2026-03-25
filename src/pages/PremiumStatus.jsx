@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import usePopup from '../hooks/usePopup';
 import LoadingSpinner from '../components/LoadingSpinner';
 import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
+import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
 
 /**
  * PremiumStatus Component
@@ -89,10 +90,12 @@ const PremiumStatus = () => {
       // Determine premium status
       const isPrem = profile?.premium_until && new Date(profile.premium_until) > new Date();
       if (isPrem) {
+        const lifetime = isLifetimePremium(profile.premium_until);
         setPremiumDetails({
           isActive: true,
           expiryDate: new Date(profile.premium_until),
-          daysRemaining: Math.ceil((new Date(profile.premium_until) - new Date()) / (1000 * 60 * 60 * 24)),
+          daysRemaining: lifetime ? null : Math.ceil((new Date(profile.premium_until) - new Date()) / (1000 * 60 * 60 * 24)),
+          isLifetime: lifetime,
           grantedBy: payments && payments.length > 0 ? 'paid' : (uniqueOffers.length > 0 ? 'gift' : 'admin')
         });
       } else {
@@ -100,6 +103,7 @@ const PremiumStatus = () => {
           isActive: false,
           expiryDate: null,
           daysRemaining: 0,
+          isLifetime: false,
           grantedBy: null
         });
       }
@@ -148,10 +152,10 @@ const PremiumStatus = () => {
                   <span className="text-sm text-slate-600 font-semibold">EXPIRY DATE</span>
                 </div>
                 <p className="text-2xl font-bold text-slate-900">
-                  {premiumDetails.expiryDate.toLocaleDateString()}
+                  {premiumDetails.isLifetime ? 'Lifetime' : formatPremiumLabel(premiumDetails.expiryDate, 'en-IN')}
                 </p>
                 <p className="text-sm text-slate-500 mt-1">
-                  {premiumDetails.daysRemaining} days remaining
+                  {premiumDetails.isLifetime ? 'No expiry' : `${premiumDetails.daysRemaining} days remaining`}
                 </p>
               </div>
 
