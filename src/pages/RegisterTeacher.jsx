@@ -4,11 +4,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { prepareAvatarFile } from '../utils/imageUtils';
+import { validateRotatingAccessCode } from '../utils/rotatingAccessCode';
 
 const RegisterTeacher = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', fullName: '', phone: '', coreSubject: 'Computer Science', accessKey: '' });
+  const [form, setForm] = useState({ email: '', password: '', fullName: '', phone: '', coreSubject: 'Computer Science', accessKey: '', protectionCode: '' });
   const [file, setFile] = useState(null);
   const [errors, setErrors] = useState({});
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
@@ -23,6 +24,11 @@ const RegisterTeacher = () => {
       newErrors.accessKey = 'Access key is required';
     } else if (form.accessKey !== TEACHER_ACCESS_KEY) {
       newErrors.accessKey = 'Invalid access key';
+    }
+    if (!form.protectionCode.trim()) {
+      newErrors.protectionCode = 'Protection code is required';
+    } else if (!validateRotatingAccessCode(TEACHER_ACCESS_KEY, 'teacher', form.protectionCode)) {
+      newErrors.protectionCode = 'Invalid or expired protection code';
     }
     if (!form.fullName.trim()) {
       newErrors.fullName = 'Full name is required';
@@ -143,6 +149,19 @@ const RegisterTeacher = () => {
               }}
             />
             {errors.accessKey && <p className="text-red-500 text-xs mt-1">{errors.accessKey}</p>}
+          </div>
+
+          <div>
+            <input className={`w-full p-3 border rounded-lg ${errors.protectionCode ? 'border-red-500' : ''}`}
+              type="password"
+              placeholder="1-Minute Protection Code"
+              value={form.protectionCode}
+              onChange={e => {
+                setForm({...form, protectionCode: e.target.value});
+                if (errors.protectionCode) setErrors({...errors, protectionCode: ''});
+              }}
+            />
+            {errors.protectionCode && <p className="text-red-500 text-xs mt-1">{errors.protectionCode}</p>}
           </div>
 
           <div>

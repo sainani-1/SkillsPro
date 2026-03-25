@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -681,6 +681,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/accounts" className={navItemClass} title="Account Management">
               <Lock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Account Management</span>}
+            </NavLink>
+            <NavLink to="/app/admin/access-codes" className={navItemClass} title="Rotating Access Codes">
+              <KeyRound size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Access Codes</span>}
             </NavLink>
             <NavLink to="/app/admin/notifications" className={navItemClass} title="Post Notifications">
               <Bell size={28} />

@@ -99,6 +99,7 @@ import UniversalAssistant from './pages/UniversalAssistant';
 import AdminUserAccess from './pages/AdminUserAccess';
 import LiveExamProctoring from './pages/LiveExamProctoring';
 import FacultyAttendance from './pages/FacultyAttendance';
+import AdminAccessCodes from './pages/AdminAccessCodes';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -342,6 +343,7 @@ function App() {
           <Route path="admin/teacher-requests" element={<AdminRoute><AdminTeacherRequests /></AdminRoute>} />
           <Route path="admin/certificate-blocks" element={<AdminRoute><CertificateBlocks /></AdminRoute>} />
           <Route path="admin/accounts" element={<AdminRoute><AccountManagement /></AdminRoute>} />
+          <Route path="admin/access-codes" element={<AdminRoute><AdminAccessCodes /></AdminRoute>} />
           <Route path="admin/notifications" element={<AdminRoute><AdminNotifications /></AdminRoute>} />
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
