@@ -6,12 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const isMissingTrackingTableError = (error: { code?: string; message?: string } | null) => {
-  const code = String(error?.code || "");
-  const message = String(error?.message || "").toLowerCase();
-  return code === "42P01" || message.includes("admin_managed_user_passwords");
-};
-
 type CreatePayload = {
   email?: string;
   password?: string;
@@ -138,22 +132,6 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: corsHeaders,
       });
-    }
-
-    const { error: trackingError } = await adminClient.from("admin_managed_user_passwords").upsert(
-      {
-        user_id: newUserId,
-        auth_user_id: newUserId,
-        email,
-        password_plain: password,
-        password_source: "admin-create-user",
-        updated_by: callerId,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
-    if (trackingError && !isMissingTrackingTableError(trackingError)) {
-      console.error("Password tracking upsert failed:", trackingError.message);
     }
 
     return new Response(

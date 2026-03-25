@@ -6,12 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const isMissingTrackingTableError = (error: { code?: string; message?: string } | null) => {
-  const code = String(error?.code || "");
-  const message = String(error?.message || "").toLowerCase();
-  return code === "42P01" || message.includes("admin_managed_user_passwords");
-};
-
 type ResetPayload = {
   user_id?: string;
   email?: string;
@@ -98,22 +92,6 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: corsHeaders,
       });
-    }
-
-    const { error: trackingError } = await adminClient.from("admin_managed_user_passwords").upsert(
-      {
-        user_id: userId,
-        auth_user_id: userId,
-        email: body.email || null,
-        password_plain: newPassword,
-        password_source: "admin-reset-password",
-        updated_by: callerId,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
-    if (trackingError && !isMissingTrackingTableError(trackingError)) {
-      console.error("Password tracking upsert failed:", trackingError.message);
     }
 
     // Optional audit trail; ignore if table/permission is absent.

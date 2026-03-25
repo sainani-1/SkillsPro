@@ -74,7 +74,6 @@ import AdminTeacherRequests from './pages/AdminTeacherRequests';
 import CertificateBlocks from './pages/CertificateBlocks';
 import AdminResetPassword from './pages/AdminResetPassword';
 import AdminUserPasswordResetPage from './pages/AdminUserPasswordResetPage';
-import AdminSeePasswordsPage from './pages/AdminSeePasswordsPage';
 import StartupIdeas from './pages/StartupIdeas';
 import AdminStartupIdeas from './pages/AdminStartupIdeas';
 import StartupCollaborations from './pages/StartupCollaborations';
@@ -280,18 +279,6 @@ function App() {
               <AdminRoute>
                 <RequireSensitiveAdminMFA>
                   <AdminUserPasswordResetPage />
-                </RequireSensitiveAdminMFA>
-              </AdminRoute>
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin-see-pass"
-          element={
-            <ProtectedRoute>
-              <AdminRoute>
-                <RequireSensitiveAdminMFA>
-                  <AdminSeePasswordsPage />
                 </RequireSensitiveAdminMFA>
               </AdminRoute>
             </ProtectedRoute>
