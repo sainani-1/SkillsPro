@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -370,6 +370,10 @@ const Sidebar = () => {
               <LayoutDashboard size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
             </NavLink>
+            <NavLink to="/app/all-in-one" className={navItemClass} title="All In One">
+              <MonitorUp size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">All In One</span>}
+            </NavLink>
             <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
@@ -499,6 +503,10 @@ const Sidebar = () => {
         {/* Teacher Specific */}
         {role === 'teacher' && (
           <>
+            <NavLink to="/app/all-in-one" className={navItemClass} title="All In One">
+              <MonitorUp size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">All In One</span>}
+            </NavLink>
             <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
@@ -559,6 +567,10 @@ const Sidebar = () => {
         {/* Admin Specific */}
         {role === 'admin' && (
           <>
+            <NavLink to="/app/all-in-one" className={navItemClass} title="All In One">
+              <MonitorUp size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">All In One</span>}
+            </NavLink>
             <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
@@ -698,9 +710,9 @@ const Sidebar = () => {
               <Clock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Exam Retake Overrides</span>}
             </NavLink>
-            <NavLink to="/app/admin/live-exam-booking-controls" className={navItemClass} title="Live Slot Wait Days">
+            <NavLink to="/app/admin/allow-failed-to-book-slot" className={navItemClass} title="Allow Failed To Book Slot">
               <KeyRound size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Live Slot Wait Days</span>}
+              {shouldShowText && <span className="truncate text-sm font-medium">Allow Failed Slot</span>}
             </NavLink>
             <NavLink to="/app/live-cancellations" className={navItemClass} title="Live Slot Cancellations">
               <Trash2 size={28} />

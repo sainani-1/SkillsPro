@@ -267,6 +267,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const reloadTimerRef = useRef(null);
   const bigLiveMonitorRef = useRef(null);
   const popupResolverRef = useRef(null);
+  const allInOneAutoOpenedRef = useRef(false);
 
   const role = profile?.role || 'student';
   const isAdmin = role === 'admin';
@@ -280,6 +281,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     overview: 'Overview',
     slots: 'Slot Management',
     monitoring: 'Live Monitoring',
+    'all-in-one': 'All In One',
     attendance: 'Attendance',
     alerts: 'Violation Alerts',
     messages: 'Messages',
@@ -287,11 +289,23 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   };
   const isSlotsPanel = requestedPanel === 'slots';
   const isMonitoringPanel = requestedPanel === 'monitoring';
+  const isAllInOnePanel = requestedPanel === 'all-in-one';
   const isAttendancePanel = requestedPanel === 'attendance';
   const isAlertsPanel = requestedPanel === 'alerts';
   const isMessagesPanel = requestedPanel === 'messages';
   const isCancellationsPanel = requestedPanel === 'cancellations';
   const showFullOverview = requestedPanel === 'overview';
+  const operatorEyebrow = isStudent ? 'Exam Slot Booking' : isAllInOnePanel ? 'All In One' : 'Live Exam Proctoring';
+  const operatorTitle = isStudent
+    ? 'Book Your Exam Slot and Start Only On Schedule'
+    : isAllInOnePanel
+      ? 'All Slots In One View For Live Monitoring and Actions'
+      : 'Monitor Slots, Violations, Attendance, and Live Actions';
+  const operatorDescription = isStudent
+    ? 'Ultra-strict exam mode with slot booking, camera/mic/screen-share enforcement, realtime alerts, and live monitoring for admin, teacher, and instructor.'
+    : isAllInOnePanel
+      ? 'See every active slot from one place, watch live screen share, camera, and microphone feeds, then warn, pause, resume, terminate, and chat with students instantly.'
+      : 'Ultra-strict exam mode with slot booking, camera/mic/screen-share enforcement, realtime alerts, and live monitoring for admin, teacher, and instructor.';
 
   const bookingBySlotId = useMemo(() => {
     const map = {};
@@ -339,6 +353,31 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     });
     return map;
   }, [retakeOverrides]);
+  const latestRetakeOverrideRowByCourseId = useMemo(() => {
+    const map = {};
+    retakeOverrides.forEach((row) => {
+      const courseKey = String(row.course_id || '');
+      if (!courseKey) return;
+      const existing = map[courseKey];
+      const existingStamp = existing ? new Date(existing.allow_retake_at || 0).getTime() : 0;
+      const nextStamp = new Date(row.allow_retake_at || 0).getTime();
+      if (!existing || nextStamp >= existingStamp) {
+        map[courseKey] = row;
+      }
+    });
+    return map;
+  }, [retakeOverrides]);
+  const allowsRetakeNow = (examId, latestSubmission) => {
+    const exam = examsById[String(examId)];
+    const courseKey = String(exam?.course_id || '');
+    if (!courseKey) return false;
+    const overrideRow = latestRetakeOverrideRowByCourseId[courseKey];
+    if (!overrideRow?.allow_retake_at) return false;
+    const overrideDate = new Date(overrideRow.allow_retake_at);
+    if (Number.isNaN(overrideDate.getTime()) || overrideDate.getTime() > Date.now()) return false;
+    const latestSubmissionDate = latestSubmission?.submitted_at ? new Date(latestSubmission.submitted_at) : null;
+    return !latestSubmissionDate || overrideDate >= latestSubmissionDate;
+  };
 
   const liveExamRebookingBlocksByExamId = useMemo(() => {
     if (!isStudent || Number(liveExamRebookingWaitDays || 0) <= 0) return {};
@@ -690,6 +729,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   }, [currentSlotSessions]);
   const selectedMonitoringSession = useMemo(() => {
     const directSession =
+      sessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
       currentSlotSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
       slotSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
       null;
@@ -717,9 +757,37 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       })
       .sort((a, b) => new Date(a.started_at || a.created_at || 0) - new Date(b.started_at || b.created_at || 0))
   ), [currentSlotSessions, selectedSlot]);
+  const globalMonitorableSessions = useMemo(() => {
+    const sortedSessions = [...sessions].sort(
+      (a, b) => new Date(a.started_at || a.created_at || 0) - new Date(b.started_at || b.created_at || 0)
+    );
+    const seenStudentIds = new Set();
+    return sortedSessions.filter((session) => {
+      const status = String(session.status || '').toLowerCase();
+      const slot = slots.find((row) => String(row.id) === String(session.slot_id));
+      if (!slot || slotHasEnded(slot)) return false;
+      if (!['active', 'paused', 'scheduled'].includes(status)) return false;
+      const studentKey = String(session.student_id || '');
+      if (seenStudentIds.has(studentKey)) return false;
+      seenStudentIds.add(studentKey);
+      return true;
+    });
+  }, [sessions, slots]);
+  const allInOneSessions = useMemo(
+    () => globalMonitorableSessions.filter((session) => {
+      const status = String(session.status || '').toLowerCase();
+      const hasLiveMedia =
+        Boolean(session.screen_share_connected) ||
+        Boolean(session.camera_connected) ||
+        Boolean(session.mic_connected);
+      return status === 'active' && Boolean(session.started_at) && hasLiveMedia;
+    }),
+    [globalMonitorableSessions]
+  );
+  const activeMonitoringPool = isAllInOnePanel ? allInOneSessions : monitorableSessions;
   const selectedMonitoringIndex = useMemo(
-    () => monitorableSessions.findIndex((session) => String(session.id) === String(selectedMonitoringSessionId)),
-    [monitorableSessions, selectedMonitoringSessionId]
+    () => activeMonitoringPool.findIndex((session) => String(session.id) === String(selectedMonitoringSessionId)),
+    [activeMonitoringPool, selectedMonitoringSessionId]
   );
   const monitoredViolations = useMemo(
     () => slotViolations.filter((violation) => String(violation.student_id) === String(selectedMonitoringSession?.student_id || '')),
@@ -818,30 +886,45 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   }, [selectedSlot?.id, isStudent, slotBookings.length, profilesById]);
 
   useEffect(() => {
-    if (!selectedSlot) {
+    const pool = isAllInOnePanel ? allInOneSessions : activeMonitoringSessions;
+    if (!isAllInOnePanel && !selectedSlot) {
       if (selectedMonitoringSessionId) setSelectedMonitoringSessionId(null);
       return;
     }
-    if (!activeMonitoringSessions.length) {
+    if (!pool.length) {
       if (selectedMonitoringSessionId) setSelectedMonitoringSessionId(null);
       return;
     }
-    if (!selectedMonitoringSessionId || !activeMonitoringSessions.find((session) => String(session.id) === String(selectedMonitoringSessionId))) {
-      setSelectedMonitoringSessionId(activeMonitoringSessions[0].id);
+    if (!selectedMonitoringSessionId || !pool.find((session) => String(session.id) === String(selectedMonitoringSessionId))) {
+      setSelectedMonitoringSessionId(pool[0].id);
+      setSelectedSlotId(pool[0].slot_id || null);
     }
-  }, [selectedSlot, activeMonitoringSessions, selectedMonitoringSessionId]);
+  }, [selectedSlot, activeMonitoringSessions, allInOneSessions, isAllInOnePanel, selectedMonitoringSessionId]);
 
   useEffect(() => {
     if (!selectedMonitoringSession) return;
     const selectedStatus = String(selectedMonitoringSession.status || '').toLowerCase();
     if (selectedStatus !== 'terminated' && selectedStatus !== 'disconnected') return;
-    const replacementSession = activeMonitoringSessions.find(
+    const pool = isAllInOnePanel ? allInOneSessions : activeMonitoringSessions;
+    const replacementSession = pool.find(
       (session) => String(session.student_id) === String(selectedMonitoringSession.student_id)
     );
     if (replacementSession && String(replacementSession.id) !== String(selectedMonitoringSession.id)) {
       setSelectedMonitoringSessionId(replacementSession.id);
+      setSelectedSlotId(replacementSession.slot_id || null);
     }
-  }, [selectedMonitoringSession, activeMonitoringSessions]);
+  }, [selectedMonitoringSession, activeMonitoringSessions, allInOneSessions, isAllInOnePanel]);
+
+  useEffect(() => {
+    if (!isAllInOnePanel) {
+      allInOneAutoOpenedRef.current = false;
+      return;
+    }
+    if (showBigLiveModal || allInOneAutoOpenedRef.current) return;
+    if (!allInOneSessions.length) return;
+    allInOneAutoOpenedRef.current = true;
+    handleOpenAllInOnePrimary('screen');
+  }, [allInOneSessions, isAllInOnePanel, showBigLiveModal]);
 
   useEffect(() => {
     if (!isStudent) return;
@@ -898,6 +981,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
 
       let visibleSlotIds = [];
       let slotRows = [];
+      const shouldIncludeCancelledSlots = isAdmin && isCancellationsPanel;
+      const shouldLoadAdminDirectory = isAdmin && (showFullOverview || isSlotsPanel);
 
       if (isInstructor) {
         const { data: assignedRows, error: assignedError } = await withClientTimeout(
@@ -934,6 +1019,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         const { data, error: slotError } = await withClientTimeout(slotQuery);
         if (slotError) throw slotError;
         slotRows = data || [];
+      }
+      if (!shouldIncludeCancelledSlots) {
+        slotRows = slotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
       }
 
       const slotIds = slotRows.map((slot) => slot.id);
@@ -983,7 +1071,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           : Promise.resolve({ data: [], error: null }),
         loadOptionalQuery(supabase.from('exams').select('id, course_id, test_name').order('id'), []),
         loadOptionalQuery(supabase.from('courses').select('id, title'), []),
-        isAdmin
+        shouldLoadAdminDirectory
           ? loadOptionalQuery(
               supabase.from('profiles').select('id, full_name, email, role, assigned_teacher_id, premium_until').in('role', ['teacher', 'instructor', 'student']).order('full_name'),
               []
@@ -1082,6 +1170,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         });
         finalSlotRows = slotRows.filter((slot) => teacherSlotIds.has(slot.id));
       }
+      if (!shouldIncludeCancelledSlots) {
+        finalSlotRows = finalSlotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
+      }
 
       const finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
       const finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id));
@@ -1106,7 +1197,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setRetakeOverrides(retakeOverrideRows);
       setPassedSubmissions(passedSubmissionRows);
       setLatestSubmissions(latestSubmissionRows);
-      if (isAdmin) {
+      if (shouldLoadAdminDirectory) {
         setTeacherOptions(staffRows.filter((row) => row.role === 'teacher'));
         setInstructorOptions(staffRows.filter((row) => row.role === 'instructor'));
         setStudentOptions(staffRows.filter((row) => row.role === 'student'));
@@ -1196,7 +1287,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const { error: updateError } = await supabase.from('settings').upsert(payload, { onConflict: 'key' });
       if (updateError) throw updateError;
       setRegistrationsPaused(nextValue);
-      setInfo(nextValue ? 'Exam registrations are paused globally.' : 'Exam registrations resumed.');
+      setInfo(nextValue ? 'Exam registrations are paused globally. Students cannot book unless you allow an override.' : 'Exam registrations are active again.');
     } catch (actionError) {
       setError(actionError.message || 'Failed to update registration control.');
     } finally {
@@ -1494,6 +1585,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const latestSubmission =
         latestSubmissionByExamId[String(slot.exam_id)] ||
         (exam?.course_id ? latestSubmissionByCourseId[String(exam.course_id)] : null);
+      const retakeAllowedNow = allowsRetakeNow(slot.exam_id, latestSubmission);
       if (
         passedExamIds.passedExamIdSet.has(String(slot.exam_id)) ||
         (exam?.course_id && passedExamIds.passedCourseIdSet.has(String(exam.course_id)))
@@ -1504,7 +1596,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         latestSubmission &&
         latestSubmission.passed === false &&
         latestSubmission.next_attempt_allowed_at &&
-        new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now()
+        new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now() &&
+        !retakeAllowedNow
       ) {
         throw new Error(`You failed this exam. Wait until ${formatDateTime(latestSubmission.next_attempt_allowed_at)} before booking again.`);
       }
@@ -1714,7 +1807,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setSaving(true);
     setError('');
     try {
-      const { error: cancelError } = await supabase
+      const { data: cancelledRows, error: cancelError } = await supabase
         .from('exam_live_slots')
         .update({
           status: 'cancelled',
@@ -1722,10 +1815,35 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           cancelled_at: nowIso(),
           updated_at: nowIso(),
         })
-        .eq('id', slot.id);
+        .eq('id', slot.id)
+        .select('id');
       if (cancelError) throw cancelError;
+      if (!cancelledRows?.length) {
+        throw new Error('Slot cancel was not saved in the database. Check live-exam RLS policies.');
+      }
 
       const affectedBookings = bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled');
+      if (affectedBookings.length > 0) {
+        const bookingIds = affectedBookings.map((row) => row.id);
+        await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'cancelled',
+            cancelled_at: nowIso(),
+            cancellation_reason: reason || 'Slot cancelled by admin',
+            updated_at: nowIso(),
+          })
+          .in('id', bookingIds);
+        await supabase
+          .from('exam_live_sessions')
+          .update({
+            status: 'cancelled',
+            ended_at: nowIso(),
+            termination_reason: reason || 'Slot cancelled by admin',
+            updated_at: nowIso(),
+          })
+          .eq('slot_id', slot.id);
+      }
       if (affectedBookings.length > 0) {
         await insertNotifications(
           affectedBookings.map((row) => ({
@@ -1756,7 +1874,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setError('');
       setInfo('');
       try {
-        const { error: cancelError } = await supabase
+        const { data: cancelledRows, error: cancelError } = await supabase
           .from('exam_live_slots')
           .update({
             status: 'cancelled',
@@ -1764,8 +1882,31 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
             cancelled_at: nowIso(),
             updated_at: nowIso(),
           })
-          .eq('id', slot.id);
+          .eq('id', slot.id)
+          .select('id');
         if (cancelError) throw cancelError;
+        if (!cancelledRows?.length) {
+          throw new Error('Slot hide was not saved in the database. Check live-exam RLS policies.');
+        }
+
+        await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'cancelled',
+            cancelled_at: nowIso(),
+            cancellation_reason: 'Hidden by admin delete action',
+            updated_at: nowIso(),
+          })
+          .eq('slot_id', slot.id);
+        await supabase
+          .from('exam_live_sessions')
+          .update({
+            status: 'cancelled',
+            ended_at: nowIso(),
+            termination_reason: 'Hidden by admin delete action',
+            updated_at: nowIso(),
+          })
+          .eq('slot_id', slot.id);
 
         setSlots((prev) => prev.filter((row) => String(row.id) !== String(slot.id)));
         setBookings((prev) => prev.filter((row) => String(row.slot_id) !== String(slot.id)));
@@ -1843,7 +1984,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setInfo('');
     try {
       if (cancellableSlotIds.length > 0) {
-        const { error: cancelError } = await supabase
+        const { data: cancelledRows, error: cancelError } = await supabase
           .from('exam_live_slots')
           .update({
             status: 'cancelled',
@@ -1851,16 +1992,42 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
             cancelled_at: nowIso(),
             updated_at: nowIso(),
           })
-          .in('id', cancellableSlotIds);
+          .in('id', cancellableSlotIds)
+          .select('id');
         if (cancelError) throw cancelError;
+        if ((cancelledRows || []).length !== cancellableSlotIds.length) {
+          throw new Error('Some slots were not hidden in the database. Check live-exam RLS policies.');
+        }
+        await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'cancelled',
+            cancelled_at: nowIso(),
+            cancellation_reason: 'Bulk hidden by admin delete all action',
+            updated_at: nowIso(),
+          })
+          .in('slot_id', cancellableSlotIds);
+        await supabase
+          .from('exam_live_sessions')
+          .update({
+            status: 'cancelled',
+            ended_at: nowIso(),
+            termination_reason: 'Bulk hidden by admin delete all action',
+            updated_at: nowIso(),
+          })
+          .in('slot_id', cancellableSlotIds);
       }
 
       if (deletableSlotIds.length > 0) {
-        const { error: deleteError } = await supabase
+        const { data: deletedRows, error: deleteError } = await supabase
           .from('exam_live_slots')
           .delete()
-          .in('id', deletableSlotIds);
+          .in('id', deletableSlotIds)
+          .select('id');
         if (deleteError) throw deleteError;
+        if ((deletedRows || []).length !== deletableSlotIds.length) {
+          throw new Error('Some empty slots were not deleted in the database. Check live-exam RLS policies.');
+        }
       }
 
       const removedSlotIdSet = new Set(visibleSlotIds.map(String));
@@ -2040,6 +2207,15 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setSelectedSlotId(slot.id);
     const basePath = isInstructor ? '/app/instructor/live-monitoring' : '/app/live-monitoring';
     navigate(`${basePath}?slotId=${slot.id}`);
+  };
+  const selectMonitoringSession = (session, { openModal = false, tab = 'screen' } = {}) => {
+    if (!session?.id) return;
+    setSelectedSlotId(session.slot_id || null);
+    setSelectedMonitoringSessionId(session.id);
+    setMonitorFeedTab(tab);
+    if (openModal) {
+      setShowBigLiveModal(true);
+    }
   };
 
   const handleAttendance = async (session, status) => {
@@ -2306,11 +2482,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   };
 
   const handleSelectAdjacentMonitoringSession = (direction) => {
-    if (!monitorableSessions.length) return;
+    if (!activeMonitoringPool.length) return;
     const safeIndex = selectedMonitoringIndex >= 0 ? selectedMonitoringIndex : 0;
     const nextIndex = safeIndex + direction;
-    if (nextIndex < 0 || nextIndex >= monitorableSessions.length) return;
-    setSelectedMonitoringSessionId(monitorableSessions[nextIndex].id);
+    if (nextIndex < 0 || nextIndex >= activeMonitoringPool.length) return;
+    selectMonitoringSession(activeMonitoringPool[nextIndex], { tab: monitorFeedTab });
   };
 
   const openPopup = ({ mode = 'info', title, message, defaultValue = '', confirmLabel = 'Confirm', cancelLabel = 'Cancel' }) => (
@@ -2350,9 +2526,68 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       void showPopupMessage('Student Not Live', 'Student is not live right now.');
       return;
     }
-    setSelectedMonitoringSessionId(session.id);
+    selectMonitoringSession(session, { openModal: true, tab });
+    window.setTimeout(() => {
+      bigLiveMonitorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
+  const handleOpenAllInOnePrimary = (tab = 'screen') => {
+    const firstSession = allInOneSessions[0];
+    if (!firstSession?.id) {
+      setSelectedMonitoringSessionId(null);
+      setSelectedSlotId(null);
+      setMonitorFeedTab(tab);
+      setShowBigLiveModal(true);
+      return;
+    }
+    setSelectedSlotId(firstSession.slot_id || null);
+    setSelectedMonitoringSessionId(firstSession.id);
     setMonitorFeedTab(tab);
-    setShowBigLiveModal(true);
+    window.setTimeout(() => {
+      setShowBigLiveModal(true);
+      window.setTimeout(() => {
+        bigLiveMonitorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    }, 0);
+  };
+  const handleSpeakToStudent = async (session) => {
+    if (!session?.id || !session?.student_id || !session?.slot_id) return;
+    const message = await askPrompt(
+      'Speak To Student',
+      'Send a direct instruction to this student.',
+      'Please stay focused on the exam and follow invigilator instructions.',
+      'Send Message',
+      'Back'
+    );
+    if (message === null || !String(message).trim()) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      const { error: messageError } = await supabase
+        .from('exam_live_messages')
+        .insert({
+          slot_id: session.slot_id,
+          session_id: session.id,
+          sender_id: profile.id,
+          sender_role: role,
+          recipient_id: session.student_id,
+          is_broadcast: false,
+          content: String(message).trim(),
+        });
+      if (messageError) throw messageError;
+      setInfo('Instruction sent to student.');
+      await loadData({ silent: true });
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to send instruction to student.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleOpenMonitoringInfo = (session) => {
+    if (!session?.id) return;
+    selectMonitoringSession(session, { tab: monitorFeedTab });
+    setShowBigLiveModal(false);
     window.setTimeout(() => {
       bigLiveMonitorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 80);
@@ -2400,11 +2635,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-6 text-white shadow-xl">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200">{isStudent ? 'Exam Slot Booking' : 'Live Exam Proctoring'}</p>
-            <h1 className="mt-2 text-3xl font-bold">{isStudent ? 'Book Your Exam Slot and Start Only On Schedule' : 'Monitor Slots, Violations, Attendance, and Live Actions'}</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-300">
-              Ultra-strict exam mode with slot booking, camera/mic/screen-share enforcement, realtime alerts, and live monitoring for admin, teacher, and instructor.
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200">{operatorEyebrow}</p>
+            <h1 className="mt-2 text-3xl font-bold">{operatorTitle}</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-300">{operatorDescription}</p>
           </div>
           {!isStudent ? (
             <div className="grid grid-cols-3 gap-3 text-center">
@@ -2426,9 +2659,14 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 <h2 className="text-lg font-semibold text-slate-900">Admin Controls</h2>
                 <p className="text-sm text-slate-500">Create exam timing slots, assign instructors if needed, pause registrations, and cancel booked slots.</p>
               </div>
-              <button type="button" onClick={() => upsertRegistrationPause(!registrationsPaused)} disabled={saving} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${registrationsPaused ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'} disabled:opacity-60`}>
-                {registrationsPaused ? 'Resume Registrations' : 'Pause Registrations'}
-              </button>
+              <div className="flex flex-col items-end gap-2">
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${registrationsPaused ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {registrationsPaused ? 'Registrations Paused' : 'Registrations Active'}
+                </span>
+                <button type="button" onClick={() => upsertRegistrationPause(!registrationsPaused)} disabled={saving} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${registrationsPaused ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'} disabled:opacity-60`}>
+                  {registrationsPaused ? 'Resume Registrations' : 'Pause Registrations'}
+                </button>
+              </div>
             </div>
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               <div className="space-y-1 text-sm">
@@ -2647,6 +2885,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
               const latestSubmission =
                 latestSubmissionByExamId[String(slot.exam_id)] ||
                 (exam?.course_id ? latestSubmissionByCourseId[String(exam.course_id)] : null);
+              const retakeAllowedNow = allowsRetakeNow(slot.exam_id, latestSubmission);
               const hasAnotherBookingForSameExam = examLevelBooking && String(examLevelBooking.slot_id) !== String(slot.id);
               const hasPassedExamAlready =
                 passedExamIds.passedExamIdSet.has(String(slot.exam_id)) ||
@@ -2655,7 +2894,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 latestSubmission &&
                 latestSubmission.passed === false &&
                 latestSubmission.next_attempt_allowed_at &&
-                new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now();
+                new Date(latestSubmission.next_attempt_allowed_at).getTime() > Date.now() &&
+                !retakeAllowedNow;
               const rebookingBlock = liveExamRebookingBlocksByExamId[slot.exam_id];
               const isRebookingBlocked = !myBooking && Boolean(rebookingBlock) && String(rebookingBlock.lastSlotId) !== String(slot.id);
               const effectiveBookingStatus = myBooking ? getEffectiveBookingStatus(myBooking, slot) : '';
@@ -2695,6 +2935,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                     <p>Override while paused: <span className="font-medium text-slate-900">{hasOverride ? 'Allowed' : 'No'}</span></p>
                     {hasPassedExamAlready && latestSubmission ? <p>Result: <span className="font-medium text-emerald-700">Passed with {Math.round(Number(latestSubmission.score_percent) || 0)}%</span></p> : null}
                     {hasFailedExamWait ? <p>Result: <span className="font-medium text-amber-800">Failed. Wait until {formatDateTime(latestSubmission.next_attempt_allowed_at)}</span></p> : null}
+                    {!hasFailedExamWait && retakeAllowedNow ? <p>Result: <span className="font-medium text-emerald-700">Allowed again by admin. You can book now.</span></p> : null}
                   </div>
                   {slot.notes ? <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{slot.notes}</div> : null}
                   <div className="mt-5 flex flex-wrap gap-2">
@@ -2727,10 +2968,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">{isInstructor ? 'Students Writing Now' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
-                <p className="mt-1 text-xs text-slate-500">{isInstructor ? 'Search students or exam names. Click a student to open strict monitoring for that live session.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
+                <h2 className="text-lg font-semibold text-slate-900">{isMonitoringPanel ? 'All In One Launcher' : isInstructor ? 'Students Writing Now' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
+                <p className="mt-1 text-xs text-slate-500">{isMonitoringPanel ? 'Open one fullscreen live monitor and move across all active students with left and right navigation.' : isInstructor ? 'Search students or exam names. Click a student to open strict monitoring for that live session.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
               </div>
-              {isAdmin ? (
+              {isAdmin && !isAllInOnePanel ? (
                 <button
                   type="button"
                   onClick={handleDeleteAllSlots}
@@ -2741,6 +2982,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 </button>
               ) : null}
             </div>
+            {!isAllInOnePanel ? (
             <div className="mt-4">
               <input
                 value={slotSearch}
@@ -2749,8 +2991,34 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
+            ) : null}
             <div className="mt-4 space-y-3">
-              {isInstructor ? (
+              {isAllInOnePanel ? (
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl bg-white p-4 text-sm text-slate-600 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Live Students</p>
+                      <p className="mt-2 text-3xl font-bold text-slate-900">{allInOneSessions.length}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white p-4 text-sm text-slate-600 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Current View</p>
+                      <p className="mt-2 text-3xl font-bold text-slate-900">{selectedMonitoringIndex >= 0 ? selectedMonitoringIndex + 1 : 0}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white p-4 text-sm text-slate-600 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Active Slots</p>
+                      <p className="mt-2 text-3xl font-bold text-slate-900">{new Set(allInOneSessions.map((session) => String(session.slot_id || ''))).size}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAllInOnePrimary('screen')}
+                    disabled={allInOneSessions.length === 0}
+                    className="mt-5 w-full rounded-3xl bg-slate-900 px-6 py-5 text-lg font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {allInOneSessions.length === 0 ? 'No Students Live Right Now' : 'Open Big Screen'}
+                  </button>
+                </div>
+              ) : isInstructor ? (
                 instructorPanelCards.length === 0 ? <p className="text-sm text-slate-500">No instructor slots are available right now.</p> : instructorPanelCards.map((card) => {
                   const {
                     slot,
@@ -2765,12 +3033,20 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                   const primarySession = activeSlotSessions[0] || null;
                   const previewStudents = studentNames.slice(0, 2);
                   return (
-                    <button
+                    <div
                       key={slot.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         setSelectedSlotId(slot.id);
                         setSelectedMonitoringSessionId(primarySession?.id || null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedSlotId(slot.id);
+                          setSelectedMonitoringSessionId(primarySession?.id || null);
+                        }
                       }}
                       className={`w-full rounded-2xl border p-4 text-left transition ${String(selectedSlotId) === String(slot.id) ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                     >
@@ -2809,16 +3085,15 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              setSelectedSlotId(slot.id);
-                              setSelectedMonitoringSessionId(primarySession.id);
+                              handleOpenMonitoringInfo(primarySession);
                             }}
-                            className="rounded-xl border border-teal-300 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50"
+                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                           >
-                            View Active Student
+                            i
                           </button>
                         ) : null}
                       </div>
-                    </button>
+                    </div>
                   );
                 })
               ) : staffVisibleSlots.length === 0 ? <p className="text-sm text-slate-500">No slots available for this role yet.</p> : staffVisibleSlots.map((slot) => {
@@ -2829,7 +3104,19 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                 const activeCount = sessions.filter((row) => String(row.slot_id) === String(slot.id) && row.status === 'active').length;
                 const terminatedCount = sessions.filter((row) => String(row.slot_id) === String(slot.id) && (row.status === 'terminated' || row.status === 'disconnected')).length;
                 return (
-                  <button key={slot.id} type="button" onClick={() => setSelectedSlotId(slot.id)} className={`w-full rounded-2xl border p-4 text-left transition ${String(selectedSlotId) === String(slot.id) ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                  <div
+                    key={slot.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedSlotId(slot.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedSlotId(slot.id);
+                      }
+                    }}
+                    className={`w-full rounded-2xl border p-4 text-left transition ${String(selectedSlotId) === String(slot.id) ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{getSlotHeadline(slot, exam, course)}</p>
@@ -2852,14 +3139,114 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                         Open Live
                       </button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           </div>
 
           <div className="space-y-4">
-            {!selectedSlot ? <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">Select an exam slot to view bookings, alerts, attendance, and live controls.</div> : (
+            {isAllInOnePanel ? (
+              <>
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Fullscreen Monitor</p>
+                  <h3 className="mt-3 text-2xl font-semibold text-slate-900">Open the big live view and monitor every active student from one place.</h3>
+                  <p className="mt-3 text-sm text-slate-500">Use the left and right arrows inside the fullscreen view to move across students. Warn, pause, resume, terminate, and inspect student details there.</p>
+                </div>
+                {showBigLiveModal ? (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+                    <div className="relative max-h-[94vh] w-full max-w-7xl overflow-auto rounded-[2rem] bg-white p-5 shadow-2xl">
+                      {selectedMonitoringSession ? (
+                        <>
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-16 w-16 rounded-full object-cover" />
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
+                                <h3 className="mt-2 text-2xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
+                                <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenMonitoringInfo(selectedMonitoringSession)}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                i
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAdjacentMonitoringSession(-1)}
+                                disabled={selectedMonitoringIndex <= 0}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              >
+                                &lt;
+                              </button>
+                              <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                                {selectedMonitoringIndex >= 0 ? `${selectedMonitoringIndex + 1} / ${activeMonitoringPool.length}` : `1 / ${Math.max(1, activeMonitoringPool.length)}`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAdjacentMonitoringSession(1)}
+                                disabled={selectedMonitoringIndex < 0 || selectedMonitoringIndex >= activeMonitoringPool.length - 1}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              >
+                                &gt;
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowBigLiveModal(false)}
+                                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                              >
+                                X
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
+                            <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
+                            <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
+                          </div>
+                          <div className="mt-4">
+                            <LiveExamStreamMonitor
+                              slotId={selectedSlot?.id}
+                              session={selectedMonitoringSession}
+                              viewerId={profile?.id}
+                              viewerInstanceId={`all-in-one-${selectedMonitoringSession?.id || 'none'}`}
+                              viewerRole={role}
+                              large
+                            />
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800">Warn</button>
+                            <button type="button" onClick={() => handleSpeakToStudent(selectedMonitoringSession)} className="rounded-xl bg-teal-100 px-4 py-2 text-sm font-semibold text-teal-800">Speak</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume' : 'Pause'}</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
+                            {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button> : null}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
+                          <h3 className="mt-3 text-3xl font-semibold text-slate-900">No User Writing Now</h3>
+                          <p className="mt-3 max-w-xl text-sm text-slate-500">When a student starts writing the live exam, their screen share, camera, and actions will appear here.</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowBigLiveModal(false)}
+                            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {!isAllInOnePanel ? (
+            !selectedSlot ? <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">Select an exam slot to view bookings, alerts, attendance, and live controls.</div> : (
               <>
                 {(showFullOverview || isSlotsPanel) ? <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -2981,21 +3368,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                   </span>
                                 </div>
                               </button>
-                              {session ? (
-                                <div className="mt-4">
-                                  <LiveExamStreamMonitor
-                                    key={`compact-${session.id}`}
-                                    slotId={selectedSlot.id}
-                                    session={session}
-                                    viewerId={profile?.id}
-                                    viewerInstanceId={`compact-${booking.id}`}
-                                    viewerRole={role}
-                                    compact
-                                  />
-                                </div>
-                              ) : (
-                                <p className={`mt-4 text-xs ${session && String(selectedMonitoringSessionId) === String(session.id) ? 'text-slate-300' : 'text-slate-500'}`}>{session ? 'Click to open live monitoring' : 'Student has not started the exam yet'}</p>
-                              )}
+                              <div className={`mt-4 rounded-2xl border px-3 py-3 text-xs ${
+                                session && String(selectedMonitoringSessionId) === String(session.id)
+                                  ? 'border-white/10 bg-white/5 text-slate-200'
+                                  : 'border-slate-200 bg-slate-50 text-slate-500'
+                              }`}>
+                                {session
+                                  ? (session.camera_connected || session.screen_share_connected || session.mic_connected
+                                      ? 'Live stream connected. Use Open Big Screen to watch this student.'
+                                      : 'Waiting for student camera/screen share...')
+                                  : 'Student has not started the exam yet.'}
+                              </div>
                               {session ? (
                                 <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
                                   <span className={`rounded-xl px-2 py-1 font-semibold ${session.camera_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>Cam {session.camera_connected ? 'connected' : 'waiting'}</span>
@@ -3010,28 +3393,21 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                     onClick={() => handleOpenBigLiveView(session, 'screen')}
                                     className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
                                   >
-                                    Open Live
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenBigLiveView(session, 'camera')}
-                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                  >
-                                    Camera
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenBigLiveView(session, 'voice')}
-                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                  >
-                                    Mic
+                                    Open All In One
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleOpenBigLiveView(session, 'screen')}
                                     className="rounded-xl border border-teal-300 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100"
                                   >
-                                    Open Big Live View
+                                    Open Big Screen
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenMonitoringInfo(session)}
+                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    i
                                   </button>
                                 </div>
                               ) : null}
@@ -3258,72 +3634,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                   </div>
                 ) : null}
 
-                {showBigLiveModal && selectedMonitoringSession ? (
-                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-                    <div className="relative max-h-[94vh] w-full max-w-7xl overflow-auto rounded-[2rem] bg-white p-5 shadow-2xl">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="flex items-start gap-3">
-                          <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-16 w-16 rounded-full object-cover" />
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
-                            <h3 className="mt-2 text-2xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
-                            <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleSelectAdjacentMonitoringSession(-1)}
-                            disabled={selectedMonitoringIndex <= 0}
-                            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            &lt;
-                          </button>
-                          <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
-                            {selectedMonitoringIndex >= 0 ? `${selectedMonitoringIndex + 1} / ${monitorableSessions.length}` : `1 / ${Math.max(1, monitorableSessions.length)}`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectAdjacentMonitoringSession(1)}
-                            disabled={selectedMonitoringIndex < 0 || selectedMonitoringIndex >= monitorableSessions.length - 1}
-                            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            &gt;
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowBigLiveModal(false)}
-                            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                          >
-                            X
-                          </button>
-                        </div>
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
-                        <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
-                        <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
-                      </div>
-                      <div className="mt-4">
-                        <LiveExamStreamMonitor
-                          slotId={selectedSlot?.id}
-                          session={selectedMonitoringSession}
-                          viewerId={profile?.id}
-                          viewerInstanceId={`modal-${selectedMonitoringSession?.id || 'none'}`}
-                          viewerRole={role}
-                          large
-                        />
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800">Warn</button>
-                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume' : 'Pause'}</button>
-                        <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
-                        {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button> : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
                 {(showFullOverview || isAttendancePanel || isCancellationsPanel) ? <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-lg font-semibold text-slate-900">{isCancellationsPanel ? 'Exam Cancellations and Student Actions' : 'Bookings, Attendance, and Actions'}</h3>
@@ -3383,8 +3693,99 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                     </div>
                   </div> : null}
                 </div>
+                {showBigLiveModal ? (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+                    <div className="relative max-h-[94vh] w-full max-w-7xl overflow-auto rounded-[2rem] bg-white p-5 shadow-2xl">
+                      {selectedMonitoringSession ? (
+                        <>
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <AvatarImage userId={selectedMonitoringStudent?.id} avatarUrl={selectedMonitoringStudent?.avatar_url} fallbackName={selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'} alt={selectedMonitoringStudent?.full_name || 'Student'} className="h-16 w-16 rounded-full object-cover" />
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
+                                <h3 className="mt-2 text-2xl font-semibold text-slate-900">{selectedMonitoringStudent?.full_name || selectedMonitoringStudent?.email || 'Student'}</h3>
+                                <p className="mt-1 text-sm text-slate-500">{getExamDisplayName(selectedExam, coursesById[selectedExam?.course_id])}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenMonitoringInfo(selectedMonitoringSession)}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                i
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAdjacentMonitoringSession(-1)}
+                                disabled={selectedMonitoringIndex <= 0}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              >
+                                &lt;
+                              </button>
+                              <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                                {selectedMonitoringIndex >= 0 ? `${selectedMonitoringIndex + 1} / ${activeMonitoringPool.length}` : `1 / ${Math.max(1, activeMonitoringPool.length)}`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAdjacentMonitoringSession(1)}
+                                disabled={selectedMonitoringIndex < 0 || selectedMonitoringIndex >= activeMonitoringPool.length - 1}
+                                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              >
+                                &gt;
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowBigLiveModal(false)}
+                                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                              >
+                                X
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setMonitorFeedTab('screen')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'screen' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Screen Share</button>
+                            <button type="button" onClick={() => setMonitorFeedTab('camera')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'camera' ? 'bg-teal-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Live Camera</button>
+                            <button type="button" onClick={() => setMonitorFeedTab('voice')} className={`rounded-xl px-4 py-2 text-sm font-semibold ${monitorFeedTab === 'voice' ? 'bg-amber-500 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>Voice Audio</button>
+                          </div>
+                          <div className="mt-4">
+                            <LiveExamStreamMonitor
+                              slotId={selectedSlot?.id}
+                              session={selectedMonitoringSession}
+                              viewerId={profile?.id}
+                              viewerInstanceId={`modal-${selectedMonitoringSession?.id || 'none'}`}
+                              viewerRole={role}
+                              large
+                            />
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800">Warn</button>
+                            <button type="button" onClick={() => handleSpeakToStudent(selectedMonitoringSession)} className="rounded-xl bg-teal-100 px-4 py-2 text-sm font-semibold text-teal-800">Speak</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume' : 'Pause'}</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
+                            {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button> : null}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
+                          <h3 className="mt-3 text-3xl font-semibold text-slate-900">No User Writing Now</h3>
+                          <p className="mt-3 max-w-xl text-sm text-slate-500">When a student starts writing the live exam, their screen share, camera, and actions will appear here.</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowBigLiveModal(false)}
+                            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </>
-            )}
+            )
+            ) : null}
           </div>
         </div>
       )}

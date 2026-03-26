@@ -783,7 +783,17 @@ export default function Exam({ examMode = "certification" }) {
     };
 
     const connectLiveKit = async () => {
-      try {
+      const isAbortLikeError = (error) => {
+        const message = String(error?.message || error || "").toLowerCase();
+        return (
+          message.includes("abort handler called") ||
+          message.includes("could not establish signal connection") ||
+          message.includes("signal connection")
+        );
+      };
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      const connectAndPublish = async () => {
         const tokenData = await getLiveKitTokenForSession({
           sessionId: liveExamContext.sessionId,
           mode: "student",
@@ -842,6 +852,31 @@ export default function Exam({ examMode = "certification" }) {
 
         liveKitPublishedTracksRef.current = publishedTracks;
         await syncLiveMediaState();
+      };
+      const connectAndPublishWithRetries = async () => {
+        const retryDelays = [0, 250, 750, 1500];
+        let lastError = null;
+        for (const delay of retryDelays) {
+          if (delay > 0) {
+            await wait(delay);
+          }
+          try {
+            await connectAndPublish();
+            return;
+          } catch (attemptError) {
+            lastError = attemptError;
+            const shouldRetry = isAbortLikeError(attemptError);
+            await cleanupRoom();
+            if (!shouldRetry) {
+              throw attemptError;
+            }
+          }
+        }
+        throw lastError || new Error("Failed to connect LiveKit live stream.");
+      };
+
+      try {
+        await connectAndPublishWithRetries();
       } catch (liveKitError) {
         if (!mounted) return;
         console.error("[Exam] LiveKit publish failed:", liveKitError);

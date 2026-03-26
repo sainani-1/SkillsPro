@@ -91,6 +91,7 @@ const Layout = () => {
 
     const teacherTargets = [
       ...common,
+      { label: 'All In One', path: '/app/all-in-one' },
       { label: 'Live Exams', path: '/app/live-exams' },
       { label: 'Live Monitoring', path: '/app/live-monitoring' },
       { label: 'Exam Attendance', path: '/app/live-attendance' },
@@ -110,6 +111,7 @@ const Layout = () => {
 
     const adminTargets = [
       ...common,
+      { label: 'All In One', path: '/app/all-in-one' },
       { label: 'Live Exams', path: '/app/live-exams' },
       { label: 'Live Exam Slots', path: '/app/live-exam-slots' },
       { label: 'Live Monitoring', path: '/app/live-monitoring' },
@@ -140,7 +142,7 @@ const Layout = () => {
       { label: 'Post Notifications', path: '/app/admin/notifications' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
       { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
-      { label: 'Live Slot Wait Days', path: '/app/admin/live-exam-booking-controls' },
+      { label: 'Allow Failed To Book Slot', path: '/app/admin/allow-failed-to-book-slot' },
       { label: 'Live Slot Cancellations', path: '/app/live-cancellations' },
       { label: 'Release Terminated Exams', path: '/app/admin/exam-retakes' },
       { label: 'Exam Settings', path: '/app/admin/exam-settings' },
@@ -159,6 +161,7 @@ const Layout = () => {
 
     const instructorTargets = [
       { label: 'Dashboard', path: '/app' },
+      { label: 'All In One', path: '/app/all-in-one' },
       { label: 'Live Exams', path: '/app/live-exams' },
     ];
 

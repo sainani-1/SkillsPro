@@ -2,6 +2,14 @@ import { supabase } from '../supabaseClient';
 
 export const liveKitRoomNameForSession = (sessionId) => `skillpro-live-exam-session-${sessionId}`;
 
+const normalizeLiveKitUrl = (rawUrl) => {
+  const value = String(rawUrl || '').trim();
+  if (!value) return value;
+  if (value.startsWith('https://')) return `wss://${value.slice('https://'.length)}`;
+  if (value.startsWith('http://')) return `ws://${value.slice('http://'.length)}`;
+  return value;
+};
+
 export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId, viewerInstanceId = '' }) => {
   if (!requesterId) {
     throw new Error('LiveKit auth failed: requester id is missing.');
@@ -32,5 +40,8 @@ export const getLiveKitTokenForSession = async ({ sessionId, mode, requesterId, 
     throw new Error('LiveKit token response is incomplete.');
   }
 
-  return payload;
+  return {
+    ...payload,
+    url: normalizeLiveKitUrl(payload.url),
+  };
 };

@@ -253,6 +253,18 @@ const InstructorRoute = ({ children }) => {
   return children;
 };
 
+const StaffAllInOneRoute = ({ children }) => {
+  const { realProfile, profile, loading } = useAuth();
+  const activeRole = realProfile?.role || profile?.role;
+
+  if (loading) return <LoadingSpinner message="Loading live monitoring..." />;
+  if (!['admin', 'teacher', 'instructor'].includes(activeRole)) {
+    return <Navigate to="/app" />;
+  }
+
+  return activeRole === 'admin' ? <RequireAdminMFA>{children}</RequireAdminMFA> : children;
+};
+
 function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -293,6 +305,7 @@ function App() {
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
           <Route index element={<Dashboard />} />
           <Route path="courses" element={<CourseList />} />
+          <Route path="all-in-one" element={<StaffAllInOneRoute><LiveExamProctoring forcedPanel="all-in-one" /></StaffAllInOneRoute>} />
           <Route path="write-test" element={<StudentWriteTest />} />
           <Route path="course/:courseId" element={<CourseDetail />} />
           <Route path="profile" element={<Profile />} />
@@ -344,6 +357,7 @@ function App() {
           <Route path="admin/courses" element={<AdminRoute><AdminCourses /></AdminRoute>} />
           <Route path="teacher/tests" element={<TeacherRoute><TeacherConductTests /></TeacherRoute>} />
           <Route path="instructor/live-exams" element={<InstructorRoute><LiveExamProctoring /></InstructorRoute>} />
+          <Route path="instructor/all-in-one" element={<InstructorRoute><LiveExamProctoring forcedPanel="all-in-one" /></InstructorRoute>} />
           <Route path="instructor/live-exam-slots" element={<InstructorRoute><LiveExamProctoring forcedPanel="slots" /></InstructorRoute>} />
           <Route path="instructor/live-monitoring" element={<InstructorRoute><LiveExamProctoring forcedPanel="monitoring" /></InstructorRoute>} />
           <Route path="instructor/live-attendance" element={<InstructorRoute><LiveExamProctoring forcedPanel="attendance" /></InstructorRoute>} />
@@ -363,6 +377,7 @@ function App() {
           <Route path="admin/notifications" element={<AdminRoute><AdminNotifications /></AdminRoute>} />
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
           <Route path="admin/live-exam-booking-controls" element={<AdminRoute><AdminLiveExamBookingControls /></AdminRoute>} />
+          <Route path="admin/allow-failed-to-book-slot" element={<AdminRoute><AdminLiveExamBookingControls /></AdminRoute>} />
           <Route path="admin/exam-retakes" element={<AdminRoute><AdminExamRetakes /></AdminRoute>} />
           <Route path="admin/settings" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/website-protection" element={<AdminRoute><AdminWebsiteProtection /></AdminRoute>} />

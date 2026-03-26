@@ -162,8 +162,8 @@ export default function AdminLiveExamBookingControls() {
     <div className="space-y-6 p-6 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Live Exam Booking Controls</h1>
-          <p className="mt-1 text-sm text-slate-600">Control how long students must wait before booking the same live exam again, and unlock specific students when needed.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Allow Failed To Book Slot</h1>
+          <p className="mt-1 text-sm text-slate-600">Control how long students must wait before booking the same live exam again, and allow failed or blocked students to book the slot again when needed.</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
           <span className="font-semibold text-slate-900">{defaultDays}</span> day default wait
@@ -202,9 +202,9 @@ export default function AdminLiveExamBookingControls() {
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3">
             <KeyRound className="h-5 w-5 text-teal-700" />
-            <h2 className="text-lg font-semibold text-slate-900">Allow Student Again</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Allow Failed Student Again</h2>
           </div>
-          <p className="mt-2 text-sm text-slate-600">Grant immediate or scheduled permission for a student to book/write the live exam again for a course.</p>
+          <p className="mt-2 text-sm text-slate-600">Grant immediate or scheduled permission for a student to book or write the live exam again for a course after a failed attempt or booking issue.</p>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700">Search Student</label>

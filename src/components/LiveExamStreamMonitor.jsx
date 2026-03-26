@@ -198,6 +198,22 @@ function bindSharedRoomStateListeners(entry) {
       });
     }
   });
+
+  entry.room.on(RoomEvent.Reconnecting, () => {
+    emitSharedRoomState(entry, {
+      debugState: { room: 'reconnecting' },
+      status: 'Reconnecting live preview...',
+      error: '',
+    });
+  });
+
+  entry.room.on(RoomEvent.Reconnected, () => {
+    emitSharedRoomState(entry, {
+      debugState: { room: ConnectionState.Connected },
+      status: 'Live stream connected.',
+      error: '',
+    });
+  });
 }
 
 export default function LiveExamStreamMonitor({
@@ -312,46 +328,112 @@ export default function LiveExamStreamMonitor({
       if (!subscribedTrack) return;
       const trackSid = publication?.trackSid || subscribedTrack?.sid || `${publication?.source || 'unknown'}-${subscribedTrack?.kind || 'track'}`;
       if (attachedTrackSids.has(trackSid)) return;
+      const screenElement = screenVideoRef.current;
+      const cameraElement = cameraVideoRef.current;
+      const audioElement = audioRef.current;
 
-      if (publication.source === Track.Source.ScreenShare && subscribedTrack.kind === Track.Kind.Video) {
-        const element = screenVideoRef.current;
-        if (!element) return;
+      const attachVideoToElement = async (element, debugPatch) => {
+        if (!element) return false;
         subscribedTrack.setEnabled?.(true);
         publication.setSubscribed?.(true);
         element.srcObject = null;
         element.muted = true;
-        subscribedTrack.attach(element);
+        element.autoplay = true;
+        element.playsInline = true;
+        element.controls = false;
+        element.onloadedmetadata = () => {
+          void playMediaElement(element);
+        };
+        element.oncanplay = () => {
+          void playMediaElement(element);
+        };
+        try {
+          subscribedTrack.attach(element);
+        } catch {
+          if (subscribedTrack?.mediaStreamTrack) {
+            element.srcObject = new MediaStream([subscribedTrack.mediaStreamTrack]);
+          } else {
+            throw new Error('Unable to attach remote video track.');
+          }
+        }
         await playMediaElement(element);
         attachedTrackSids.add(trackSid);
-        localDetachFns.push(() => detachTrack(subscribedTrack, element));
+        localDetachFns.push(() => {
+          detachTrack(subscribedTrack, element);
+          element.srcObject = null;
+        });
+        if (debugPatch) {
+          emitSharedRoomState(sharedEntry, { debugState: debugPatch });
+        }
+        return true;
+      };
+
+      const attachAudioToElement = async (element, debugPatch) => {
+        if (!element) return false;
+        subscribedTrack.setEnabled?.(true);
+        publication.setSubscribed?.(true);
+        element.srcObject = null;
+        element.autoplay = true;
+        element.onloadedmetadata = () => {
+          void playMediaElement(element);
+        };
+        element.oncanplay = () => {
+          void playMediaElement(element);
+        };
+        try {
+          subscribedTrack.attach(element);
+        } catch {
+          if (subscribedTrack?.mediaStreamTrack) {
+            element.srcObject = new MediaStream([subscribedTrack.mediaStreamTrack]);
+          } else {
+            throw new Error('Unable to attach remote audio track.');
+          }
+        }
+        element.muted = !audioEnabled;
+        await playMediaElement(element);
+        attachedTrackSids.add(trackSid);
+        localDetachFns.push(() => {
+          detachTrack(subscribedTrack, element);
+          element.srcObject = null;
+        });
+        if (debugPatch) {
+          emitSharedRoomState(sharedEntry, { debugState: debugPatch });
+        }
+        return true;
+      };
+
+      if (publication.source === Track.Source.ScreenShare && subscribedTrack.kind === Track.Kind.Video) {
+        await attachVideoToElement(screenElement, { screen: 'connected' });
         return;
       }
 
       if (publication.source === Track.Source.Camera && subscribedTrack.kind === Track.Kind.Video) {
-        const element = cameraVideoRef.current;
-        if (!element) return;
-        subscribedTrack.setEnabled?.(true);
-        publication.setSubscribed?.(true);
-        element.srcObject = null;
-        element.muted = true;
-        subscribedTrack.attach(element);
-        await playMediaElement(element);
-        attachedTrackSids.add(trackSid);
-        localDetachFns.push(() => detachTrack(subscribedTrack, element));
+        await attachVideoToElement(cameraElement, { camera: 'connected' });
         return;
       }
 
       if (publication.source === Track.Source.Microphone && subscribedTrack.kind === Track.Kind.Audio) {
-        const element = audioRef.current;
-        if (!element) return;
-        subscribedTrack.setEnabled?.(true);
-        publication.setSubscribed?.(true);
-        element.srcObject = null;
-        subscribedTrack.attach(element);
-        element.muted = !audioEnabled;
-        await playMediaElement(element);
-        attachedTrackSids.add(trackSid);
-        localDetachFns.push(() => detachTrack(subscribedTrack, element));
+        await attachAudioToElement(audioElement, { mic: 'connected' });
+        return;
+      }
+
+      // Fallback: if the incoming track source is unlabeled or unexpected,
+      // still render the first available media track instead of leaving blanks.
+      if (subscribedTrack.kind === Track.Kind.Video) {
+        if (!screenElement?.srcObject) {
+          await attachVideoToElement(screenElement, { screen: 'connected' });
+          return;
+        }
+        if (!cameraElement?.srcObject) {
+          await attachVideoToElement(cameraElement, { camera: 'connected' });
+          return;
+        }
+      }
+
+      if (subscribedTrack.kind === Track.Kind.Audio) {
+        if (!audioElement?.srcObject) {
+          await attachAudioToElement(audioElement, { mic: 'connected' });
+        }
       }
     };
 
@@ -363,7 +445,16 @@ export default function LiveExamStreamMonitor({
     };
 
     const connectRoom = async () => {
-      try {
+      const isAbortLikeError = (error) => {
+        const message = String(error?.message || error || '').toLowerCase();
+        return (
+          message.includes('abort handler called') ||
+          message.includes('could not establish signal connection') ||
+          message.includes('signal connection')
+        );
+      };
+      const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const connectOnce = async () => {
         emitSharedRoomState(sharedEntry, {
           error: '',
           status: 'Connecting live preview...',
@@ -379,8 +470,8 @@ export default function LiveExamStreamMonitor({
         if (sharedEntry.refCount <= 0 && sharedEntry.subscribers.size === 0) return;
 
         const room = new Room({
-          adaptiveStream: true,
-          dynacast: true,
+          adaptiveStream: false,
+          dynacast: false,
         });
         sharedEntry.room = room;
         bindSharedRoomStateListeners(sharedEntry);
@@ -395,7 +486,39 @@ export default function LiveExamStreamMonitor({
           return;
         }
 
+        emitSharedRoomState(sharedEntry, {
+          error: '',
+          status: 'Waiting for student camera/screen share...',
+          debugState: { room: ConnectionState.Connected },
+        });
+
         room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
+      };
+      const connectWithRetries = async () => {
+        const retryDelays = [0, 250, 750, 1500];
+        let lastError = null;
+        for (const delay of retryDelays) {
+          if (delay > 0) {
+            await wait(delay);
+          }
+          try {
+            await connectOnce();
+            return;
+          } catch (attemptError) {
+            lastError = attemptError;
+            const shouldRetry = isAbortLikeError(attemptError);
+            sharedEntry.room?.disconnect?.();
+            sharedEntry.room = null;
+            sharedEntry.listenersBound = false;
+            if (!shouldRetry) {
+              throw attemptError;
+            }
+          }
+        }
+        throw lastError || new Error('Failed to connect LiveKit preview.');
+      };
+      try {
+        await connectWithRetries();
       } catch (connectionError) {
         emitSharedRoomState(sharedEntry, {
           error: connectionError.message || 'Failed to connect LiveKit preview.',
@@ -498,7 +621,14 @@ export default function LiveExamStreamMonitor({
     }
 
     const roomConnected = String(debugState.room).toLowerCase() === String(ConnectionState.Connected).toLowerCase();
-    const hasVideoFeed = debugState.screen === 'connected' || debugState.camera === 'connected';
+    const sessionMediaConnected =
+      Boolean(resolvedSession?.screen_share_connected) ||
+      Boolean(resolvedSession?.camera_connected) ||
+      Boolean(resolvedSession?.mic_connected);
+    const hasVideoFeed =
+      debugState.screen === 'connected' ||
+      debugState.camera === 'connected' ||
+      sessionMediaConnected;
 
     if (hasVideoFeed) {
       setStatus('Live stream connected.');
@@ -513,13 +643,32 @@ export default function LiveExamStreamMonitor({
       return;
     }
     setStatus('Connecting live preview...');
-  }, [debugState.room, debugState.screen, debugState.camera, error, resolvedSession?.id, sessionStatus, viewerId, hasStartedSession]);
+  }, [
+    debugState.room,
+    debugState.screen,
+    debugState.camera,
+    error,
+    resolvedSession?.id,
+    resolvedSession?.screen_share_connected,
+    resolvedSession?.camera_connected,
+    resolvedSession?.mic_connected,
+    sessionStatus,
+    viewerId,
+    hasStartedSession,
+  ]);
 
   const statusTone = useMemo(() => {
     if (error) return 'text-rose-300';
     if (status.toLowerCase().includes('connected')) return 'text-emerald-300';
     return 'text-slate-300';
   }, [error, status]);
+  const displayRoomState = debugState.room || '-';
+  const displayScreenState =
+    debugState.screen === 'connected' || resolvedSession?.screen_share_connected ? 'connected' : debugState.screen;
+  const displayCameraState =
+    debugState.camera === 'connected' || resolvedSession?.camera_connected ? 'connected' : debugState.camera;
+  const displayMicState =
+    debugState.mic === 'connected' || resolvedSession?.mic_connected ? 'connected' : debugState.mic;
 
   return (
     <div className="space-y-3">
@@ -536,7 +685,7 @@ export default function LiveExamStreamMonitor({
           className={`w-full rounded-2xl bg-black object-contain ${screenHeightClass}`}
         />
         {!compact ? (
-          <p className="mt-2 text-[11px] text-slate-400">Room: {debugState.room} | Screen: {debugState.screen}</p>
+          <p className="mt-2 text-[11px] text-slate-400">Room: {displayRoomState} | Screen: {displayScreenState}</p>
         ) : null}
       </div>
 
@@ -563,7 +712,7 @@ export default function LiveExamStreamMonitor({
           />
           <audio ref={audioRef} autoPlay muted={!audioEnabled} />
           {!compact ? (
-            <p className="mt-2 text-[11px] text-slate-400">Camera: {debugState.camera} | Mic: {debugState.mic}</p>
+            <p className="mt-2 text-[11px] text-slate-400">Camera: {displayCameraState} | Mic: {displayMicState}</p>
           ) : null}
         </div>
 
@@ -571,7 +720,9 @@ export default function LiveExamStreamMonitor({
           <div className="rounded-3xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mic</p>
             <p className="mt-2 text-sm font-semibold text-slate-900">
-              {audioEnabled ? 'Live microphone monitoring enabled.' : 'Enable mic listening for this student.'}
+              {displayMicState === 'connected'
+                ? (audioEnabled ? 'Live microphone monitoring enabled.' : 'Student microphone is connected. Click Listen Mic to hear it.')
+                : 'Enable mic listening for this student.'}
             </p>
             <p className="mt-2 text-xs text-slate-500">
               LiveKit is now used for room transport. Make sure the `livekit-token` function is deployed and LiveKit env vars are configured.
