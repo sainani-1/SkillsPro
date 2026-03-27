@@ -536,6 +536,10 @@ const Sidebar = () => {
               <Video size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Assigned Classes</span>}
             </NavLink>
+            <NavLink to="/app/class-feedback" className={navItemClass} title="Class Feedback">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Class Feedback</span>}
+            </NavLink>
             <NavLink to="/app/class-schedule" className={navItemClass} title="Schedule Sessions">
               <Calendar size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Schedule Sessions</span>}
@@ -652,6 +656,10 @@ const Sidebar = () => {
               <Video size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Schedule Live Classes</span>}
             </NavLink>
+            <NavLink to="/app/class-feedback" className={navItemClass} title="Class Feedback">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Class Feedback</span>}
+            </NavLink>
             <NavLink to="/app/attendance" className={navItemClass} title="Attendance">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Attendance</span>}
@@ -709,6 +717,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/exam-overrides" className={navItemClass} title="Exam Retake Overrides">
               <Clock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Exam Retake Overrides</span>}
+            </NavLink>
+            <NavLink to="/app/admin/choose-meet" className={navItemClass} title="Choose Meet">
+              <Video size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Choose Meet</span>}
             </NavLink>
             <NavLink to="/app/admin/allow-failed-to-book-slot" className={navItemClass} title="Allow Failed To Book Slot">
               <KeyRound size={28} />

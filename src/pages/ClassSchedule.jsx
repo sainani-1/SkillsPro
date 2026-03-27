@@ -19,6 +19,8 @@ import {
   subMonths,
 } from 'date-fns';
 
+const CLASS_MEETING_PROVIDER_KEY = 'class_meeting_provider';
+
 const ClassSchedule = () => {
   const { profile, isPremium } = useAuth();
   const navigate = useNavigate();
@@ -29,6 +31,7 @@ const ClassSchedule = () => {
   const [endsAt, setEndsAt] = useState('');
   const [joinLink, setJoinLink] = useState('');
   const [meetingType, setMeetingType] = useState('jitsi');
+  const [configuredMeetingProvider, setConfiguredMeetingProvider] = useState('jitsi');
   const [students, setStudents] = useState([]);
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -36,6 +39,7 @@ const ClassSchedule = () => {
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [deleteModal, setDeleteModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
   const [endModal, setEndModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
+  const [joiningSessionId, setJoiningSessionId] = useState(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [pickerState, setPickerState] = useState({
     open: false,
@@ -168,6 +172,7 @@ const ClassSchedule = () => {
     if (!profile?.id || !profile?.role) return;
     loadSessions();
     loadStudents();
+    loadMeetingProvider();
     if (profile.role === 'admin') {
       loadTeachers();
     }
@@ -191,6 +196,18 @@ const ClassSchedule = () => {
       .eq('role', 'teacher')
       .order('full_name');
     setTeachers(data || []);
+  };
+
+  const loadMeetingProvider = async () => {
+    const { data } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', CLASS_MEETING_PROVIDER_KEY)
+      .maybeSingle();
+
+    const provider = data?.value === 'livekit' ? 'livekit' : 'jitsi';
+    setConfiguredMeetingProvider(provider);
+    setMeetingType(provider);
   };
 
   const loadStudents = async () => {
@@ -337,17 +354,8 @@ const ClassSchedule = () => {
       return;
     }
 
-    if (meetingType === 'external' && !joinLink) {
-      setAlertModal({
-        show: true,
-        title: 'Missing Link',
-        message: 'Please provide meeting link for external platform',
-        type: 'warning'
-      });
-      return;
-    }
-    
-    const link = meetingType === 'external' ? joinLink : null;
+    const selectedMeetingType = configuredMeetingProvider === 'livekit' ? 'livekit' : 'jitsi';
+    const link = null;
     
     const isoDateString = istLocalToUtcIso(scheduledAt);
     if (!isoDateString) {
@@ -397,7 +405,7 @@ const ClassSchedule = () => {
       scheduled_for: isoDateString,
       ends_at: endsAtIso,
       meeting_link: link,
-      meeting_type: meetingType
+      meeting_type: selectedMeetingType
     }).select().single();
 
     if (sessionError) {
@@ -509,7 +517,7 @@ const ClassSchedule = () => {
     setScheduledAt('');
     setEndsAt('');
     setJoinLink('');
-    setMeetingType('jitsi');
+    setMeetingType(configuredMeetingProvider);
     setSelectedStudents([]);
     setSelectedTeacher('');
     setShowForm(false);
@@ -523,6 +531,8 @@ const ClassSchedule = () => {
   };
 
   const isFreeStudent = profile?.role === 'student' && !isPremium(profile);
+  const builtInProviderLabel = configuredMeetingProvider === 'livekit' ? 'LiveKit' : 'SkillPro Live';
+  const isBuiltInProviderLiveKit = configuredMeetingProvider === 'livekit';
 
   if (isFreeStudent) {
     return (
@@ -629,7 +639,16 @@ const ClassSchedule = () => {
             </div>
             <div>
               <label className="block text-sm font-semibold mb-2 text-slate-700">Meeting Platform</label>
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className={`rounded-2xl border-2 p-4 ${isBuiltInProviderLiveKit ? 'border-emerald-300 bg-emerald-50' : 'border-blue-300 bg-blue-50'}`}>
+                <div className="font-semibold text-sm">{builtInProviderLabel}</div>
+                <div className="text-xs text-slate-500">Selected by admin in Choose Meet</div>
+              </div>
+              <p className={`mt-2 text-xs ${isBuiltInProviderLiveKit ? 'text-emerald-700' : 'text-green-600'}`}>
+                {isBuiltInProviderLiveKit
+                  ? 'LiveKit room will be opened inside SkillPro for this class session.'
+                  : 'Meeting room will be automatically created with SkillPro Live'}
+              </p>
+              <div className="hidden grid grid-cols-2 gap-3 mb-3">
                 <button
                   type="button"
                   onClick={() => setMeetingType('jitsi')}
@@ -665,7 +684,7 @@ const ClassSchedule = () => {
                   required
                 />
               )}
-              {meetingType === 'jitsi' && (
+              {false && meetingType === 'jitsi' && (
                 <p className="text-xs text-green-600 mt-2">
                   ✓ Meeting room will be automatically created with SkillPro Live
                 </p>
@@ -909,8 +928,8 @@ const ClassSchedule = () => {
               return (
             <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg hover:shadow-md transition">
               <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${session.meeting_type === 'jitsi' ? 'bg-blue-100' : 'bg-purple-100'}`}>
-                  {session.meeting_type === 'jitsi' ? (
+                <div className={`p-2 rounded-lg ${(session.meeting_type === 'jitsi' || session.meeting_type === 'livekit') ? 'bg-blue-100' : 'bg-purple-100'}`}>
+                  {(session.meeting_type === 'jitsi' || session.meeting_type === 'livekit') ? (
                     <Video className="text-blue-600" size={24} />
                   ) : (
                     <ExternalLink className="text-purple-600" size={24} />
@@ -946,23 +965,22 @@ const ClassSchedule = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {session.meeting_type === 'jitsi' ? (
+                {(session.meeting_type === 'jitsi' || session.meeting_type === 'livekit') ? (
                   <button
                     onClick={() => {
                       if (!canJoinNow) return;
-                      console.log('Join Class button clicked, session:', session);
-                      console.log('Navigating to:', `/live-class/${session.id}`);
+                      setJoiningSessionId(session.id);
                       navigate(`/live-class/${session.id}`);
                     }}
-                    disabled={!canJoinNow}
+                    disabled={!canJoinNow || joiningSessionId === session.id}
                     className={`px-6 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
-                      canJoinNow
+                      canJoinNow && joiningSessionId !== session.id
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-slate-300 text-slate-600 cursor-not-allowed'
                     }`}
                   >
                     <Video size={18} />
-                    {canJoinNow ? 'Join Class' : 'Available at Scheduled Time'}
+                    {joiningSessionId === session.id ? 'Joining...' : canJoinNow ? 'Join Class' : 'Available at Scheduled Time'}
                   </button>
                 ) : (
                   <a 

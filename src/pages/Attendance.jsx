@@ -1,9 +1,30 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import AlertModal from '../components/AlertModal';
-import { ClipboardList, CheckCircle, XCircle, User, Calendar, Clock, Save, X } from 'lucide-react';
+import { ClipboardList, CheckCircle, XCircle, User, Calendar, Clock, Save, X, Download } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+const formatMinutes = (value) => {
+  const minutes = Math.max(0, Number(value || 0));
+  if (!minutes) return '0m';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+};
 
 const Attendance = () => {
   const { profile } = useAuth();
@@ -276,6 +297,79 @@ const Attendance = () => {
     };
   }, [profile, isTeacher, isAdmin]);
 
+  const sessionAttendanceSummary = useMemo(() => {
+    const presentCount = students.filter((student) => student.attended === true).length;
+    const absentCount = students.filter((student) => student.attended === false).length;
+    const trackedLiveCount = students.filter((student) => student.join_time || student.leave_time).length;
+    const averageLiveMinutes = trackedLiveCount
+      ? Math.round(
+          students
+            .filter((student) => student.join_time || student.leave_time)
+            .reduce((sum, student) => sum + Number(student.live_minutes || 0), 0) / trackedLiveCount,
+        )
+      : 0;
+
+    return {
+      total: students.length,
+      presentCount,
+      absentCount,
+      trackedLiveCount,
+      averageLiveMinutes,
+    };
+  }, [students]);
+
+  const exportSelectedSessionAttendance = () => {
+    if (!selectedSession || !students.length) {
+      setAlertModal({
+        show: true,
+        title: 'No Data',
+        message: 'There is no attendance data to export for this session yet.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    const rows = students.map((student) => ({
+      name: student.full_name || '',
+      email: student.email || '',
+      status: student.attended === true ? 'Present' : student.attended === false ? 'Absent' : 'Not Marked',
+      source: student.attendance_source || 'manual',
+      joinTime: student.join_time ? formatDateTime(student.join_time) : '',
+      leaveTime: student.leave_time ? formatDateTime(student.leave_time) : '',
+      liveMinutes: Number(student.live_minutes || 0),
+      markedAt: student.marked_at ? formatDateTime(student.marked_at) : '',
+    }));
+
+    const header = ['Name', 'Email', 'Status', 'Source', 'Join Time', 'Leave Time', 'Live Minutes', 'Marked At'];
+    const csv = [
+      header.join(','),
+      ...rows.map((row) =>
+        [
+          row.name,
+          row.email,
+          row.status,
+          row.source,
+          row.joinTime,
+          row.leaveTime,
+          row.liveMinutes,
+          row.markedAt,
+        ]
+          .map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
+          .join(','),
+      ),
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${selectedSession.title || 'session'}-attendance.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const loadStudentsForSession = async (session) => {
     if (!session) return [];
 
@@ -334,7 +428,7 @@ const Attendance = () => {
     const tableName = session.type === 'class' ? 'class_attendance' : 'guidance_attendance';
     const { data } = await supabase
       .from(tableName)
-      .select('id, student_id, attended')
+      .select('id, student_id, attended, join_time, leave_time, live_minutes, attendance_source, marked_at')
       .eq('session_id', session.id);
 
     let attendanceStudents = [];
@@ -396,7 +490,12 @@ const Attendance = () => {
       ...s,
       attended: attendanceMap[s.id],
       locked: false,
-      recordId: data?.find(r => r.student_id === s.id)?.id
+      recordId: data?.find(r => r.student_id === s.id)?.id,
+      join_time: data?.find(r => r.student_id === s.id)?.join_time || null,
+      leave_time: data?.find(r => r.student_id === s.id)?.leave_time || null,
+      live_minutes: data?.find(r => r.student_id === s.id)?.live_minutes || 0,
+      attendance_source: data?.find(r => r.student_id === s.id)?.attendance_source || 'manual',
+      marked_at: data?.find(r => r.student_id === s.id)?.marked_at || null,
     }));
 
     const allStudentsMarked =
@@ -954,6 +1053,35 @@ const Attendance = () => {
             )}
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Students</p>
+                <p className="mt-2 text-2xl font-bold text-slate-900">{sessionAttendanceSummary.total}</p>
+              </div>
+              <div className="rounded-xl border bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Present</p>
+                <p className="mt-2 text-2xl font-bold text-emerald-700">{sessionAttendanceSummary.presentCount}</p>
+              </div>
+              <div className="rounded-xl border bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Absent</p>
+                <p className="mt-2 text-2xl font-bold text-rose-700">{sessionAttendanceSummary.absentCount}</p>
+              </div>
+              <div className="rounded-xl border bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Avg Live Time</p>
+                <p className="mt-2 text-2xl font-bold text-indigo-700">{formatMinutes(sessionAttendanceSummary.averageLiveMinutes)}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={exportSelectedSessionAttendance}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              <Download size={16} />
+              <span>Export CSV</span>
+            </button>
+          </div>
+
           {isAdmin && (
             <div className="flex items-center gap-2">
               <button
@@ -1027,6 +1155,62 @@ const Attendance = () => {
               </button>
             </div>
           )}
+
+          <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
+            <div className="border-b bg-slate-50 px-4 py-3">
+              <h4 className="font-semibold text-slate-900">Attendance Report</h4>
+              <p className="text-sm text-slate-500">Includes manual attendance plus live join/leave tracking where available.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Student</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Join Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Leave Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Live Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-600">Marked At</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {students.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" className="px-4 py-8 text-center text-sm text-slate-500">
+                        No students loaded for this session yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    students.map((student) => (
+                      <tr key={student.id}>
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{student.full_name || 'Student'}</p>
+                            <p className="text-xs text-slate-500">{student.email || 'No email'}</p>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {student.attended === true ? (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Present</span>
+                          ) : student.attended === false ? (
+                            <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Absent</span>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Not Marked</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{student.attendance_source || 'manual'}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{formatDateTime(student.join_time)}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{formatDateTime(student.leave_time)}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">{formatMinutes(student.live_minutes)}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{formatDateTime(student.marked_at)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
         </div>
       )}

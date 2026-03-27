@@ -142,6 +142,7 @@ const Layout = () => {
       { label: 'Post Notifications', path: '/app/admin/notifications' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
       { label: 'Exam Retake Overrides', path: '/app/admin/exam-overrides' },
+      { label: 'Choose Meet', path: '/app/admin/choose-meet' },
       { label: 'Allow Failed To Book Slot', path: '/app/admin/allow-failed-to-book-slot' },
       { label: 'Live Slot Cancellations', path: '/app/live-cancellations' },
       { label: 'Release Terminated Exams', path: '/app/admin/exam-retakes' },

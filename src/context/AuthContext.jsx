@@ -10,7 +10,6 @@ import {
   setSingleSessionNotice
 } from '../utils/singleSession';
 import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySession';
-import { reportMultiSessionViolation } from '../utils/sessionSecurity';
 
 const AuthContext = createContext();
 
@@ -74,35 +73,45 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const handleSingleSessionConflict = async (userId) => {
-    const latestSession = await fetchActiveSessionRecord(userId);
-    const violation = await reportMultiSessionViolation(
-      profile || { id: userId, role: 'student', full_name: '', email: '' },
-      {
-        existingDeviceLabel: latestSession?.device_label,
-        existingDeviceId: latestSession?.device_id,
-        existingUpdatedAt: latestSession?.updated_at,
-        incomingDeviceLabel: 'Current device',
-        incomingDeviceId: getOrCreateDeviceId(),
-      }
-    );
-    const repeated = Number(violation?.count || 0) >= 2;
-    const oldDevice = latestSession?.device_label || latestSession?.device_id || 'Another active device';
-    setSingleSessionNotice({
-      title: repeated ? 'Repeated Multi-Session Detected' : 'Multi-Session Detected',
-      type: 'warning',
-      inlineMessage: repeated
-        ? 'Two or more sessions detected again. Reported to admin.'
-        : 'Two or more sessions detected. Reported to admin.',
-      message: repeated
-        ? `Two or more active sessions were detected for this account.\n\nLogged-in device: ${oldDevice}\nThis device: Current device\n\nReported to admin again. Your account will be disabled by admin soon if this repeats.`
-        : `Two or more active sessions were detected for this account.\n\nLogged-in device: ${oldDevice}\nThis device: Current device\n\nThis has been reported to admin. You have been logged out from this device.`,
-    });
+  const forceClientLogout = async (userId, notice = null) => {
+    if (notice) {
+      setSingleSessionNotice(notice);
+    }
     clearStoredSessionKey(userId);
     setUser(null);
     setProfile(null);
+    setImpersonationProfile(null);
     clearProfileCache();
+    clearImpersonation();
+    clearDailyLoginState();
     await supabase.auth.signOut();
+  };
+
+  const handleSingleSessionConflict = async (userId) => {
+    const latestSession = await fetchActiveSessionRecord(userId);
+    const oldDevice = latestSession?.device_label || latestSession?.device_id || 'Another active device';
+    await forceClientLogout(userId, {
+      title: 'Session Moved To Another Device',
+      type: 'warning',
+      inlineMessage: 'This account was opened on another device. Please log in again here if needed.',
+      message: `This account is now active on another device.\n\nActive device: ${oldDevice}\nThis device: Current device\n\nYou have been logged out on this device for security.`,
+    });
+  };
+
+  const validateSessionOwnership = async (sessionUserId) => {
+    if (!sessionUserId) return true;
+    const localKey = localStorage.getItem(`single_session_key_${sessionUserId}`);
+    if (!localKey) return true;
+
+    const owned = await isCurrentDeviceSessionOwner(sessionUserId);
+    if (owned === false) {
+      await handleSingleSessionConflict(sessionUserId);
+      return false;
+    }
+    if (owned === true) {
+      await heartbeatSingleSession(sessionUserId);
+    }
+    return true;
   };
 
   const isPremium = (p) => {
@@ -118,10 +127,6 @@ export const AuthProvider = ({ children }) => {
     if (cachedProfile?.profile) {
       setProfile(cachedProfile.profile);
       setImpersonationProfile(cachedImpersonation);
-      if (cachedProfile.userId) {
-        setUser({ id: cachedProfile.userId });
-      }
-      setLoading(false);
     }
 
     // Wait for Supabase to restore session from localStorage
@@ -138,9 +143,20 @@ export const AuthProvider = ({ children }) => {
         tries++;
       }
       if (!isMounted) return;
+      if (session?.user) {
+        const allowed = await validateSessionOwnership(session.user.id);
+        if (!isMounted || !allowed) {
+          setLoading(false);
+          return;
+        }
+      }
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id, { background: !!cachedProfile?.profile });
-      else {
+      if (session?.user) {
+        if (cachedProfile?.profile) {
+          setLoading(false);
+        }
+        fetchProfile(session.user.id, { background: !!cachedProfile?.profile });
+      } else {
         setProfile(null);
         setImpersonationProfile(null);
         clearProfileCache();
@@ -300,8 +316,10 @@ export const AuthProvider = ({ children }) => {
         fullName: data.full_name || ''
       });
     } catch (error) {
-      setProfile(null);
-      setImpersonationProfile(null);
+      if (!background) {
+        setProfile(null);
+        setImpersonationProfile(null);
+      }
     } finally {
       if (!background) setLoading(false);
     }
