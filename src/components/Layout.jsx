@@ -135,6 +135,7 @@ const Layout = () => {
       { label: 'Manage Premium', path: '/app/admin/manage-premium' },
       { label: 'Assign Teachers', path: '/app/admin/teacher-assignment' },
       { label: 'Student Reassignments', path: '/app/admin/student-reassignments' },
+      { label: 'Auto Assigned Students', path: '/app/admin/auto-assigned-students' },
       { label: 'Teacher Requests', path: '/app/admin/teacher-requests' },
       { label: 'Teacher Leaves', path: '/app/leaves' },
       { label: 'User Access', path: '/app/admin/user-access' },

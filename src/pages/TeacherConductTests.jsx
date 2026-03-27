@@ -37,9 +37,12 @@ function TeacherConductTests() {
   const [questionsByExamId, setQuestionsByExamId] = useState({});
   const [submissionsByExamId, setSubmissionsByExamId] = useState({});
   const [conductedExamIds, setConductedExamIds] = useState([]);
+  const [conductedTestsByExamId, setConductedTestsByExamId] = useState({});
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [testName, setTestName] = useState('');
+  const [publishForAllStudents, setPublishForAllStudents] = useState(true);
+  const [targetStudentIds, setTargetStudentIds] = useState([]);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
   const selectedStudent = useMemo(
@@ -85,6 +88,18 @@ function TeacherConductTests() {
   useEffect(() => {
     setTestName(selectedExam?.test_name || '');
   }, [selectedExam?.id, selectedExam?.test_name]);
+
+  useEffect(() => {
+    if (!selectedExam?.id) {
+      setPublishForAllStudents(true);
+      setTargetStudentIds([]);
+      return;
+    }
+    const conducted = conductedTestsByExamId[selectedExam.id];
+    const isSelectedAudience = conducted?.audience_mode === 'selected_students';
+    setPublishForAllStudents(!isSelectedAudience);
+    setTargetStudentIds(isSelectedAudience ? (conducted?.target_student_ids || []).map(String) : []);
+  }, [selectedExam?.id, conductedTestsByExamId]);
   const selectedStudentTestwiseResults = useMemo(() => {
     if (!selectedStudentId) return [];
     const rows = [];
@@ -188,10 +203,13 @@ function TeacherConductTests() {
 
       const { data: conductedRows } = await supabase
         .from('teacher_conducted_tests')
-        .select('exam_id')
+        .select('exam_id, created_at, audience_mode, target_student_ids')
         .eq('teacher_id', profile.id);
       const conductedSet = new Set((conductedRows || []).map((r) => r.exam_id));
       setConductedExamIds(Array.from(conductedSet));
+      setConductedTestsByExamId(
+        Object.fromEntries((conductedRows || []).map((row) => [row.exam_id, row])),
+      );
 
       const examMap = {};
       (examRows || []).forEach((e) => {
@@ -352,6 +370,12 @@ function TeacherConductTests() {
     }));
   };
 
+  const toggleTargetStudent = (studentId) => {
+    setTargetStudentIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
   const publishQuestions = async () => {
     if (!selectedCourseId) return;
     setSaving(true);
@@ -372,6 +396,10 @@ function TeacherConductTests() {
 
       if (list.length === 0) {
         throw new Error('Add at least one question before publishing.');
+      }
+
+      if (!publishForAllStudents && targetStudentIds.length === 0) {
+        throw new Error('Select at least one student if this test is not for all assigned students.');
       }
 
       await supabase
@@ -403,27 +431,32 @@ function TeacherConductTests() {
       setAlertModal({
         show: true,
         title: 'Published',
-        message: `Test published successfully. Students can now write exam with strict proctoring.`,
+        message: publishForAllStudents
+          ? 'Test published successfully for all assigned students.'
+          : `Test published successfully for ${targetStudentIds.length} selected student(s).`,
         type: 'success',
       });
       await supabase
         .from('teacher_conducted_tests')
-        .upsert([{ teacher_id: profile.id, exam_id: exam.id }], { onConflict: 'teacher_id,exam_id' });
+        .upsert([
+          {
+            teacher_id: profile.id,
+            exam_id: exam.id,
+            audience_mode: publishForAllStudents ? 'all_assigned' : 'selected_students',
+            target_student_ids: publishForAllStudents ? [] : targetStudentIds,
+          },
+        ], { onConflict: 'teacher_id,exam_id' });
 
-      const { data: assignedStudents } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'student')
-        .eq('assigned_teacher_id', profile.id);
+      const notificationStudentIds = publishForAllStudents ? students.map((student) => student.id) : targetStudentIds;
 
-      const studentNotificationRows = (assignedStudents || []).map((student) => ({
+      const studentNotificationRows = notificationStudentIds.map((studentId) => ({
         title: testName?.trim() ? `Test Updated: ${testName.trim()}` : 'Assigned Test Updated',
         content: testName?.trim()
           ? `Your teacher updated and republished "${testName.trim()}". You can write the test now.`
           : 'Your teacher updated and republished a test. You can write the test now.',
         type: 'info',
         target_role: 'student',
-        target_user_id: student.id,
+        target_user_id: studentId,
       }));
 
       if (studentNotificationRows.length > 0) {
@@ -451,7 +484,7 @@ function TeacherConductTests() {
 
       await sendAdminNotification({
         title: 'Teacher Published Test',
-        content: `${profile?.full_name || 'Teacher'} published ${testName?.trim() ? `"${testName.trim()}"` : 'a test'} for assigned students.`,
+        content: `${profile?.full_name || 'Teacher'} published ${testName?.trim() ? `"${testName.trim()}"` : 'a test'} ${publishForAllStudents ? 'for all assigned students' : `for ${targetStudentIds.length} selected student(s)`}.`,
         admin_id: profile?.id || null,
       });
     } catch (err) {
@@ -520,8 +553,8 @@ function TeacherConductTests() {
             <h2 className="font-semibold text-slate-800">Test Builder</h2>
           </div>
 
-          {!selectedStudent ? (
-            <p className="text-sm text-slate-500">Select a student to start creating a test.</p>
+          {students.length === 0 ? (
+            <p className="text-sm text-slate-500">No assigned students available for test publishing.</p>
           ) : availableCourses.length === 0 ? (
             <p className="text-sm text-slate-500">
               No course buckets are available yet. Add at least one course in admin panel so teacher tests can be created for assigned students.
@@ -531,8 +564,48 @@ function TeacherConductTests() {
               <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Test Audience</label>
-                  <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
-                    Published tests will be available to all students assigned to you, even if they are not enrolled in a course.
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 space-y-3">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={publishForAllStudents}
+                        onChange={(e) => setPublishForAllStudents(e.target.checked)}
+                      />
+                      <span className="font-medium">This test is for all assigned students</span>
+                    </label>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!publishForAllStudents}
+                          onChange={(e) => setPublishForAllStudents(!e.target.checked)}
+                        />
+                        <span className="font-medium">Check for whom this test is</span>
+                      </label>
+                      {!publishForAllStudents ? (
+                        <div className="mt-3 space-y-2 max-h-44 overflow-auto pr-1">
+                          {students.map((student) => (
+                            <label key={student.id} className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={targetStudentIds.includes(student.id)}
+                                onChange={() => toggleTargetStudent(student.id)}
+                                className="mt-1"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">{student.full_name || 'Student'}</span>
+                                <span className="block text-xs text-slate-500">{student.email}</span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {publishForAllStudents
+                        ? 'This test will be visible to all students assigned to you.'
+                        : `This test will be visible only to ${targetStudentIds.length} selected student(s).`}
+                    </p>
                   </div>
                 </div>
                 <div className="text-xs text-slate-600">

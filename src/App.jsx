@@ -105,6 +105,7 @@ import AdminAccessCodes from './pages/AdminAccessCodes';
 import AdminLiveExamBookingControls from './pages/AdminLiveExamBookingControls';
 import AdminChooseMeet from './pages/AdminChooseMeet';
 import ClassFeedback from './pages/ClassFeedback';
+import AdminAutoAssignedStudents from './pages/AdminAutoAssignedStudents';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -373,6 +374,7 @@ function App() {
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />
           <Route path="admin/teacher-assignment" element={<AdminRoute><TeacherAssignment /></AdminRoute>} />
           <Route path="admin/student-reassignments" element={<AdminRoute><AdminStudentReassignments /></AdminRoute>} />
+          <Route path="admin/auto-assigned-students" element={<AdminRoute><AdminAutoAssignedStudents /></AdminRoute>} />
           <Route path="admin/teacher-requests" element={<AdminRoute><AdminTeacherRequests /></AdminRoute>} />
           <Route path="admin/certificate-blocks" element={<AdminRoute><CertificateBlocks /></AdminRoute>} />
           <Route path="admin/accounts" element={<AdminRoute><AccountManagement /></AdminRoute>} />

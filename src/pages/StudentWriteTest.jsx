@@ -39,10 +39,15 @@ export default function StudentWriteTest() {
 
         const { data: conductedTests } = await supabase
           .from('teacher_conducted_tests')
-          .select('exam_id, created_at')
+          .select('exam_id, created_at, audience_mode, target_student_ids')
           .eq('teacher_id', profile.assigned_teacher_id);
 
-        const examIds = Array.from(new Set((conductedTests || []).map((row) => row.exam_id).filter(Boolean)));
+        const visibleConductedTests = (conductedTests || []).filter((row) => {
+          if ((row.audience_mode || 'all_assigned') === 'all_assigned') return true;
+          return Array.isArray(row.target_student_ids) && row.target_student_ids.map(String).includes(String(profile.id));
+        });
+
+        const examIds = Array.from(new Set(visibleConductedTests.map((row) => row.exam_id).filter(Boolean)));
         if (examIds.length === 0) {
           if (mounted) setRows([]);
           return;
@@ -79,7 +84,7 @@ export default function StudentWriteTest() {
           courseMap[c.id] = c;
         });
         const publishedAtByExam = {};
-        (conductedTests || []).forEach((row) => {
+        visibleConductedTests.forEach((row) => {
           if (!publishedAtByExam[row.exam_id]) {
             publishedAtByExam[row.exam_id] = row.created_at || null;
           }

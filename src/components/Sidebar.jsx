@@ -676,6 +676,10 @@ const Sidebar = () => {
               <Users size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Student Reassign</span>}
             </NavLink>
+            <NavLink to="/app/admin/auto-assigned-students" className={navItemClass} title="Auto Assigned Students">
+              <Users size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Auto Assigned</span>}
+            </NavLink>
             <NavLink to="/app/admin/teacher-requests" className={navItemClass} title="Teacher Requests">
               <Users size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Teacher Requests</span>}

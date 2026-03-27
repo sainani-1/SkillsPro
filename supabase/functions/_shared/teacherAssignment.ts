@@ -82,6 +82,41 @@ export async function assignBalancedTeacherToStudent(adminClient: SupabaseLikeCl
 
   if (assignmentError) throw assignmentError;
 
+  const assignedAt = new Date().toISOString();
+  await adminClient
+    .from("teacher_assignments")
+    .update({ active: false })
+    .eq("student_id", student.id)
+    .eq("active", true);
+
+  const { data: existingAssignment } = await adminClient
+    .from("teacher_assignments")
+    .select("id")
+    .eq("student_id", student.id)
+    .eq("teacher_id", selectedTeacher.id)
+    .maybeSingle();
+
+  if (existingAssignment?.id) {
+    await adminClient
+      .from("teacher_assignments")
+      .update({
+        active: true,
+        assigned_at: assignedAt,
+        assigned_by: null,
+      })
+      .eq("id", existingAssignment.id);
+  } else {
+    await adminClient
+      .from("teacher_assignments")
+      .insert({
+        teacher_id: selectedTeacher.id,
+        student_id: student.id,
+        assigned_by: null,
+        assigned_at: assignedAt,
+        active: true,
+      });
+  }
+
   return {
     assignedTeacherId: selectedTeacher.id,
     teacher: selectedTeacher,
