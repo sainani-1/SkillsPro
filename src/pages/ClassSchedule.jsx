@@ -35,6 +35,7 @@ const ClassSchedule = () => {
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [deleteModal, setDeleteModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
+  const [endModal, setEndModal] = useState({ show: false, sessionId: null, sessionTitle: '' });
   const [nowTick, setNowTick] = useState(Date.now());
   const [pickerState, setPickerState] = useState({
     open: false,
@@ -234,10 +235,47 @@ const ClassSchedule = () => {
     return new Date(start.getTime() + 60 * 60 * 1000);
   };
 
+  const hasSessionEnded = (session) => session?.status === 'ended';
+
   const isSessionCompleted = (session) => {
     // nowTick forces re-render and status recomputation every minute.
     void nowTick;
-    return new Date() >= getSessionEndTime(session);
+    return hasSessionEnded(session) || new Date() >= getSessionEndTime(session);
+  };
+
+  const endSession = async () => {
+    const sessionId = endModal.sessionId;
+    setEndModal({ show: false, sessionId: null, sessionTitle: '' });
+    if (!sessionId) return;
+
+    try {
+      const { error } = await supabase
+        .from('class_sessions')
+        .update({
+          status: 'ended',
+          ends_at: new Date().toISOString()
+        })
+        .eq('id', sessionId);
+
+      if (error) throw error;
+
+      setAlertModal({
+        show: true,
+        title: 'Session Ended',
+        message: 'The session is now marked as completed for students.',
+        type: 'success'
+      });
+
+      loadSessions();
+    } catch (error) {
+      console.error('Error ending session:', error);
+      setAlertModal({
+        show: true,
+        title: 'Error',
+        message: 'Failed to end session.',
+        type: 'error'
+      });
+    }
   };
 
   const deleteSession = async () => {
@@ -601,7 +639,7 @@ const ClassSchedule = () => {
                       : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
                   }`}
                 >
-                  <div className="font-semibold text-sm">Jitsi Meet</div>
+                  <div className="font-semibold text-sm">SkillPro Live</div>
                   <div className="text-xs text-slate-500">Our Platform</div>
                 </button>
                 <button
@@ -629,7 +667,7 @@ const ClassSchedule = () => {
               )}
               {meetingType === 'jitsi' && (
                 <p className="text-xs text-green-600 mt-2">
-                  ✓ Meeting room will be automatically created with Jitsi
+                  ✓ Meeting room will be automatically created with SkillPro Live
                 </p>
               )}
             </div>
@@ -867,7 +905,7 @@ const ClassSchedule = () => {
               const start = new Date(session.scheduled_for);
               const end = getSessionEndTime(session);
               const now = new Date();
-              const canJoinNow = profile.role === 'admin' || ((isStudent || isTeacher) ? (now >= start && now < end) : now < end);
+              const canJoinNow = !hasSessionEnded(session) && (profile.role === 'admin' || ((isStudent || isTeacher) ? (now >= start && now < end) : now < end));
               return (
             <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg hover:shadow-md transition">
               <div className="flex items-center gap-3">
@@ -903,7 +941,7 @@ const ClassSchedule = () => {
                     })}
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
-                    {session.meeting_type === 'jitsi' ? '🟢 Jitsi Meet' : '🔗 External Platform'}
+                    {session.meeting_type === 'jitsi' ? '🟢 SkillPro Live' : '🔗 External Platform'}
                   </p>
                 </div>
               </div>
@@ -943,6 +981,15 @@ const ClassSchedule = () => {
                     <ExternalLink size={18} />
                     {canJoinNow ? 'Open Link' : 'Available at Scheduled Time'}
                   </a>
+                )}
+                {(profile.role === 'teacher' || profile.role === 'admin') && (
+                  <button
+                    onClick={() => setEndModal({ show: true, sessionId: session.id, sessionTitle: session.title })}
+                    className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-amber-700 transition"
+                    title="End Session"
+                  >
+                    End
+                  </button>
                 )}
                 {(profile.role === 'teacher' || profile.role === 'admin') && (
                   <button
@@ -1050,6 +1097,38 @@ const ClassSchedule = () => {
                 className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {endModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-start gap-4">
+              <div className="bg-amber-100 p-3 rounded-full">
+                <Clock className="text-amber-600" size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900 mb-2">End Session</h3>
+                <p className="text-gray-600 mb-1">Are you sure you want to end this session now?</p>
+                <p className="text-sm font-semibold text-gray-800 mb-4">"{endModal.sessionTitle}"</p>
+                <p className="text-sm text-amber-700">Students will immediately see this session as completed.</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setEndModal({ show: false, sessionId: null, sessionTitle: '' })}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={endSession}
+                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium transition"
+              >
+                End Session
               </button>
             </div>
           </div>

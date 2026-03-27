@@ -13,6 +13,8 @@ const LiveClass = () => {
   const navigate = useNavigate();
   const jitsiContainerRef = useRef(null);
   const jitsiApiRef = useRef(null);
+  const meetingWindowRef = useRef(null);
+  const meetingWindowPollRef = useRef(null);
   const { openPopup, popupNode } = usePopup();
   const { confirm, dialogNode } = useDialog();
   const [session, setSession] = useState(null);
@@ -25,11 +27,56 @@ const LiveClass = () => {
   const isSessionStartReached = sessionStartTime ? new Date() >= sessionStartTime : false;
   const getJitsiRoomName = (sessionRow) => `SkillPro_Session_${sessionRow.id}_${sessionRow.title?.replace(/\s+/g, '_') || 'Class'}`;
   const getJitsiRoomUrl = (sessionRow) => `https://meet.jit.si/${encodeURIComponent(getJitsiRoomName(sessionRow))}`;
+  const getReturnRoute = () => {
+    if (profile?.role === 'student') return '/app/class-schedule';
+    if (profile?.role === 'teacher') return '/app/attendance';
+    return '/app';
+  };
 
   const getSessionEndTime = (sessionRow) => {
     if (sessionRow?.ends_at) return new Date(sessionRow.ends_at);
     const start = new Date(sessionRow.scheduled_for);
     return new Date(start.getTime() + 60 * 60 * 1000);
+  };
+
+  const clearMeetingWindowWatcher = () => {
+    if (meetingWindowPollRef.current) {
+      clearInterval(meetingWindowPollRef.current);
+      meetingWindowPollRef.current = null;
+    }
+  };
+
+  const redirectBackToApp = () => {
+    clearMeetingWindowWatcher();
+    navigate(getReturnRoute());
+  };
+
+  const openJitsiMeetingWindow = (roomUrl) => {
+    clearMeetingWindowWatcher();
+
+    const openedWindow = window.open(roomUrl, '_blank', 'noopener,noreferrer');
+
+    if (!openedWindow) {
+      openPopup(
+        'Popup Blocked',
+        'SkillPro Live could not open in a new tab. Please allow popups for this site and try again.',
+        'warning'
+      );
+      return false;
+    }
+
+    meetingWindowRef.current = openedWindow;
+    setMeetingStarted(true);
+
+    meetingWindowPollRef.current = setInterval(() => {
+      if (meetingWindowRef.current?.closed) {
+        meetingWindowRef.current = null;
+        clearMeetingWindowWatcher();
+        redirectBackToApp();
+      }
+    }, 1000);
+
+    return true;
   };
 
   useEffect(() => {
@@ -167,12 +214,11 @@ const LiveClass = () => {
 
       setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
     } else if (session.status !== 'live') {
-      openPopup('Please Wait', 'Only the teacher can start this Jitsi class. You can join after the teacher starts it.', 'info');
+      openPopup('Please Wait', 'Only the teacher can start this SkillPro Live class. You can join after the teacher starts it.', 'info');
       return;
     }
 
-    window.location.assign(getJitsiRoomUrl(session));
-    setMeetingStarted(true);
+    openJitsiMeetingWindow(getJitsiRoomUrl(session));
   };
 
   const handleExternalLink = () => {
@@ -206,22 +252,33 @@ const LiveClass = () => {
         console.error('Error ending session:', error);
       }
 
-      // Dispose Jitsi meeting
+      // Dispose meeting state
       if (jitsiApiRef.current) {
         jitsiApiRef.current.dispose();
+      }
+
+      if (meetingWindowRef.current && !meetingWindowRef.current.closed) {
+        meetingWindowRef.current.close();
+        meetingWindowRef.current = null;
       }
 
       setSessionEnded(true);
       
       // Redirect after 3 seconds
       setTimeout(() => {
-        navigate('/app');
+        redirectBackToApp();
       }, 3000);
     } catch (error) {
       console.error('Error ending session:', error);
       openPopup('End failed', 'Failed to end session.', 'error');
     }
   };
+
+  useEffect(() => {
+    return () => {
+      clearMeetingWindowWatcher();
+    };
+  }, []);
 
   if (loading) {
     return <LoadingSpinner message="Loading class session..." />;
@@ -321,7 +378,7 @@ const LiveClass = () => {
                   </h2>
                   <p className="text-slate-400 mb-3">
                     {isSessionStartReached
-                      ? `Start the Jitsi meeting for ${session.title}. Students can join once you start it.`
+                      ? `Start the SkillPro Live meeting for ${session.title}. Students can join once you start it.`
                       : `You can start this class only at the scheduled time: ${sessionStartTime?.toLocaleString('en-IN', {
                           day: '2-digit',
                           month: '2-digit',
@@ -366,7 +423,7 @@ const LiveClass = () => {
                 <>
                   <h2 className="text-white text-2xl font-bold mb-4">Waiting for Teacher</h2>
                   <p className="text-slate-400 mb-3">
-                    Only the teacher can start this Jitsi meeting.
+                    Only the teacher can start this SkillPro Live meeting.
                   </p>
                   <p className="text-slate-500 mb-8">
                     This page will refresh automatically and let you join once the class starts.
@@ -389,17 +446,17 @@ const LiveClass = () => {
               <Video className="mx-auto mb-6 text-blue-400" size={72} />
               <h2 className="mb-4 text-3xl font-bold text-white">Meeting Opened in New Tab</h2>
               <p className="mb-4 text-slate-300">
-                Your class is now running on the full Jitsi page, not the demo embed, so it should not hit that 5-minute embedded-session cutoff.
+                Your class is now running on the full SkillPro Live meeting page, so it should not hit that 5-minute embedded-session cutoff.
               </p>
               <p className="mb-8 text-slate-400">
-                If the meeting did not open, use the button below to go to the Jitsi room directly.
+                If the meeting did not open, use the button below to go to the SkillPro Live room directly.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-4">
                 <button
-                  onClick={() => window.location.assign(getJitsiRoomUrl(session))}
+                  onClick={() => openJitsiMeetingWindow(getJitsiRoomUrl(session))}
                   className="rounded-2xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
                 >
-                  Open Jitsi Meeting
+                  Open SkillPro Live
                 </button>
                 <a
                   href={getJitsiRoomUrl(session)}
@@ -437,7 +494,7 @@ const LiveClass = () => {
       {/* Footer Info */}
       <div className="bg-slate-800 px-6 py-3 flex items-center justify-between">
         <p className="text-slate-400 text-sm">
-          Powered by Jitsi Meet
+          Powered by SkillPro Live
         </p>
         <div className="flex items-center gap-3">
           {(profile.role === 'teacher' || profile.role === 'admin') && meetingStarted && (
@@ -451,10 +508,18 @@ const LiveClass = () => {
           )}
           <button
             onClick={() => {
+              clearMeetingWindowWatcher();
+
               if (jitsiApiRef.current) {
                 jitsiApiRef.current.dispose();
               }
-              navigate('/app');
+
+              if (meetingWindowRef.current && !meetingWindowRef.current.closed) {
+                meetingWindowRef.current.close();
+                meetingWindowRef.current = null;
+              }
+
+              navigate(getReturnRoute());
             }}
             className="text-red-400 hover:text-red-300 flex items-center gap-2"
           >

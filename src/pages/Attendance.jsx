@@ -55,6 +55,45 @@ const Attendance = () => {
     return now >= sessionDate;
   };
 
+  const getSessionEndTime = (session) => {
+    if (!session) return null;
+    if (session.ends_at) return new Date(session.ends_at);
+    const start = new Date(session.scheduled_for);
+    return new Date(start.getTime() + 60 * 60 * 1000);
+  };
+
+  const getTeacherAttendanceStatus = (session, alreadyPosted) => {
+    if (alreadyPosted) {
+      return {
+        label: 'Already Posted',
+        title: 'Attendance already saved for this session'
+      };
+    }
+
+    const now = new Date();
+    const startTime = new Date(session.scheduled_for);
+    const endTime = getSessionEndTime(session);
+
+    if (now < startTime) {
+      return {
+        label: 'Not Yet Started',
+        title: 'Attendance will be available after the scheduled start time'
+      };
+    }
+
+    if (endTime && now >= endTime) {
+      return {
+        label: 'Not Posted',
+        title: 'This session is completed but attendance has not been posted yet'
+      };
+    }
+
+    return {
+      label: 'Mark Attendance',
+      title: 'Mark attendance'
+    };
+  };
+
 
   const loadData = async (options = {}) => {
     const { silent = false } = options;
@@ -64,7 +103,7 @@ const Attendance = () => {
     if (isTeacher || isAdmin) {
       let query = supabase
         .from('class_sessions')
-        .select('*');
+        .select('*, class_session_participants(student_id)');
       
       if (isTeacher) {
         query = query.eq('teacher_id', profile.id);
@@ -848,14 +887,15 @@ const Attendance = () => {
                   {(() => {
                     const sessionKey = `${session.type}-${session.id}`;
                     const alreadyPosted = !!postedSessionKeys[sessionKey];
+                    const statusMeta = getTeacherAttendanceStatus(session, alreadyPosted);
                     const canMarkCurrentSession = canMarkAttendanceNow(session) || isAdmin;
                     const canOpen = canMarkCurrentSession && !(alreadyPosted && !isAdmin);
-                    const buttonText = alreadyPosted && !isAdmin
-                      ? 'Already Posted'
-                      : (canMarkCurrentSession ? 'Mark Attendance' : 'Not Started Yet');
-                    const buttonTitle = alreadyPosted && !isAdmin
-                      ? 'Attendance already saved for this session'
-                      : (canMarkCurrentSession ? 'Mark attendance' : 'Attendance opens after the scheduled session time');
+                    const buttonText = isAdmin
+                      ? (canMarkCurrentSession ? 'Mark Attendance' : 'View Session')
+                      : statusMeta.label;
+                    const buttonTitle = isAdmin
+                      ? (canMarkCurrentSession ? 'Mark attendance' : 'Open session details')
+                      : statusMeta.title;
                     return (
                   <button
                     onClick={() => selectSessionForAttendance(session)}

@@ -69,7 +69,7 @@ const StudentDashboard = () => {
         // Source directly from assigned class sessions so teacher/admin schedules always appear.
         const { data, error } = await supabase
           .from('class_sessions')
-          .select('id, title, scheduled_for, created_at, meeting_type, meeting_link, class_session_participants!inner(student_id)')
+          .select('id, title, scheduled_for, created_at, meeting_type, meeting_link, status, class_session_participants!inner(student_id)')
           .eq('class_session_participants.student_id', profile.id)
           .gte('scheduled_for', new Date().toISOString())
           .order('scheduled_for', { ascending: true })
@@ -80,7 +80,7 @@ const StudentDashboard = () => {
           return;
         }
 
-        const alerts = (data || []).map((session) => ({
+        const alerts = (data || []).filter((session) => session.status !== 'ended').map((session) => ({
           id: session.id,
           title: `Class Scheduled: ${session.title}`,
           scheduled_for: session.scheduled_for,
