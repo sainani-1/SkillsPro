@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -20,6 +20,7 @@ const Sidebar = () => {
   const [newLeaveRequests, setNewLeaveRequests] = useState(0);
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
+  const [newMultiSessionAlerts, setNewMultiSessionAlerts] = useState(0);
   const isMissingTargetUserColumn = (err) => {
     const msg = String(err?.message || '').toLowerCase();
     const details = String(err?.details || '').toLowerCase();
@@ -66,6 +67,44 @@ const Sidebar = () => {
     };
     fetchNewGuidanceRequests();
     const interval = setInterval(fetchNewGuidanceRequests, 30000);
+    return () => clearInterval(interval);
+  }, [profile?.id, role, location.pathname]);
+
+  useEffect(() => {
+    if (!profile?.id || role !== 'admin') return;
+
+    const fetchNewMultiSessionAlerts = async () => {
+      try {
+        const lastSeenKey = `lastSeenMultiSessionAlerts_${profile.id}`;
+        const lastSeen = localStorage.getItem(lastSeenKey);
+
+        if (location.pathname === '/app/admin/multi-session-alerts') {
+          localStorage.setItem(lastSeenKey, new Date().toISOString());
+          setNewMultiSessionAlerts(0);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('multi_session_alerts')
+          .select('id, created_at, admin_status')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const pendingRows = (data || []).filter((row) => row.admin_status === 'new');
+        if (lastSeen) {
+          const newCount = pendingRows.filter((row) => new Date(row.created_at) > new Date(lastSeen)).length;
+          setNewMultiSessionAlerts(newCount);
+        } else {
+          setNewMultiSessionAlerts(pendingRows.length);
+        }
+      } catch {
+        setNewMultiSessionAlerts(0);
+      }
+    };
+
+    fetchNewMultiSessionAlerts();
+    const interval = setInterval(fetchNewMultiSessionAlerts, 30000);
     return () => clearInterval(interval);
   }, [profile?.id, role, location.pathname]);
 
@@ -714,6 +753,15 @@ const Sidebar = () => {
               <Bell size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Post Notifications</span>}
             </NavLink>
+            <NavLink to="/app/admin/multi-session-alerts" className={navItemClass} title="Multi Session Alerts">
+              <ShieldAlert size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Multi Session Alerts</span>}
+              {newMultiSessionAlerts > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {newMultiSessionAlerts > 9 ? '9+' : newMultiSessionAlerts}
+                </span>
+              )}
+            </NavLink>
             <NavLink to="/app/admin/courses" className={navItemClass} title="Courses">
               <BookOpen size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Courses</span>}
@@ -777,6 +825,10 @@ const Sidebar = () => {
             <NavLink to="/app/admin/mfa-management" className={navItemClass} title="MFA Management">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">MFA Management</span>}
+            </NavLink>
+            <NavLink to="/app/admin/mfa-rules" className={navItemClass} title="MFA Rules">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">MFA Rules</span>}
             </NavLink>
             <NavLink to="/app/admin/deleted-accounts" className={navItemClass} title="Deleted Accounts">
               <Trash2 size={28} />

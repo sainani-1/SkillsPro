@@ -10,6 +10,7 @@ import Layout from './components/Layout';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAdminMFA from './components/RequireAdminMFA';
 import RequireSensitiveAdminMFA from './components/RequireSensitiveAdminMFA';
+import RequireConfiguredSensitiveAdminMFA from './components/RequireConfiguredSensitiveAdminMFA';
 import { supabase } from './supabaseClient';
 import AdminMFASetup from "./pages/AdminMFASetup";
 import AdminMFAVerify from "./pages/AdminMFAVerify";
@@ -106,6 +107,8 @@ import AdminLiveExamBookingControls from './pages/AdminLiveExamBookingControls';
 import AdminChooseMeet from './pages/AdminChooseMeet';
 import ClassFeedback from './pages/ClassFeedback';
 import AdminAutoAssignedStudents from './pages/AdminAutoAssignedStudents';
+import AdminMFARules from './pages/AdminMFARules';
+import AdminMultiSessionAlerts from './pages/AdminMultiSessionAlerts';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -302,7 +305,7 @@ function App() {
         <Route path="*" element={<NotFound />} />
 
         {/* Protected Routes */}
-        <Route path="/app" element={<ProtectedRoute><RequireAdminMFA><Layout /></RequireAdminMFA></ProtectedRoute>}>
+        <Route path="/app" element={<ProtectedRoute><RequireAdminMFA><RequireConfiguredSensitiveAdminMFA><Layout /></RequireConfiguredSensitiveAdminMFA></RequireAdminMFA></ProtectedRoute>}>
                               <Route path="admin/logic-building-setup" element={<AdminRoute><AdminContestSetup /></AdminRoute>} />
                     <Route path="logic-building-contest" element={<LogicBuildingContest />} />
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
@@ -394,6 +397,8 @@ function App() {
           <Route path="admin/issue-reports" element={<AdminRoute><AdminIssueReports /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
+          <Route path="admin/mfa-rules" element={<AdminRoute><RequireSensitiveAdminMFA><AdminMFARules /></RequireSensitiveAdminMFA></AdminRoute>} />
+          <Route path="admin/multi-session-alerts" element={<AdminRoute><AdminMultiSessionAlerts /></AdminRoute>} />
           <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />
           <Route path="admin/startup-ideas" element={<AdminRoute><AdminStartupIdeas /></AdminRoute>} />
           <Route path="admin/startup-collaborations" element={<AdminRoute><AdminStartupCollaborations /></AdminRoute>} />

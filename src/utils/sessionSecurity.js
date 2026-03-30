@@ -3,25 +3,6 @@ import { supabase } from '../supabaseClient';
 const isMissingColumnError = (error, columnName) =>
   String(error?.message || '').toLowerCase().includes(String(columnName || '').toLowerCase());
 
-const pushNotification = async (payload) => {
-  try {
-    const { error } = await supabase.from('admin_notifications').insert(payload);
-    if (error && String(error.message || '').includes('target_user_id')) {
-      const { target_user_id, ...fallback } = payload;
-      const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
-      await supabase.from('admin_notifications').insert({
-        ...fallback,
-        content:
-          marker && !String(fallback.content || '').includes('[target_user_id:')
-            ? `${marker}${fallback.content || ''}`
-            : fallback.content,
-      });
-    }
-  } catch {
-    // Notifications are best-effort only.
-  }
-};
-
 const formatDeviceLine = (label, fallback) => label || fallback || 'Unknown device';
 
 export const reportMultiSessionViolation = async (userProfile, conflictMeta = {}) => {
@@ -97,32 +78,22 @@ Reported automatically to admin. If repeated again, the account can be deactivat
     : 'More than one active session plagiarism detected and reported to admin. If repeated again, your account can be deactivated.';
 
   try {
-    await supabase.from('issue_reports').insert({
-      reporter_id: userProfile.id,
-      reporter_role: userProfile.role,
-      category: 'account',
-      subject,
-      description,
+    await supabase.from('multi_session_alerts').insert({
+      user_id: userProfile.id,
+      full_name: fullName,
+      email,
+      phone: mobileNumber,
+      user_role: userProfile.role,
+      existing_device_label: previousDevice,
+      new_device_label: newDevice,
+      existing_updated_at: conflictMeta?.existingUpdatedAt || null,
+      violation_count: violationCount,
+      is_repeat_offense: isRepeatOffense,
+      admin_status: 'new',
     });
   } catch {
-    // Best effort: admin notification below still provides visibility.
+    // Best effort only.
   }
-
-  await pushNotification({
-    title: isRepeatOffense ? 'Repeated Multi-Session Alert' : 'Multi-Session Alert',
-    content: description,
-    type: isRepeatOffense ? 'error' : 'warning',
-    target_role: 'admin',
-    target_user_id: null,
-  });
-
-  await pushNotification({
-    title: isRepeatOffense ? 'Repeated Session Violation' : 'Session Violation Warning',
-    content: userMessage,
-    type: isRepeatOffense ? 'error' : 'warning',
-    target_role: 'all',
-    target_user_id: userProfile.id,
-  });
 
   return {
     count: violationCount,

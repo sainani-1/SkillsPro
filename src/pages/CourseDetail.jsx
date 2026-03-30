@@ -271,6 +271,7 @@ const writeVideoProgress = (userId, courseId, payload) => {
 const CourseDetail = () => {
   const { courseId } = useParams();
   const [activeTab, setActiveTab] = useState(() => readBrowserState(`${COURSE_TAB_KEY_PREFIX}${courseId}`, 'overview'));
+  const [activeNoteIndex, setActiveNoteIndex] = useState(0);
   const [course, setCourse] = useState(null);
   const [protectedAssets, setProtectedAssets] = useState(null);
   const [enrolled, setEnrolled] = useState(false);
@@ -300,6 +301,10 @@ const CourseDetail = () => {
     resumeAppliedRef.current = false;
     lastSavedTimeRef.current = 0;
   }, [courseId, protectedAssets?.video_url]);
+
+  useEffect(() => {
+    setActiveNoteIndex(0);
+  }, [courseId, protectedAssets?.notes_url, protectedAssets?.notes_urls]);
 
   useEffect(() => {
     const progress = readVideoProgress(profile?.id || user?.id, courseId);
@@ -468,7 +473,21 @@ const CourseDetail = () => {
   };
 
   const videoSource = useMemo(() => parseVideoSource(protectedAssets?.video_url), [protectedAssets?.video_url]);
-  const notesSource = useMemo(() => parseNotesSource(protectedAssets?.notes_url), [protectedAssets?.notes_url]);
+  const notesSources = useMemo(() => {
+    const rawNotes = Array.isArray(protectedAssets?.notes_urls) && protectedAssets.notes_urls.length > 0
+      ? protectedAssets.notes_urls
+      : protectedAssets?.notes_url
+        ? [protectedAssets.notes_url]
+        : [];
+
+    return rawNotes
+      .map((rawValue, index) => {
+        const parsed = parseNotesSource(rawValue);
+        return parsed ? { ...parsed, label: `Note ${index + 1}` } : null;
+      })
+      .filter(Boolean);
+  }, [protectedAssets?.notes_url, protectedAssets?.notes_urls]);
+  const activeNote = notesSources[activeNoteIndex] || null;
 
   const persistVideoProgress = (currentTime, duration) => {
     const safeCurrentTime = Number.isFinite(currentTime) ? currentTime : 0;
@@ -853,21 +872,60 @@ const CourseDetail = () => {
                       </div>
                     ) : assetsLoading ? (
                       <LoadingSpinner message="Loading protected notes..." />
-                    ) : notesSource?.blocked ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
-                        <ShieldAlert size={28} className="mx-auto text-amber-600" />
-                        <p className="mt-3 font-semibold text-amber-900">Protected notes blocked</p>
-                        <p className="mt-1 text-sm text-amber-800">{notesSource.message}</p>
+                    ) : activeNote?.blocked ? (
+                      <div className="space-y-4">
+                        {notesSources.length > 1 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {notesSources.map((note, index) => (
+                              <button
+                                key={note.label}
+                                type="button"
+                                onClick={() => setActiveNoteIndex(index)}
+                                className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${
+                                  index === activeNoteIndex
+                                    ? 'border-blue-600 bg-blue-600 text-white'
+                                    : 'border-slate-300 text-slate-700 hover:border-slate-400 hover:text-slate-900'
+                                }`}
+                              >
+                                {note.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+                          <ShieldAlert size={28} className="mx-auto text-amber-600" />
+                          <p className="mt-3 font-semibold text-amber-900">Protected notes blocked</p>
+                          <p className="mt-1 text-sm text-amber-800">{activeNote.message}</p>
+                        </div>
                       </div>
-                    ) : notesSource ? (
+                    ) : activeNote ? (
                       <div className="space-y-4">
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                           Notes are previewed inside SkillPro only. Direct download and print actions are intentionally removed.
                         </div>
+                        {notesSources.length > 1 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {notesSources.map((note, index) => (
+                              <button
+                                key={note.label}
+                                type="button"
+                                onClick={() => setActiveNoteIndex(index)}
+                                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${
+                                  index === activeNoteIndex
+                                    ? 'border-blue-600 bg-blue-600 text-white'
+                                    : 'border-slate-300 text-slate-700 hover:border-slate-400 hover:text-slate-900'
+                                }`}
+                              >
+                                <FileText size={16} />
+                                {note.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                         <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-950">
                           <iframe
-                            title={`${course.title} notes`}
-                            src={notesSource.src}
+                            title={`${course.title} ${activeNote.label}`}
+                            src={activeNote.src}
                             className="h-[70vh] w-full bg-white"
                             sandbox="allow-same-origin allow-scripts"
                           />

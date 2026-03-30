@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../context/AuthContext';
 import { Unlock, Clock, CheckCircle, Search, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 /**
  * AdminExamRetakes Component
@@ -17,6 +19,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
  * - Search students by name or email
  */
 const AdminExamRetakes = () => {
+  const { profile } = useAuth();
   const { popupNode, openPopup } = usePopup();
   const [lockedStudents, setLockedStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -211,6 +214,17 @@ const AdminExamRetakes = () => {
         })
       );
       openPopup('Permission Granted', 'Student can now retake the exam immediately!', 'success');
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Allowed exam retake again',
+        target: `${userId}:${courseId}`,
+        details: {
+          user_id: userId,
+          course_id: courseId,
+          source: 'admin_exam_retakes',
+          allow_retake_at: new Date().toISOString(),
+        },
+      });
       await loadLockedStudents();
     } catch (error) {
       console.error('Error granting permission:', error);
@@ -245,6 +259,16 @@ const AdminExamRetakes = () => {
         })
       );
       openPopup('Permission Revoked', 'Retake override has been removed', 'success');
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Removed exam retake override',
+        target: `${userId}:${courseId}`,
+        details: {
+          user_id: userId,
+          course_id: courseId,
+          source: 'admin_exam_retakes',
+        },
+      });
       await loadLockedStudents();
     } catch (error) {
       console.error('Error revoking permission:', error);
@@ -284,6 +308,18 @@ const AdminExamRetakes = () => {
         )
       );
       openPopup('Exam Released', 'Student can write the exam again now.', 'success');
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Released terminated exam for rewrite',
+        target: `${student.user_id}:${student.exam_id}`,
+        details: {
+          user_id: student.user_id,
+          exam_id: student.exam_id,
+          course_id: student.course_id || null,
+          source: 'admin_exam_retakes',
+          result,
+        },
+      });
       await loadLockedStudents();
     } catch (error) {
       console.error('Error releasing terminated exam:', error);
@@ -327,6 +363,19 @@ const AdminExamRetakes = () => {
       );
 
       openPopup('Deleted', 'Failed exam record has been deleted.', 'success');
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Deleted failed exam submission',
+        target: `${student.id}:${submission.id}`,
+        details: {
+          user_id: student.id,
+          submission_id: submission.id,
+          exam_id: submission.exam_id,
+          course_id: submission.exam?.course_id || null,
+          source: 'admin_exam_retakes',
+          result,
+        },
+      });
       await loadLockedStudents();
     } catch (error) {
       console.error('Error deleting failed exam record:', error);

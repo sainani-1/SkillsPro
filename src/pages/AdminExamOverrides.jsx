@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { Clock, Plus, Trash2, SlidersHorizontal } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const AdminExamOverrides = () => {
   const { profile } = useAuth();
@@ -105,6 +106,18 @@ const AdminExamOverrides = () => {
 
       if (insertError) throw insertError;
 
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Saved exam retake override',
+        target: `${form.userId}:${form.courseId}`,
+        details: {
+          user_id: form.userId,
+          course_id: form.courseId,
+          allow_retake_at: allowAt.toISOString(),
+          source: 'admin_exam_overrides',
+        },
+      });
+
       setForm(prev => ({ ...prev, days: 60, allowDate: '' }));
       setStudentQuery('');
       const { data: refresh } = await supabase
@@ -122,7 +135,19 @@ const AdminExamOverrides = () => {
   const handleRemove = async (id) => {
     setSaving(true);
     try {
+      const targetRow = overrides.find((row) => row.id === id);
       await supabase.from('exam_retake_overrides').delete().eq('id', id);
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Removed exam retake override',
+        target: String(id),
+        details: {
+          override_id: id,
+          user_id: targetRow?.user_id || null,
+          course_id: targetRow?.course_id || null,
+          source: 'admin_exam_overrides',
+        },
+      });
       setOverrides(prev => prev.filter(o => o.id !== id));
     } catch (err) {
       setError(err.message || 'Failed to delete override.');

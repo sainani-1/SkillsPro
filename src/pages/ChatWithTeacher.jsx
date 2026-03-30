@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { Send, MessageCircle, CheckCircle } from 'lucide-react';
@@ -7,7 +7,9 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { markChatAsRead } from '../utils/chatReadState';
 
 const ChatWithTeacher = () => {
-  const { profile, realProfile, isImpersonating } = useAuth();
+  const ADMIN_USER_ACCESS_TARGET_KEY = 'admin_user_access_target';
+  const navigate = useNavigate();
+  const { profile, realProfile, isImpersonating, stopImpersonation } = useAuth();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [groupId, setGroupId] = useState(null);
@@ -334,6 +336,21 @@ const ChatWithTeacher = () => {
     return <LoadingSpinner message="Setting up your chat..." />;
   }
 
+  const openAdminChatMonitor = () => {
+    const targetUserId = profile?.id;
+    try {
+      if (targetUserId) {
+        sessionStorage.setItem(ADMIN_USER_ACCESS_TARGET_KEY, targetUserId);
+      } else {
+        sessionStorage.removeItem(ADMIN_USER_ACCESS_TARGET_KEY);
+      }
+    } catch {
+      // Ignore storage failures and still navigate.
+    }
+    stopImpersonation();
+    navigate('/app/admin/user-access');
+  };
+
   if (isImpersonating && realProfile?.role === 'admin') {
     return (
       <div className="bg-white rounded-xl p-8 text-center">
@@ -342,12 +359,13 @@ const ChatWithTeacher = () => {
         <p className="text-slate-600 mb-4">
           Admin impersonation keeps the real admin login active, so this page cannot safely create a student chat session.
         </p>
-        <Link
-          to={`/app/admin/user-access/${profile.id}`}
+        <button
+          type="button"
+          onClick={openAdminChatMonitor}
           className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           Open Admin Chat Monitor
-        </Link>
+        </button>
       </div>
     );
   }

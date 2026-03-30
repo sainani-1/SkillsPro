@@ -1,19 +1,180 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Video, Users, Mic, MicOff, VideoOff, PhoneOff, Settings, Monitor, Star } from 'lucide-react';
+import {
+  Video,
+  PhoneOff,
+  Monitor,
+  Star,
+  Copy,
+  ExternalLink,
+  CalendarDays,
+  ShieldCheck,
+  Sparkles,
+  ChevronRight,
+  GraduationCap,
+  Clock3,
+  LayoutGrid,
+  Mail,
+  PanelRightOpen,
+  PanelRightClose,
+} from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 import useDialog from '../hooks/useDialog.jsx';
 import LiveKitClassSession from '../components/LiveKitClassSession';
 import { getLiveKitTokenForClassSession } from '../lib/livekitSession';
 
+const formatSessionDateTime = (value) =>
+  new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  });
+
+const buildParticipantInitials = (name = '') =>
+  String(name)
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk[0]?.toUpperCase() || '')
+    .join('') || 'SP';
+
+const ParticipantDrawer = ({
+  participant,
+  currentRole,
+  roomUrl,
+  onClose,
+  onCopy,
+  onOpenProfile,
+  onAttendance,
+}) => {
+  if (!participant) return null;
+
+  const isAdmin = currentRole === 'admin';
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm">
+      <button type="button" className="flex-1 cursor-default" onClick={onClose} aria-label="Close participant drawer" />
+      <aside className="h-full w-full max-w-md border-l border-white/10 bg-slate-950/95 p-6 text-white shadow-[0_24px_80px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">Participant</p>
+            <h3 className="mt-2 text-2xl font-bold">{participant.full_name || 'Student'}</h3>
+            <p className="mt-2 text-sm text-slate-400">{participant.email || 'No email available'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400 to-blue-600 text-lg font-bold text-white shadow-lg">
+              {buildParticipantInitials(participant.full_name)}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">{participant.full_name || 'SkillPro Participant'}</p>
+              <p className="mt-1 text-xs text-slate-400">{participant.phone || 'Phone not available'}</p>
+            </div>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+            <div className="rounded-2xl border border-white/8 bg-slate-900/70 px-4 py-3">
+              <p className="text-slate-400">Role</p>
+              <p className="mt-1 font-semibold text-white">{participant.role === 'teacher' ? 'Teacher' : 'Student'}</p>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-slate-900/70 px-4 py-3">
+              <p className="text-slate-400">Access</p>
+              <p className="mt-1 font-semibold text-emerald-300">Invited</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-3">
+          <button
+            type="button"
+            onClick={() => onCopy(participant.email, participant.email ? 'Email copied' : 'Email not available')}
+            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:bg-white/[0.08]"
+          >
+            <span className="flex items-center gap-3">
+              <Mail size={18} className="text-cyan-300" />
+              <span>
+                <span className="block text-sm font-semibold text-white">Copy Email</span>
+                <span className="block text-xs text-slate-400">Quickly share or contact this participant</span>
+              </span>
+            </span>
+            <Copy size={16} className="text-slate-400" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onCopy(roomUrl, 'Room link copied')}
+            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:bg-white/[0.08]"
+          >
+            <span className="flex items-center gap-3">
+              <ExternalLink size={18} className="text-violet-300" />
+              <span>
+                <span className="block text-sm font-semibold text-white">Copy Room Link</span>
+                <span className="block text-xs text-slate-400">Share the active SkillPro room if needed</span>
+              </span>
+            </span>
+            <Copy size={16} className="text-slate-400" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onAttendance}
+            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:bg-white/[0.08]"
+          >
+            <span className="flex items-center gap-3">
+              <CalendarDays size={18} className="text-amber-300" />
+              <span>
+                <span className="block text-sm font-semibold text-white">Open Attendance</span>
+                <span className="block text-xs text-slate-400">Jump back to the attendance console</span>
+              </span>
+            </span>
+            <ChevronRight size={16} className="text-slate-400" />
+          </button>
+
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => onOpenProfile(participant.id)}
+              className="flex w-full items-center justify-between rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-left transition hover:bg-cyan-400/15"
+            >
+              <span className="flex items-center gap-3">
+                <ShieldCheck size={18} className="text-cyan-300" />
+                <span>
+                  <span className="block text-sm font-semibold text-white">Open Student Profile</span>
+                  <span className="block text-xs text-slate-300">Review student details in admin view</span>
+                </span>
+              </span>
+              <ChevronRight size={16} className="text-slate-200" />
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-8 rounded-[1.5rem] border border-white/10 bg-slate-900/80 px-4 py-4 text-sm text-slate-300">
+          SkillPro still runs in the separate meeting tab. This drawer adds classroom shortcuts and participant context without changing the meeting behavior.
+        </div>
+      </aside>
+    </div>
+  );
+};
+
 const LiveClass = () => {
   const { sessionId } = useParams();
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const jitsiContainerRef = useRef(null);
   const jitsiApiRef = useRef(null);
   const meetingWindowRef = useRef(null);
   const meetingWindowPollRef = useRef(null);
@@ -21,11 +182,14 @@ const LiveClass = () => {
   const { openPopup, popupNode } = usePopup();
   const { confirm, dialogNode } = useDialog();
   const [session, setSession] = useState(null);
+  const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [meetingStarted, setMeetingStarted] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const [liveKitConnection, setLiveKitConnection] = useState(null);
   const [joiningMeeting, setJoiningMeeting] = useState(false);
+  const [participantsPanelOpen, setParticipantsPanelOpen] = useState(true);
+  const [selectedParticipant, setSelectedParticipant] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState('');
@@ -37,7 +201,8 @@ const LiveClass = () => {
   const isSessionStartReached = sessionStartTime ? new Date() >= sessionStartTime : false;
   const getJitsiRoomName = (sessionRow) => `SkillPro_Session_${sessionRow.id}_${sessionRow.title?.replace(/\s+/g, '_') || 'Class'}`;
   const getJitsiRoomUrl = (sessionRow) => `https://meet.jit.si/${encodeURIComponent(getJitsiRoomName(sessionRow))}`;
-  const getMeetingProviderLabel = (sessionRow) => sessionRow?.meeting_type === 'livekit' ? 'LiveKit' : 'SkillPro Live';
+  const getMeetingProviderLabel = (sessionRow) => sessionRow?.meeting_type === 'external' ? 'External Platform' : 'SkillPro';
+  const sessionRoomUrl = session ? getJitsiRoomUrl(session) : '';
   const getAssignedBreakoutRoomId = (sessionRow) => {
     const breakout = sessionRow?.livekit_controls?.breakout;
     if (!breakout?.active) return '';
@@ -60,6 +225,12 @@ const LiveClass = () => {
     return new Date(start.getTime() + 60 * 60 * 1000);
   };
 
+  const attendeeSummary = useMemo(() => ({
+    total: participants.length,
+    students: participants.filter((item) => item.role !== 'teacher' && item.role !== 'admin').length,
+    withEmail: participants.filter((item) => item.email).length,
+  }), [participants]);
+
   const clearMeetingWindowWatcher = () => {
     if (meetingWindowPollRef.current) {
       clearInterval(meetingWindowPollRef.current);
@@ -70,6 +241,19 @@ const LiveClass = () => {
   const redirectBackToApp = () => {
     clearMeetingWindowWatcher();
     navigate(getReturnRoute());
+  };
+
+  const copyToClipboard = async (value, successMessage = 'Copied') => {
+    if (!value) {
+      openPopup('Nothing to copy', 'The requested value is not available yet.', 'warning');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(String(value));
+      openPopup('Copied', successMessage, 'success');
+    } catch (error) {
+      openPopup('Copy failed', 'Could not copy that value right now.', 'error');
+    }
   };
 
   const cleanupMeetingState = () => {
@@ -151,7 +335,7 @@ const LiveClass = () => {
     if (!openedWindow) {
       openPopup(
         'Popup Blocked',
-        'SkillPro Live could not open in a new tab. Please allow popups for this site and try again.',
+        'SkillPro could not open in a new tab. Please allow popups for this site and try again.',
         'warning'
       );
       return false;
@@ -331,6 +515,21 @@ const LiveClass = () => {
       }
 
       setSession(data);
+      const participantIds = Array.from(
+        new Set((data.class_session_participants || []).map((entry) => entry.student_id).filter(Boolean)),
+      );
+
+      if (participantIds.length > 0) {
+        const { data: participantProfiles, error: participantError } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, phone, role')
+          .in('id', participantIds);
+
+        if (participantError) throw participantError;
+        setParticipants(participantProfiles || []);
+      } else {
+        setParticipants([]);
+      }
       setLoading(false);
     } catch (error) {
       console.error('Error loading session:', error);
@@ -371,7 +570,7 @@ const LiveClass = () => {
 
       setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
     } else if (session.status !== 'live') {
-      openPopup('Please Wait', 'Only the teacher can start this SkillPro Live class. You can join after the teacher starts it.', 'info');
+      openPopup('Please Wait', 'Only the teacher can start this SkillPro class. You can join after the teacher starts it.', 'info');
       setJoiningMeeting(false);
       return;
     }
@@ -414,7 +613,7 @@ const LiveClass = () => {
 
       setSession((prev) => (prev ? { ...prev, status: 'live' } : prev));
     } else if (session.status !== 'live') {
-      openPopup('Please Wait', 'Only the teacher can start this LiveKit class. You can join after the teacher starts it.', 'info');
+      openPopup('Please Wait', 'Only the teacher can start this SkillPro class. You can join after the teacher starts it.', 'info');
       setJoiningMeeting(false);
       return;
     }
@@ -500,6 +699,16 @@ const LiveClass = () => {
       setLiveKitConnection(null);
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedParticipant) return;
+    const stillPresent = participants.find((item) => item.id === selectedParticipant.id);
+    if (!stillPresent) {
+      setSelectedParticipant(null);
+      return;
+    }
+    setSelectedParticipant(stillPresent);
+  }, [participants, selectedParticipant]);
 
   useEffect(() => {
     if (!sessionEnded || profile?.role !== 'student' || feedbackOpen || feedbackSubmitted) return;
@@ -601,9 +810,14 @@ const LiveClass = () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-900 flex flex-col">
+    <div className="fixed inset-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(96,165,250,0.18),_transparent_26%),linear-gradient(180deg,_#020617_0%,_#0f172a_100%)] text-white">
       {popupNode}
       {dialogNode}
+      <div className="pointer-events-none absolute inset-0 opacity-40">
+        <div className="absolute -left-16 top-12 h-56 w-56 rounded-full bg-cyan-400/20 blur-3xl" />
+        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-violet-500/10 blur-3xl" />
+      </div>
       {feedbackOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-6 text-white shadow-2xl">
@@ -652,54 +866,113 @@ const LiveClass = () => {
           </div>
         </div>
       ) : null}
-      {/* Header */}
-      <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-red-500 w-3 h-3 rounded-full animate-pulse"></div>
-          <div>
-            <h1 className="text-white font-bold text-lg">{session.title}</h1>
-            <p className="text-slate-400 text-sm">
-              {new Date(session.scheduled_for).toLocaleString('en-IN', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true,
-                timeZone: 'Asia/Kolkata'
-              })}
-            </p>
+      {selectedParticipant ? (
+        <ParticipantDrawer
+          participant={selectedParticipant}
+          currentRole={profile?.role}
+          roomUrl={sessionRoomUrl}
+          onClose={() => setSelectedParticipant(null)}
+          onCopy={copyToClipboard}
+          onOpenProfile={(studentId) => navigate(`/app/admin/student/${studentId}`)}
+          onAttendance={() => navigate('/app/attendance')}
+        />
+      ) : null}
+      <div className="relative z-10 flex h-full flex-col">
+      <div className="border-b border-white/10 bg-slate-950/55 px-4 py-4 backdrop-blur-xl sm:px-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="mt-1 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-lg shadow-cyan-950/40">
+              <Video size={22} className="text-slate-950" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
+                  <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
+                  Classroom
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-200">
+                  <Sparkles size={14} className="text-cyan-300" />
+                  {getMeetingProviderLabel(session)}
+                </span>
+              </div>
+              <h1 className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl">{session.title}</h1>
+              <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-300">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5">
+                  <CalendarDays size={16} className="text-cyan-300" />
+                  {formatSessionDateTime(session.scheduled_for)}
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5">
+                  <Clock3 size={16} className="text-amber-300" />
+                  Ends {formatSessionDateTime(getSessionEndTime(session))}
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 bg-slate-700 px-4 py-2 rounded-lg">
-            <Users className="text-green-400" size={20} />
-            <span className="text-white text-sm font-semibold">Live</span>
-          </div>
-          {session.meeting_type === 'external' && session.meeting_link && (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="grid min-w-[240px] grid-cols-3 gap-2 rounded-[1.5rem] border border-white/10 bg-white/[0.05] p-2">
+              <div className="rounded-2xl bg-slate-950/70 px-3 py-3 text-center">
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Total</p>
+                <p className="mt-1 text-lg font-bold text-white">{attendeeSummary.total}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-950/70 px-3 py-3 text-center">
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Students</p>
+                <p className="mt-1 text-lg font-bold text-white">{attendeeSummary.students}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-950/70 px-3 py-3 text-center">
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Status</p>
+                <p className="mt-1 text-sm font-bold text-emerald-300">{meetingStarted ? 'Live' : session.status === 'live' ? 'Open' : 'Ready'}</p>
+              </div>
+            </div>
             <button
-              onClick={handleExternalLink}
-              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition"
+              type="button"
+              onClick={() => setParticipantsPanelOpen((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.10]"
             >
-              Open External Link
+              {participantsPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              Participants
             </button>
-          )}
+            {session.meeting_type !== 'external' ? (
+              <button
+                type="button"
+                onClick={() => copyToClipboard(sessionRoomUrl, 'Room link copied')}
+                className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/15"
+              >
+                <Copy size={17} />
+                Copy Room Link
+              </button>
+            ) : null}
+            {session.meeting_type === 'external' && session.meeting_link ? (
+              <button
+                onClick={handleExternalLink}
+                className="rounded-2xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-purple-700"
+              >
+                Open External Link
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      {/* Meeting Area */}
-      <div className="flex-1 relative">
+      <div className="flex min-h-0 flex-1 gap-4 px-4 py-4 sm:px-6">
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/55 shadow-[0_24px_90px_rgba(2,8,23,0.45)] backdrop-blur-xl">
         {/* Ready to Join Screen */}
         {!meetingStarted && ['jitsi', 'livekit'].includes(session.meeting_type) && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center max-w-xl px-6">
-              <Video className="mx-auto mb-6 text-blue-400" size={80} />
+          <div className="absolute inset-0 overflow-y-auto">
+            <div className="mx-auto flex min-h-full max-w-5xl items-center justify-center px-6 py-10">
+              <div className="w-full rounded-[2rem] border border-white/10 bg-[linear-gradient(145deg,rgba(15,23,42,0.95),rgba(15,23,42,0.82))] p-8 shadow-2xl sm:p-10">
+                <div className="grid gap-8 xl:grid-cols-[1.25fr_0.85fr] xl:items-center">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">
+                      <LayoutGrid size={14} />
+                      Live Class Console
+                    </div>
+                    <div className="mt-6 text-left">
               {isTeacherOwner ? (
                 <>
-                  <h2 className="text-white text-2xl font-bold mb-4">
-                    {isSessionStartReached ? 'Start Live Class' : 'Class Not Started Yet'}
+                  <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                    {isSessionStartReached ? 'Launch your classroom' : 'Classroom opens at the scheduled time'}
                   </h2>
-                  <p className="text-slate-400 mb-3">
+                  <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
                     {isSessionStartReached
                       ? `Start the ${getMeetingProviderLabel(session)} meeting for ${session.title}. Students can join once you start it.`
                       : `You can start this class only at the scheduled time: ${sessionStartTime?.toLocaleString('en-IN', {
@@ -713,17 +986,17 @@ const LiveClass = () => {
                         })}`}
                   </p>
                   {!isSessionStartReached && (
-                    <p className="text-slate-500 mb-8">
+                    <p className="mb-8 mt-3 text-slate-500">
                       The start button will be available once the class time begins.
                     </p>
                   )}
                   <button
                     onClick={session.meeting_type === 'livekit' ? startLiveKitMeeting : startJitsiMeeting}
                     disabled={!isSessionStartReached || joiningMeeting}
-                    className={`px-8 py-4 rounded-xl text-lg font-semibold transition shadow-lg ${
+                    className={`mt-4 rounded-2xl px-8 py-4 text-lg font-semibold transition ${
                       isSessionStartReached && !joiningMeeting
-                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/30'
-                        : 'bg-slate-700 text-slate-300 cursor-not-allowed shadow-none'
+                        ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                        : 'cursor-not-allowed bg-slate-700 text-slate-300'
                     }`}
                   >
                     {joiningMeeting ? 'Joining...' : isSessionStartReached ? 'Start Class Now' : 'Available at Scheduled Time'}
@@ -731,15 +1004,15 @@ const LiveClass = () => {
                 </>
               ) : session.status === 'live' && canJoinStartedMeeting ? (
                 <>
-                  <h2 className="text-white text-2xl font-bold mb-4">Ready to Join?</h2>
-                  <p className="text-slate-400 mb-8">
+                  <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Everything is ready to join</h2>
+                  <p className="mb-8 mt-4 max-w-2xl text-base leading-7 text-slate-300">
                     The teacher has started this live class. You can join now.
                   </p>
                   <button
                     onClick={session.meeting_type === 'livekit' ? startLiveKitMeeting : startJitsiMeeting}
                     disabled={joiningMeeting}
-                    className={`px-8 py-4 rounded-xl text-lg font-semibold transition shadow-lg ${
-                      joiningMeeting ? 'bg-slate-700 text-slate-300 cursor-not-allowed shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    className={`rounded-2xl px-8 py-4 text-lg font-semibold transition ${
+                      joiningMeeting ? 'cursor-not-allowed bg-slate-700 text-slate-300' : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
                     }`}
                   >
                     {joiningMeeting ? 'Joining...' : 'Join Class Now'}
@@ -747,51 +1020,142 @@ const LiveClass = () => {
                 </>
               ) : (
                 <>
-                  <h2 className="text-white text-2xl font-bold mb-4">Waiting for Teacher</h2>
-                  <p className="text-slate-400 mb-3">
+                  <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Waiting for the teacher to begin</h2>
+                  <p className="mb-3 mt-4 max-w-2xl text-base leading-7 text-slate-300">
                     Only the teacher can start this {getMeetingProviderLabel(session)} meeting.
                   </p>
-                  <p className="text-slate-500 mb-8">
+                  <p className="mb-8 text-slate-500">
                     This page will refresh automatically and let you join once the class starts.
                   </p>
                   <button
                     onClick={() => loadSession()}
-                    className="bg-slate-700 text-white px-6 py-3 rounded-xl text-base font-semibold hover:bg-slate-600 transition"
+                    className="rounded-2xl bg-white/[0.08] px-6 py-4 text-base font-semibold text-white transition hover:bg-white/[0.14]"
                   >
                     Refresh Status
                   </button>
                 </>
               )}
+                    </div>
+                  </div>
+                  <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-5">
+                    <div className="rounded-[1.5rem] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/60 p-5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">Classroom preview</p>
+                        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                          Standby
+                        </span>
+                      </div>
+                      <div className="mt-5 grid grid-cols-2 gap-3">
+                        {participants.slice(0, 4).map((participant) => (
+                          <button
+                            key={participant.id}
+                            type="button"
+                            onClick={() => setSelectedParticipant(participant)}
+                            className="group rounded-[1.35rem] border border-white/10 bg-white/[0.04] p-4 text-left transition hover:border-cyan-400/30 hover:bg-white/[0.08]"
+                          >
+                            <div className="flex h-28 items-end rounded-[1.1rem] bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.28),_transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.72),rgba(2,8,23,0.95))] p-3">
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.24em] text-cyan-200/80">Participant</p>
+                                <p className="mt-2 text-sm font-semibold text-white">{participant.full_name || 'Student'}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                        {participants.length === 0 ? (
+                          <div className="col-span-2 rounded-[1.35rem] border border-dashed border-white/10 px-4 py-8 text-center text-sm text-slate-400">
+                            Participant cards will appear here once students are assigned.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {meetingStarted && session.meeting_type === 'jitsi' && (
-          <div className="absolute inset-0 flex items-center justify-center px-6">
-            <div className="max-w-2xl rounded-3xl border border-slate-700 bg-slate-800/95 p-10 text-center shadow-2xl">
-              <Video className="mx-auto mb-6 text-blue-400" size={72} />
-              <h2 className="mb-4 text-3xl font-bold text-white">Meeting Opened in New Tab</h2>
-              <p className="mb-4 text-slate-300">
-                Your class is now running on the full SkillPro Live meeting page, so it should not hit that 5-minute embedded-session cutoff.
-              </p>
-              <p className="mb-8 text-slate-400">
-                If the meeting did not open, use the button below to go to the SkillPro Live room directly.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-4">
-                <button
-                  onClick={() => openJitsiMeetingWindow(getJitsiRoomUrl(session))}
-                  className="rounded-2xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
-                >
-                  Open SkillPro Live
-                </button>
-                <a
-                  href={getJitsiRoomUrl(session)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-2xl border border-slate-600 px-6 py-3 font-semibold text-slate-200 transition hover:bg-slate-700"
-                >
-                  Open in Browser
-                </a>
+          <div className="absolute inset-0 overflow-y-auto">
+            <div className="mx-auto flex min-h-full max-w-6xl items-center justify-center px-6 py-10">
+              <div className="grid w-full gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(145deg,rgba(15,23,42,0.95),rgba(8,47,73,0.88))] p-8 shadow-2xl">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
+                      <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
+                      Room Live
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-200">
+                      <ExternalLink size={14} className="text-cyan-300" />
+                      Opened in new tab
+                    </span>
+                  </div>
+                  <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl">SkillPro is running in the full meeting tab</h2>
+                  <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
+                    The actual room stays in a separate browser tab to avoid the embedded-session limit. This classroom console remains here for participants, shortcuts, and session controls.
+                  </p>
+                  <div className="mt-8 flex flex-wrap gap-3">
+                    <button
+                      onClick={() => openJitsiMeetingWindow(sessionRoomUrl)}
+                      className="rounded-2xl bg-cyan-500 px-6 py-4 font-semibold text-slate-950 transition hover:bg-cyan-400"
+                    >
+                      Reopen SkillPro
+                    </button>
+                    <a
+                      href={sessionRoomUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-2xl border border-white/10 px-6 py-4 font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+                    >
+                      Open in Browser
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(sessionRoomUrl, 'Room link copied')}
+                      className="rounded-2xl border border-white/10 px-6 py-4 font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+                    >
+                      Copy Room Link
+                    </button>
+                  </div>
+                </div>
+                <div className="rounded-[2rem] border border-white/10 bg-slate-950/75 p-6 shadow-2xl">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.08]">
+                      <GraduationCap size={22} className="text-cyan-300" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white">Quick actions</p>
+                      <p className="text-sm text-slate-400">Useful tools while the room is open</p>
+                    </div>
+                  </div>
+                  <div className="mt-6 space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/app/attendance')}
+                      className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-left transition hover:bg-white/[0.08]"
+                    >
+                      <span>
+                        <span className="block text-sm font-semibold text-white">Open Attendance</span>
+                        <span className="block text-xs text-slate-400">Manage attendance and teacher flow</span>
+                      </span>
+                      <ChevronRight size={18} className="text-slate-400" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setParticipantsPanelOpen(true)}
+                      className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-left transition hover:bg-white/[0.08]"
+                    >
+                      <span>
+                        <span className="block text-sm font-semibold text-white">Open Participants Rail</span>
+                        <span className="block text-xs text-slate-400">Click any participant to open quick actions</span>
+                      </span>
+                      <ChevronRight size={18} className="text-slate-400" />
+                    </button>
+                    <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-4 text-sm text-cyan-100">
+                      Live video thumbnails and per-participant meeting controls are available in the SkillPro meeting tab itself. This page now gives you a cleaner control console around that room.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -835,31 +1199,87 @@ const LiveClass = () => {
             </div>
           </div>
         )}
+        </div>
+        {participantsPanelOpen && session.meeting_type !== 'livekit' ? (
+          <aside className="hidden w-[360px] flex-shrink-0 overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/70 shadow-[0_24px_90px_rgba(2,8,23,0.45)] backdrop-blur-xl lg:block">
+            <div className="border-b border-white/10 px-5 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">Participants</p>
+                  <h3 className="mt-2 text-xl font-bold text-white">Classroom Rail</h3>
+                </div>
+                <div className="rounded-2xl bg-white/[0.05] px-3 py-2 text-right">
+                  <p className="text-xs text-slate-400">Invited</p>
+                  <p className="text-base font-bold text-white">{attendeeSummary.total}</p>
+                </div>
+              </div>
+            </div>
+            <div className="h-full overflow-y-auto p-4">
+              <div className="space-y-3">
+                {participants.length === 0 ? (
+                  <div className="rounded-[1.5rem] border border-dashed border-white/10 px-4 py-8 text-center text-sm text-slate-400">
+                    No participants assigned yet.
+                  </div>
+                ) : participants.map((participant) => (
+                  <button
+                    key={participant.id}
+                    type="button"
+                    onClick={() => setSelectedParticipant(participant)}
+                    className="group w-full rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4 text-left transition hover:border-cyan-400/30 hover:bg-white/[0.08]"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-cyan-400 to-blue-600 font-bold text-white shadow-lg">
+                        {buildParticipantInitials(participant.full_name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-white">{participant.full_name || 'Student'}</p>
+                          <ChevronRight size={16} className="text-slate-500 transition group-hover:text-cyan-300" />
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-400">{participant.email || 'No email available'}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                            {participant.role || 'student'}
+                          </span>
+                          <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-200">
+                            invited
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </aside>
+        ) : null}
       </div>
 
-      {/* Footer Info */}
-      <div className="bg-slate-800 px-6 py-3 flex items-center justify-between">
-        <p className="text-slate-400 text-sm">
-          Powered by {getMeetingProviderLabel(session)}
-        </p>
-        <div className="flex items-center gap-3">
-          {(profile.role === 'teacher' || profile.role === 'admin') && meetingStarted && (
+      <div className="border-t border-white/10 bg-slate-950/55 px-4 py-4 backdrop-blur-xl sm:px-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-slate-400">
+            Powered by {getMeetingProviderLabel(session)}. Use the participant rail for quick profile and sharing actions.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {(profile.role === 'teacher' || profile.role === 'admin') && meetingStarted && (
+              <button
+                onClick={endSession}
+                className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700"
+              >
+                <PhoneOff size={18} />
+                End Session for All
+              </button>
+            )}
             <button
-              onClick={endSession}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center gap-2 transition"
+              onClick={handleLeaveClassroom}
+              className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-400/15"
             >
               <PhoneOff size={18} />
-              <span>End Session for All</span>
+              Leave Class
             </button>
-          )}
-          <button
-            onClick={handleLeaveClassroom}
-            className="text-red-400 hover:text-red-300 flex items-center gap-2"
-          >
-            <PhoneOff size={18} />
-            <span>Leave Class</span>
-          </button>
+          </div>
         </div>
+      </div>
       </div>
     </div>
   );

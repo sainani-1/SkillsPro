@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import NotesUrlFields from '../components/NotesUrlFields';
 import {
   fetchCourseProtectedAssetsMap,
   mergeCoursesWithProtectedAssets,
@@ -86,6 +87,13 @@ const CATEGORY_IMAGE = {
 };
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=80';
+const EMPTY_NOTES_DRAFT = [''];
+
+const normalizeNotesDraft = (value) => {
+  if (Array.isArray(value) && value.length > 0) return value;
+  if (typeof value === 'string' && value.trim()) return [value];
+  return [...EMPTY_NOTES_DRAFT];
+};
 
 const CourseList = () => {
         const { profile, isPremium } = useAuth();
@@ -100,14 +108,17 @@ const CourseList = () => {
         const [showEditModal, setShowEditModal] = useState(false);
         const [deleteConfirm, setDeleteConfirm] = useState(null);
         const [loading, setLoading] = useState(true);
-        const [newCourse, setNewCourse] = useState(() => readBrowserState(COURSE_FORM_DRAFT_KEY, {
-          title: '',
-          category: '',
-          description: '',
-          video_url: '',
-          notes_url: '',
-          thumbnail_url: ''
-        }));
+        const [newCourse, setNewCourse] = useState(() => {
+          const savedDraft = readBrowserState(COURSE_FORM_DRAFT_KEY, {});
+          return {
+            title: savedDraft.title || '',
+            category: savedDraft.category || '',
+            description: savedDraft.description || '',
+            video_url: savedDraft.video_url || '',
+            notes_urls: normalizeNotesDraft(savedDraft.notes_urls || savedDraft.notes_url),
+            thumbnail_url: savedDraft.thumbnail_url || ''
+          };
+        });
         const [showExamQuestionsModal, setShowExamQuestionsModal] = useState(false);
         const [selectedCourseForExam, setSelectedCourseForExam] = useState(null);
         const [selectedExamId, setSelectedExamId] = useState(null);
@@ -270,7 +281,7 @@ const CourseList = () => {
 
             const savedAssets = await upsertCourseProtectedAssets(data.id, {
               video_url: newCourse.video_url,
-              notes_url: newCourse.notes_url,
+              notes_urls: newCourse.notes_urls,
             });
 
             // Create default exam
@@ -287,7 +298,7 @@ const CourseList = () => {
               category: '',
               description: '',
               video_url: '',
-              notes_url: '',
+              notes_urls: [...EMPTY_NOTES_DRAFT],
               thumbnail_url: ''
             });
             writeBrowserState(COURSE_FORM_DRAFT_KEY, {
@@ -295,7 +306,7 @@ const CourseList = () => {
               category: '',
               description: '',
               video_url: '',
-              notes_url: '',
+              notes_urls: [...EMPTY_NOTES_DRAFT],
               thumbnail_url: ''
             });
             setShowAddCourseModal(false);
@@ -328,7 +339,7 @@ const CourseList = () => {
 
             const savedAssets = await upsertCourseProtectedAssets(editingCourse.id, {
               video_url: editingCourse.video_url,
-              notes_url: editingCourse.notes_url,
+              notes_urls: editingCourse.notes_urls,
             });
 
             setCourses(courses.map(c => (
@@ -818,16 +829,12 @@ const CourseList = () => {
                  </p>
                </div>
 
-               <div>
-                 <label className="block text-sm font-semibold text-slate-700 mb-1">Notes/PDF URL</label>
-                 <input
-                   type="url"
-                   value={newCourse.notes_url}
-                   onChange={(e) => setNewCourse({ ...newCourse, notes_url: e.target.value })}
-                   placeholder="https://example.com/course-notes.pdf"
-                   className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                 />
-               </div>
+               <NotesUrlFields
+                 label="Notes/PDF URLs"
+                 values={normalizeNotesDraft(newCourse.notes_urls)}
+                 onChange={(nextValues) => setNewCourse({ ...newCourse, notes_urls: nextValues })}
+                 placeholder="https://example.com/course-notes.pdf"
+               />
              </div>
 
              <div className="flex gap-3 mt-8">
@@ -917,15 +924,12 @@ const CourseList = () => {
                  </p>
                </div>
 
-               <div>
-                 <label className="block text-sm font-semibold text-slate-700 mb-1">Notes/PDF URL</label>
-                 <input
-                   type="url"
-                   value={editingCourse.notes_url || ''}
-                   onChange={(e) => setEditingCourse({ ...editingCourse, notes_url: e.target.value })}
-                   className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                 />
-               </div>
+               <NotesUrlFields
+                 label="Notes/PDF URLs"
+                 values={normalizeNotesDraft(editingCourse.notes_urls)}
+                 onChange={(nextValues) => setEditingCourse({ ...editingCourse, notes_urls: nextValues })}
+                 placeholder="https://example.com/course-notes.pdf"
+               />
              </div>
 
              <div className="flex gap-3 mt-8">

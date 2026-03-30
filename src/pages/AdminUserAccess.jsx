@@ -14,13 +14,15 @@ const ROLE_OPTIONS = [
   { value: 'all', label: 'All Users' },
 ];
 
+const ADMIN_USER_ACCESS_TARGET_KEY = 'admin_user_access_target';
+
 const AdminUserAccess = () => {
   const navigate = useNavigate();
   const { startImpersonation } = useAuth();
   const { userId } = useParams();
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [roleFilter, setRoleFilter] = useState('student');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -52,11 +54,28 @@ const AdminUserAccess = () => {
   }, []);
 
   useEffect(() => {
-    if (!userId || !users.length) return;
-    const matched = users.find((user) => String(user.id) === String(userId));
+    if (!users.length) return;
+
+    let requestedUserId = userId;
+    if (!requestedUserId) {
+      try {
+        requestedUserId = sessionStorage.getItem(ADMIN_USER_ACCESS_TARGET_KEY) || '';
+      } catch {
+        requestedUserId = '';
+      }
+    }
+
+    if (!requestedUserId) return;
+
+    const matched = users.find((user) => String(user.id) === String(requestedUserId));
     if (matched) {
       setRoleFilter(matched.role || 'all');
       void loadUserAccess(matched.id);
+      try {
+        sessionStorage.removeItem(ADMIN_USER_ACCESS_TARGET_KEY);
+      } catch {
+        // Ignore storage cleanup failures.
+      }
     }
   }, [userId, users]);
 
@@ -138,6 +157,7 @@ const AdminUserAccess = () => {
       setTeacherStudents(teacherStudentsResp.data || []);
 
       const groupIds = (memberGroupsResp.data || []).map((row) => row.group_id).filter(Boolean);
+
       if (groupIds.length === 0) {
         setChatGroups([]);
         return;

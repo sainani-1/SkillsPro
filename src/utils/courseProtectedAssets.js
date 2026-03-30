@@ -6,10 +6,29 @@ const normalizeAssetValue = (value) => {
   return trimmed ? trimmed : null;
 };
 
-export const sanitizeCourseProtectedAssets = (assets = {}) => ({
-  video_url: normalizeAssetValue(assets.video_url),
-  notes_url: normalizeAssetValue(assets.notes_url),
-});
+const normalizeAssetList = (values, fallbackValue) => {
+  const sourceValues = Array.isArray(values)
+    ? values
+    : typeof fallbackValue === 'string'
+      ? [fallbackValue]
+      : [];
+
+  const normalized = sourceValues
+    .map((value) => normalizeAssetValue(value))
+    .filter(Boolean);
+
+  return Array.from(new Set(normalized));
+};
+
+export const sanitizeCourseProtectedAssets = (assets = {}) => {
+  const notes_urls = normalizeAssetList(assets.notes_urls, assets.notes_url);
+
+  return {
+    video_url: normalizeAssetValue(assets.video_url),
+    notes_urls,
+    notes_url: notes_urls[0] || null,
+  };
+};
 
 export const fetchCourseProtectedAssetsMap = async (courseIds = []) => {
   const ids = Array.from(new Set((courseIds || []).filter(Boolean)));
@@ -17,7 +36,7 @@ export const fetchCourseProtectedAssetsMap = async (courseIds = []) => {
 
   const { data, error } = await supabase
     .from('course_protected_assets')
-    .select('course_id, video_url, notes_url')
+    .select('course_id, video_url, notes_url, notes_urls')
     .in('course_id', ids);
 
   if (error) {
@@ -35,7 +54,7 @@ export const fetchCourseProtectedAssets = async (courseId) => {
 
   const { data, error } = await supabase
     .from('course_protected_assets')
-    .select('course_id, video_url, notes_url')
+    .select('course_id, video_url, notes_url, notes_urls')
     .eq('course_id', courseId)
     .maybeSingle();
 
@@ -75,4 +94,5 @@ export const mergeCoursesWithProtectedAssets = (courses = [], assetMap = {}) =>
     ...course,
     video_url: assetMap?.[course.id]?.video_url || '',
     notes_url: assetMap?.[course.id]?.notes_url || '',
+    notes_urls: assetMap?.[course.id]?.notes_urls || [],
   }));

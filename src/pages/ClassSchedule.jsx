@@ -531,7 +531,7 @@ const ClassSchedule = () => {
   };
 
   const isFreeStudent = profile?.role === 'student' && !isPremium(profile);
-  const builtInProviderLabel = configuredMeetingProvider === 'livekit' ? 'LiveKit' : 'SkillPro Live';
+  const builtInProviderLabel = 'SkillPro';
   const isBuiltInProviderLiveKit = configuredMeetingProvider === 'livekit';
 
   if (isFreeStudent) {
@@ -644,9 +644,7 @@ const ClassSchedule = () => {
                 <div className="text-xs text-slate-500">Selected by admin in Choose Meet</div>
               </div>
               <p className={`mt-2 text-xs ${isBuiltInProviderLiveKit ? 'text-emerald-700' : 'text-green-600'}`}>
-                {isBuiltInProviderLiveKit
-                  ? 'LiveKit room will be opened inside SkillPro for this class session.'
-                  : 'Meeting room will be automatically created with SkillPro Live'}
+                Meeting room will be opened inside SkillPro for this class session.
               </p>
               <div className="hidden grid grid-cols-2 gap-3 mb-3">
                 <button
@@ -658,7 +656,7 @@ const ClassSchedule = () => {
                       : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
                   }`}
                 >
-                  <div className="font-semibold text-sm">SkillPro Live</div>
+                  <div className="font-semibold text-sm">SkillPro</div>
                   <div className="text-xs text-slate-500">Our Platform</div>
                 </button>
                 <button
@@ -686,7 +684,7 @@ const ClassSchedule = () => {
               )}
               {false && meetingType === 'jitsi' && (
                 <p className="text-xs text-green-600 mt-2">
-                  ✓ Meeting room will be automatically created with SkillPro Live
+                  ✓ Meeting room will be automatically created with SkillPro
                 </p>
               )}
             </div>
@@ -960,7 +958,7 @@ const ClassSchedule = () => {
                     })}
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
-                    {session.meeting_type === 'jitsi' ? '🟢 SkillPro Live' : '🔗 External Platform'}
+                    {(session.meeting_type === 'jitsi' || session.meeting_type === 'livekit') ? '🟢 SkillPro' : '🔗 External Platform'}
                   </p>
                 </div>
               </div>

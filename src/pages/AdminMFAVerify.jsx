@@ -4,6 +4,8 @@ import { supabase } from "../supabaseClient";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AlertModal from "../components/AlertModal";
 import Toast from "../components/Toast";
+import { useAuth } from "../context/AuthContext";
+import { LogOut, ShieldCheck, ArrowLeft } from "lucide-react";
 
 export default function AdminMFAVerify() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
@@ -14,10 +16,11 @@ export default function AdminMFAVerify() {
   const inputRefs = useRef([]);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { signOut } = useAuth();
 
   const codeStr = code.join("");
-  const scope = searchParams.get("scope") || "";
-  const nextPath = searchParams.get("next") || "/app";
+      const scope = searchParams.get("scope") || "";
+      const nextPath = searchParams.get("next") || "/app";
   const isSensitivePasswordScope = scope === "sensitive-passwords";
 
   const resetCodeAndFocusFirst = () => {
@@ -135,6 +138,7 @@ export default function AdminMFAVerify() {
         if (isSensitivePasswordScope) {
           sessionStorage.setItem("admin_sensitive_mfa_verified_user", userResp.user.id);
           sessionStorage.setItem("admin_sensitive_mfa_verified_at", String(Date.now()));
+          sessionStorage.setItem("admin_sensitive_mfa_verified_target", nextPath);
         }
       }
       setToast({
@@ -152,24 +156,71 @@ export default function AdminMFAVerify() {
     }
   };
 
+  const handleLogout = async () => {
+    await signOut();
+  };
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-blue-200 px-4">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.18),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(37,99,235,0.18),_transparent_26%),linear-gradient(180deg,_#eff6ff_0%,_#dbeafe_48%,_#bfdbfe_100%)] px-4 py-8">
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />
       <AlertModal show={alert.show} title={alert.title} message={alert.message} type={alert.type} onClose={() => setAlert({ ...alert, show: false })} />
-      <div className="flex flex-col items-center mb-8">
-        <div className="w-20 h-20 rounded-full border-2 border-blue-400/50 bg-white flex items-center justify-center shadow-lg mb-2 overflow-hidden">
-          <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain rounded-full" />
-        </div>
-        <span className="text-2xl font-extrabold text-nani-dark tracking-tight">SkillPro</span>
-      </div>
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md flex flex-col items-center gap-6 border-t-8 border-blue-500 animate-fade-in">
-        <h2 className="text-2xl font-bold text-blue-700">{isSensitivePasswordScope ? "Confirm Secure Access" : "Verify MFA"}</h2>
-        <p className="text-slate-600 text-center">
-          {isSensitivePasswordScope
-            ? "Enter the 6-digit code from your authenticator app before opening password tools."
-            : "Enter the 6-digit code from your authenticator app to continue."}
-        </p>
-        <div className="flex justify-center gap-3 mt-2 w-full">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl items-center justify-center">
+        <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+          <div className="hidden rounded-[2rem] border border-blue-200/60 bg-slate-950 px-8 py-10 text-white shadow-[0_30px_80px_rgba(30,41,59,0.28)] lg:block">
+            <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-cyan-400/15 text-cyan-300">
+              <ShieldCheck size={30} />
+            </div>
+            <h1 className="mt-8 text-4xl font-black tracking-tight">Secure admin checkpoint</h1>
+            <p className="mt-4 text-base leading-7 text-slate-300">
+              This step protects sensitive admin access. Enter the one-time code from your authenticator app to continue safely.
+            </p>
+            <div className="mt-8 space-y-4">
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-white">Fast verification</p>
+                <p className="mt-1 text-sm text-slate-400">Code verification runs automatically once all 6 digits are entered.</p>
+              </div>
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-white">Session protection</p>
+                <p className="mt-1 text-sm text-slate-400">If the admin session has expired, you will be redirected back to login.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full rounded-[2rem] border border-white/70 bg-white/90 p-8 shadow-[0_30px_80px_rgba(37,99,235,0.18)] backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-blue-400/40 bg-white shadow-lg">
+                  <img src={LOGO_URL} alt="Logo" className="h-16 w-16 rounded-full object-contain" />
+                </div>
+                <div>
+                  <span className="text-2xl font-extrabold tracking-tight text-slate-900">SkillPro</span>
+                  <p className="mt-1 text-sm text-slate-500">Admin verification</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+              >
+                <LogOut size={16} />
+                Logout
+              </button>
+            </div>
+
+            <div className="mt-8 rounded-[1.75rem] border border-blue-100 bg-[linear-gradient(135deg,rgba(239,246,255,0.95),rgba(219,234,254,0.92))] p-6">
+              <div className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white">
+                <ShieldCheck size={14} />
+                Protected step
+              </div>
+              <h2 className="mt-4 text-3xl font-bold tracking-tight text-blue-900">{isSensitivePasswordScope ? "Confirm Secure Access" : "Verify MFA"}</h2>
+              <p className="mt-3 text-slate-600">
+                {isSensitivePasswordScope
+                  ? "Enter the 6-digit code from your authenticator app before opening password tools."
+                  : "Enter the 6-digit code from your authenticator app to continue."}
+              </p>
+            </div>
+
+            <div className="mt-8 flex justify-center gap-3">
           {[...Array(6)].map((_, i) => (
             <input
               key={i}
@@ -188,16 +239,26 @@ export default function AdminMFAVerify() {
               style={{ imeMode: "disabled" }}
             />
           ))}
+            </div>
+            <button
+              disabled={loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d)}
+              onClick={() => verify(codeStr)}
+              className={`mt-8 w-full rounded-2xl py-4 text-lg font-bold text-white transition-colors ${
+                loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d) ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              {loading ? "Verifying MFA..." : !sessionReady ? "Checking Session..." : "Verify MFA"}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/login', { replace: true })}
+              className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-slate-700"
+            >
+              <ArrowLeft size={16} />
+              Back to login
+            </button>
+          </div>
         </div>
-        <button
-          disabled={loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d)}
-          onClick={() => verify(codeStr)}
-          className={`w-full py-3 rounded-lg font-bold text-lg text-white transition-colors ${
-            loading || !sessionReady || codeStr.length !== 6 || !codeStr.split("").every((d) => d) ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
-          }`}
-        >
-          {loading ? "Verifying MFA..." : !sessionReady ? "Checking Session..." : "Verify MFA"}
-        </button>
       </div>
     </div>
   );

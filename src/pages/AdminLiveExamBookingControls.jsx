@@ -3,6 +3,7 @@ import { Clock, KeyRound, Trash2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { logAdminActivity } from '../utils/adminActivityLogger';
 
 const SETTING_KEY = 'live_exam_rebooking_wait_days';
 
@@ -117,6 +118,18 @@ export default function AdminLiveExamBookingControls() {
         });
       if (insertError) throw insertError;
 
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Allowed live exam booking again',
+        target: `${form.userId}:${form.courseId}`,
+        details: {
+          user_id: form.userId,
+          course_id: form.courseId,
+          allow_retake_at: allowAt,
+          source: 'admin_live_exam_booking_controls',
+        },
+      });
+
       const { data: refreshed, error: refreshError } = await supabase
         .from('exam_retake_overrides')
         .select('id, user_id, course_id, allow_retake_at, created_at')
@@ -139,8 +152,20 @@ export default function AdminLiveExamBookingControls() {
     setError('');
     setInfo('');
     try {
+      const targetRow = overrides.find((row) => row.id === id);
       const { error: deleteError } = await supabase.from('exam_retake_overrides').delete().eq('id', id);
       if (deleteError) throw deleteError;
+      await logAdminActivity({
+        adminId: profile?.id,
+        action: 'Removed live exam rebooking override',
+        target: String(id),
+        details: {
+          override_id: id,
+          user_id: targetRow?.user_id || null,
+          course_id: targetRow?.course_id || null,
+          source: 'admin_live_exam_booking_controls',
+        },
+      });
       setOverrides((prev) => prev.filter((row) => row.id !== id));
       setInfo('Booking access override removed.');
     } catch (removeError) {
