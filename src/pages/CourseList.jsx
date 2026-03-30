@@ -5,6 +5,15 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import {
+  fetchCourseProtectedAssetsMap,
+  mergeCoursesWithProtectedAssets,
+  upsertCourseProtectedAssets
+} from '../utils/courseProtectedAssets';
+import { readBrowserState, writeBrowserState } from '../utils/browserState';
+
+const COURSES_CACHE_KEY = 'course_list_cache';
+const COURSE_FORM_DRAFT_KEY = 'course_list_new_course_draft';
 
 // 50 course records to populate the grid with category-appropriate thumbnails
 const MOCK_COURSES = [
@@ -82,7 +91,7 @@ const CourseList = () => {
         const { profile, isPremium } = useAuth();
   const { popupNode, openPopup } = usePopup();
           const premium = isPremium(profile);
-        const [courses, setCourses] = useState([]);
+        const [courses, setCourses] = useState(() => readBrowserState(COURSES_CACHE_KEY, []));
         const [examResults, setExamResults] = useState({});
         const [searchQuery, setSearchQuery] = useState('');
         const [selectedCategory, setSelectedCategory] = useState('All');
@@ -91,14 +100,14 @@ const CourseList = () => {
         const [showEditModal, setShowEditModal] = useState(false);
         const [deleteConfirm, setDeleteConfirm] = useState(null);
         const [loading, setLoading] = useState(true);
-        const [newCourse, setNewCourse] = useState({
+        const [newCourse, setNewCourse] = useState(() => readBrowserState(COURSE_FORM_DRAFT_KEY, {
           title: '',
           category: '',
           description: '',
           video_url: '',
           notes_url: '',
           thumbnail_url: ''
-        });
+        }));
         const [showExamQuestionsModal, setShowExamQuestionsModal] = useState(false);
         const [selectedCourseForExam, setSelectedCourseForExam] = useState(null);
         const [selectedExamId, setSelectedExamId] = useState(null);
@@ -147,21 +156,36 @@ const CourseList = () => {
                 .order('created_at', { ascending: false });
               
               if (data && data.length > 0) {
-                setCourses(data);
+                const canReadProtectedAssets = ['admin', 'teacher'].includes(profile?.role);
+                if (canReadProtectedAssets) {
+                  const assetsMap = await fetchCourseProtectedAssetsMap(data.map((course) => course.id));
+                  const mergedCourses = mergeCoursesWithProtectedAssets(data, assetsMap);
+                  setCourses(mergedCourses);
+                  writeBrowserState(COURSES_CACHE_KEY, mergedCourses);
+                } else {
+                  setCourses(data);
+                  writeBrowserState(COURSES_CACHE_KEY, data);
+                }
               } else {
                 // Fallback to MOCK_COURSES if no database courses or empty
                 setCourses(MOCK_COURSES);
+                writeBrowserState(COURSES_CACHE_KEY, MOCK_COURSES);
               }
             } catch (error) {
               console.error('Error fetching courses:', error);
               setCourses(MOCK_COURSES);
+              writeBrowserState(COURSES_CACHE_KEY, MOCK_COURSES);
             } finally {
               setLoading(false);
             }
           };
           
           fetchCourses();
-        }, []);
+        }, [profile?.role]);
+
+        useEffect(() => {
+          writeBrowserState(COURSE_FORM_DRAFT_KEY, newCourse);
+        }, [newCourse]);
 
         useEffect(() => {
           const loadPremiumCost = async () => {
@@ -232,8 +256,6 @@ const CourseList = () => {
               title: newCourse.title,
               category: newCourse.category,
               description: newCourse.description || null,
-              video_url: newCourse.video_url || null,
-              notes_url: newCourse.notes_url || null,
               thumbnail_url: newCourse.thumbnail_url || null,
               is_active: true
             };
@@ -246,6 +268,11 @@ const CourseList = () => {
 
             if (error) throw error;
 
+            const savedAssets = await upsertCourseProtectedAssets(data.id, {
+              video_url: newCourse.video_url,
+              notes_url: newCourse.notes_url,
+            });
+
             // Create default exam
             const { error: examCreateError } = await supabase
               .from('exams')
@@ -254,8 +281,16 @@ const CourseList = () => {
               throw new Error(`Course added but exam creation failed: ${examCreateError.message}`);
             }
 
-            setCourses([data, ...courses]);
+            setCourses([{ ...data, ...savedAssets }, ...courses]);
             setNewCourse({
+              title: '',
+              category: '',
+              description: '',
+              video_url: '',
+              notes_url: '',
+              thumbnail_url: ''
+            });
+            writeBrowserState(COURSE_FORM_DRAFT_KEY, {
               title: '',
               category: '',
               description: '',
@@ -285,15 +320,22 @@ const CourseList = () => {
                 title: editingCourse.title,
                 category: editingCourse.category,
                 description: editingCourse.description || null,
-                video_url: editingCourse.video_url || null,
-                notes_url: editingCourse.notes_url || null,
                 thumbnail_url: editingCourse.thumbnail_url || null
               })
               .eq('id', editingCourse.id);
 
             if (error) throw error;
 
-            setCourses(courses.map(c => c.id === editingCourse.id ? editingCourse : c));
+            const savedAssets = await upsertCourseProtectedAssets(editingCourse.id, {
+              video_url: editingCourse.video_url,
+              notes_url: editingCourse.notes_url,
+            });
+
+            setCourses(courses.map(c => (
+              c.id === editingCourse.id
+                ? { ...editingCourse, ...savedAssets }
+                : c
+            )));
             setEditingCourse(null);
             setShowEditModal(false);
             openPopup('Course updated', 'Course updated successfully.', 'success');
@@ -767,12 +809,12 @@ const CourseList = () => {
                  <textarea
                    value={newCourse.video_url}
                    onChange={(e) => setNewCourse({ ...newCourse, video_url: e.target.value })}
-                   placeholder="YouTube URL or Google Drive iframe embed code"
+                   placeholder="Direct MP4 URL or Google Drive file/embed link"
                    rows="3"
                    className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                  />
                  <p className="text-xs text-slate-500 mt-1">
-                   For Drive: Right-click video → Share → Embed → Copy entire &lt;iframe&gt; tag
+                   Use a Google Drive file link or embed code. Avoid YouTube here because it can expose the original video outside SkillPro.
                  </p>
                </div>
 
@@ -871,7 +913,7 @@ const CourseList = () => {
                    className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                  />
                  <p className="text-xs text-slate-500 mt-1">
-                   For Drive: Right-click video → Share → Embed → Copy entire &lt;iframe&gt; tag
+                   Use a Google Drive file link or embed code. Avoid YouTube here because it can expose the original video outside SkillPro.
                  </p>
                </div>
 

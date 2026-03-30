@@ -7,7 +7,6 @@ const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || "/skillpro-logo.png";
 const MFA_ISSUER = "SkillPro";
 
 export default function AdminMFASetup() {
-
   const navigate = useNavigate();
   const { openPopup, popupNode } = usePopup();
   const [step, setStep] = useState("name");

@@ -8,6 +8,10 @@ import AvatarImage from './AvatarImage';
 import Toast from './Toast';
 import { logAdminNavigation } from '../utils/adminActivityLogger';
 import { useNotifications } from '../context/NotificationContext';
+import { readBrowserState, writeBrowserState } from '../utils/browserState';
+
+const SIDEBAR_COLLAPSED_KEY = 'layout_sidebar_collapsed';
+const LAST_OPENED_PAGE_KEY = 'layout_last_opened_page';
 
 const Layout = () => {
   const { profile, signOut } = useAuth();
@@ -17,7 +21,7 @@ const Layout = () => {
   const [panelSearch, setPanelSearch] = useState('');
   const [showPanelSearch, setShowPanelSearch] = useState(false);
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
   const seenRealtimeNotificationIdsRef = useRef(new Set());
   const seenActivityEventKeysRef = useRef(new Set());
@@ -40,7 +44,9 @@ const Layout = () => {
     const observer = new MutationObserver(() => {
       const sidebar = document.querySelector('aside');
       if (sidebar) {
-        setSidebarCollapsed(sidebar.classList.contains('w-20'));
+        const collapsed = sidebar.classList.contains('w-20');
+        setSidebarCollapsed(collapsed);
+        writeBrowserState(SIDEBAR_COLLAPSED_KEY, collapsed);
       }
     });
 
@@ -51,6 +57,14 @@ const Layout = () => {
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!location.pathname) return;
+    writeBrowserState(LAST_OPENED_PAGE_KEY, {
+      pathname: location.pathname,
+      searchedAt: new Date().toISOString(),
+    });
+  }, [location.pathname]);
 
   const getPanelTargets = (role) => {
     const common = [

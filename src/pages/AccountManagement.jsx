@@ -7,6 +7,7 @@ import AvatarImage from '../components/AvatarImage';
 import { logAdminActivity } from '../utils/adminActivityLogger';
 import { useNavigate } from 'react-router-dom';
 import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
+import { deleteUserFromAdmin } from '../utils/adminUserDeletion';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
@@ -121,55 +122,11 @@ const AccountManagement = () => {
         updatePayload = { is_disabled: false, disabled_reason: null };
         successMsg = '✅ Account enabled!';
       } else if (action === 'delete') {
-        const deleteReason = 'Deleted by admin from Account Management (' + (selectedUser.email || selectedUser.id) + ')';
-        let fnData = null;
-        let fnError = null;
-        try {
-          const result = await supabase.functions.invoke('admin-delete-user', {
-            body: {
-              user_id: selectedUser.auth_user_id || selectedUser.id,
-              profile_id: selectedUser.id,
-              reason: deleteReason
-            }
-          });
-          fnData = result.data;
-          fnError = result.error;
-        } catch (invokeError) {
-          fnError = invokeError;
-        }
-
-        if (fnError) {
-          const deletedAt = new Date().toISOString();
-          const { error: archiveError } = await supabase.from('deleted_accounts').insert({
-            user_id: selectedUser.id,
-            full_name: selectedUser.full_name || null,
-            email: selectedUser.email || null,
-            role: selectedUser.role || null,
-            phone: selectedUser.phone || null,
-            reason: `${deleteReason}. Fallback soft delete used because Edge Function was unreachable.`,
-            deleted_by: adminUser?.id || null,
-            deleted_at: deletedAt,
-          });
-          if (archiveError) throw archiveError;
-
-          const { error: softDeleteError } = await supabase
-            .from('profiles')
-            .update({
-              is_disabled: true,
-              disabled_reason: 'Account deleted by admin (fallback soft delete).',
-              deleted_at: deletedAt,
-              deleted_reason: deleteReason,
-              deleted_by: adminUser?.id || null,
-            })
-            .eq('id', selectedUser.id);
-
-          if (softDeleteError) throw softDeleteError;
-
-          fnData = {
-            deleted: false,
-            message: 'Edge Function was unreachable, so the user was soft-deleted and disabled instead.',
-          };
-        }
+        const fnData = await deleteUserFromAdmin({
+          user: selectedUser,
+          adminUser,
+          sourceLabel: 'Account Management',
+        });
 
         setAlertModal({
           show: true,

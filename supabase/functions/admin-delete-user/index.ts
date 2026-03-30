@@ -25,6 +25,11 @@ const ignoreMissingTable = async (fn: () => Promise<{ error: { message?: string 
   throw new Error(msg || "Cleanup failed");
 };
 
+const isAuthUserMissingError = (message: string) => {
+  const m = message.toLowerCase();
+  return m.includes("user not found") || m.includes("not found");
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -128,6 +133,47 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    let authDeleted = false;
+    let authSoftDeleted = false;
+    let deleteMessage = "User deleted successfully.";
+
+    const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId, false);
+    if (!deleteError) {
+      authDeleted = true;
+    } else if (!isAuthUserMissingError(String(deleteError.message || ""))) {
+      const { error: softDeleteError } = await adminClient.auth.admin.deleteUser(userId, true);
+      if (!softDeleteError) {
+        authSoftDeleted = true;
+        deleteMessage = "Auth user could not be hard-deleted, so it was soft-deleted before profile cleanup.";
+      } else {
+        const fallbackEmail =
+          `${userId.slice(0, 8)}.deleted.${Date.now()}@deleted.local`;
+        const randomPassword = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+        const { error: fallbackError } = await adminClient.auth.admin.updateUserById(userId, {
+          email: fallbackEmail,
+          password: randomPassword,
+          user_metadata: { account_deleted: true, account_deleted_at: new Date().toISOString() },
+        });
+
+        if (fallbackError) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              deleted: false,
+              message: `Failed to delete user: ${deleteError.message}`,
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        deleteMessage =
+          "Auth user could not be deleted, but credentials were rotated so the account can no longer be used.";
+      }
+    } else {
+      authDeleted = true;
+      deleteMessage = "Auth user was already missing, so only profile cleanup was needed.";
+    }
+
     // Best-effort cleanup for known user-linked tables to reduce FK delete failures.
     const { data: ownedChatGroups } = await adminClient
       .from("chat_groups")
@@ -144,6 +190,31 @@ Deno.serve(async (req: Request) => {
     await ignoreMissingTable(() => adminClient.from("chat_groups").delete().eq("created_by", profileId));
     await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("student_id", profileId));
     await ignoreMissingTable(() => adminClient.from("teacher_assignment_requests").delete().eq("teacher_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("teacher_assignments").delete().eq("student_id", profileId));
+    await ignoreMissingTable(() => adminClient.from("teacher_assignments").delete().eq("teacher_id", profileId));
+    await ignoreMissingTable(() =>
+      adminClient.from("profiles").update({ assigned_teacher_id: null }).eq("assigned_teacher_id", profileId)
+    );
+    await ignoreMissingTable(() =>
+      adminClient
+        .from("guidance_requests")
+        .update({
+          assigned_to_teacher_id: null,
+          assigned_at: null,
+          status: "pending",
+        })
+        .eq("assigned_to_teacher_id", profileId)
+        .in("status", ["assigned", "scheduled"])
+    );
+    await ignoreMissingTable(() =>
+      adminClient
+        .from("guidance_requests")
+        .update({
+          assigned_to_teacher_id: null,
+          assigned_at: null,
+        })
+        .eq("assigned_to_teacher_id", profileId)
+    );
     await ignoreMissingTable(() => adminClient.from("class_session_participants").delete().eq("student_id", profileId));
     await ignoreMissingTable(() => adminClient.from("exam_submissions").delete().eq("user_id", profileId));
     await ignoreMissingTable(() => adminClient.from("certificates").delete().eq("user_id", profileId));
@@ -151,42 +222,13 @@ Deno.serve(async (req: Request) => {
     await ignoreMissingTable(() => adminClient.from("active_user_sessions").delete().eq("user_id", profileId));
     await ignoreMissingTable(() => adminClient.from("profiles").delete().eq("id", profileId));
 
-    const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId, false);
-    if (!deleteError) {
-      return new Response(
-        JSON.stringify({ success: true, deleted: true, message: "User deleted successfully." }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Fallback: release email so account can be re-registered even if hard delete fails.
-    const fallbackEmail =
-      `${userId.slice(0, 8)}.deleted.${Date.now()}@deleted.local`;
-    const randomPassword = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    const { error: fallbackError } = await adminClient.auth.admin.updateUserById(userId, {
-      email: fallbackEmail,
-      password: randomPassword,
-      user_metadata: { account_deleted: true, account_deleted_at: new Date().toISOString() },
-    });
-
-    if (fallbackError) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          deleted: false,
-          message: `Failed to delete user: ${deleteError.message}`,
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
     return new Response(
       JSON.stringify({
         success: true,
-        deleted: false,
-        emailReleased: true,
-        message:
-          "Auth user could not be hard-deleted, but email/password were released so this email can register again.",
+        deleted: true,
+        authDeleted,
+        authSoftDeleted,
+        message: deleteMessage,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

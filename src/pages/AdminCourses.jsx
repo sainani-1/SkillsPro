@@ -4,6 +4,14 @@ import AlertModal from '../components/AlertModal';
 import { Save, RefreshCw, Edit2, X, Plus, Trash2, Award } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
+import {
+  fetchCourseProtectedAssetsMap,
+  mergeCoursesWithProtectedAssets,
+  upsertCourseProtectedAssets
+} from '../utils/courseProtectedAssets';
+import { readBrowserState, writeBrowserState } from '../utils/browserState';
+
+const ADMIN_NEW_COURSE_DRAFT_KEY = 'admin_courses_new_course_draft';
 
 const CODING_LANGUAGES = ['python', 'java', 'cpp', 'c'];
 const makeDefaultQuestion = (examId, orderIndex = 0) => ({
@@ -64,7 +72,7 @@ const AdminCourses = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [showNewCourseForm, setShowNewCourseForm] = useState(false);
-  const [newCourse, setNewCourse] = useState({
+  const [newCourse, setNewCourse] = useState(() => readBrowserState(ADMIN_NEW_COURSE_DRAFT_KEY, {
     title: '',
     category: '',
     description: '',
@@ -72,7 +80,7 @@ const AdminCourses = () => {
     thumbnail_url: '',
     notes_url: '',
     is_free: false
-  });
+  }));
   const [deleteModal, setDeleteModal] = useState({ show: false, courseId: null, courseTitle: '' });
   const [questionEditor, setQuestionEditor] = useState({ open: false, examId: null, index: 0 });
   const getQuestionDraftKey = (examId) => `exam_questions_draft_${examId}`;
@@ -152,7 +160,8 @@ const AdminCourses = () => {
       const scopedCourses = isTeacher
         ? (coursesData || []).filter((c) => (teacherAllowedCourseIds || []).includes(c.id))
         : (coursesData || []);
-      setCourses(scopedCourses);
+      const assetsMap = await fetchCourseProtectedAssetsMap(scopedCourses.map((course) => course.id));
+      setCourses(mergeCoursesWithProtectedAssets(scopedCourses, assetsMap));
       // Load min_questions for each course
       const minMap = {};
       scopedCourses?.forEach(c => {
@@ -210,6 +219,10 @@ const AdminCourses = () => {
     loadData();
   }, [profile?.id, profile?.role]);
 
+  useEffect(() => {
+    writeBrowserState(ADMIN_NEW_COURSE_DRAFT_KEY, newCourse);
+  }, [newCourse]);
+
   const handleCourseChange = (id, field, value) => {
     setCourses(prev => prev.map(c => {
       if (c.id === id) {
@@ -254,9 +267,7 @@ const AdminCourses = () => {
         title: course.title,
         category: course.category,
         description: course.description,
-        video_url: course.video_url,
         thumbnail_url: course.thumbnail_url,
-        notes_url: course.notes_url,
         min_questions: typeof course.min_questions === 'number' ? course.min_questions : parseInt(course.min_questions) || 1
       })
       .eq('id', course.id);
@@ -264,6 +275,21 @@ const AdminCourses = () => {
     if (error) setMessage(`Error: ${error.message}`);
     else setMessage('✅ Course saved');
     
+    if (!error) {
+      try {
+        const savedAssets = await upsertCourseProtectedAssets(course.id, {
+          video_url: course.video_url,
+          notes_url: course.notes_url,
+        });
+        setCourses((prev) => prev.map((item) => (
+          item.id === course.id ? { ...item, ...savedAssets } : item
+        )));
+        setMessage('Course saved');
+      } catch (assetError) {
+        setMessage(`Error: ${assetError.message}`);
+      }
+    }
+
     setSavingId(null);
     setTimeout(() => setMessage(''), 2000);
   };
@@ -289,13 +315,16 @@ const AdminCourses = () => {
     }
 
     try {
+      const { video_url, notes_url, ...coursePayload } = newCourse;
       const { data, error } = await supabase
         .from('courses')
-        .insert([{ ...newCourse, is_free: !!newCourse.is_free }])
+        .insert([{ ...coursePayload, is_free: !!newCourse.is_free }])
         .select()
         .single();
 
       if (error) throw error;
+
+      await upsertCourseProtectedAssets(data.id, { video_url, notes_url });
 
       // Create default exam for the course
       const { error: examCreateError } = await supabase
@@ -318,6 +347,15 @@ const AdminCourses = () => {
 
       setShowNewCourseForm(false);
       setNewCourse({
+        title: '',
+        category: '',
+        description: '',
+        video_url: '',
+        thumbnail_url: '',
+        notes_url: '',
+        is_free: false
+      });
+      writeBrowserState(ADMIN_NEW_COURSE_DRAFT_KEY, {
         title: '',
         category: '',
         description: '',
@@ -874,10 +912,10 @@ const AdminCourses = () => {
                         className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         value={course.video_url || ''}
                         onChange={e => handleCourseChange(course.id, 'video_url', e.target.value)}
-                        placeholder="YouTube URL or Drive iframe embed code"
+                        placeholder="Direct MP4 URL or Google Drive file/embed link"
                         rows="3"
                       />
-                      <p className="text-xs text-slate-500 mt-1">For Drive: Share → Embed → Copy entire iframe code</p>
+                      <p className="text-xs text-slate-500 mt-1">Use a Google Drive file link or embed code. Avoid YouTube here because it can expose the original video outside SkillPro.</p>
                     </div>
 
                     <div>
@@ -898,7 +936,7 @@ const AdminCourses = () => {
                         className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         value={course.notes_url || ''}
                         onChange={e => handleCourseChange(course.id, 'notes_url', e.target.value)}
-                        placeholder="https://drive.google.com/... or https://docs.google.com/..."
+                        placeholder="https://drive.google.com/file/d/... or https://docs.google.com/document/d/..."
                       />
                     </div>
 
@@ -1077,7 +1115,7 @@ const AdminCourses = () => {
                       setCourses(prev => prev.map(c => c.id === selectedCourse.id ? { ...c, notes_url: e.target.value } : c));
                       setSelectedCourse(prev => ({ ...prev, notes_url: e.target.value }));
                     }}
-                    placeholder="https://drive.google.com/... or https://docs.google.com/..."
+                    placeholder="https://drive.google.com/file/d/... or https://docs.google.com/document/d/..."
                   />
                 </div>
 
@@ -1367,12 +1405,12 @@ const AdminCourses = () => {
                 <textarea
                   value={newCourse.video_url}
                   onChange={(e) => setNewCourse({ ...newCourse, video_url: e.target.value })}
-                  placeholder="YouTube URL or Google Drive iframe embed code"
+                  placeholder="Direct MP4 URL or Google Drive file/embed link"
                   rows="3"
                   className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  For Drive: Right-click video → Share → Get embed code → Copy entire &lt;iframe&gt; tag
+                  Use a Google Drive file link or embed code. Avoid YouTube here because it can expose the original video outside SkillPro.
                 </p>
               </div>
 

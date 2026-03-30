@@ -5,6 +5,7 @@ import { Plus, Users, X } from 'lucide-react';
 import AvatarImage from '../components/AvatarImage';
 import usePopup from '../hooks/usePopup.jsx';
 import { logAdminActivity } from '../utils/adminActivityLogger';
+import { deleteUserFromAdmin } from '../utils/adminUserDeletion';
 
 const UserManagementPage = () => {
     const { openPopup, popupNode } = usePopup();
@@ -14,6 +15,7 @@ const UserManagementPage = () => {
     const [roleFilter, setRoleFilter] = useState('all');
     const [showAddUserModal, setShowAddUserModal] = useState(false);
     const [changingRole, setChangingRole] = useState(null);
+    const [deletingUserId, setDeletingUserId] = useState(null);
 
     useEffect(() => { loadUsers(); }, []);
 
@@ -22,6 +24,7 @@ const UserManagementPage = () => {
         const { data } = await supabase
           .from('profiles')
           .select('id, auth_user_id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate, created_at')
+          .is('deleted_at', null)
           .order('created_at', { ascending: false });
         setUsers(data || []);
         setLoading(false);
@@ -106,6 +109,56 @@ const UserManagementPage = () => {
         loadUsers();
       } catch (error) {
         openPopup('Error', error.message || 'Failed to remove fake user.', 'error');
+      }
+    };
+
+    const deleteManagedUser = async (user) => {
+      if (deletingUserId) return;
+
+      const confirmName = window.prompt(
+        `Type "${user.full_name}" to permanently delete this user from the admin panel.`
+      );
+      if (confirmName !== user.full_name) {
+        if (confirmName !== null) {
+          openPopup('Cancelled', 'Entered name did not match. User was not deleted.', 'warning');
+        }
+        return;
+      }
+
+      setDeletingUserId(user.id);
+      try {
+        const {
+          data: { user: adminUser },
+        } = await supabase.auth.getUser();
+
+        const result = await deleteUserFromAdmin({
+          user,
+          adminUser,
+          sourceLabel: 'User Management',
+        });
+
+        await logAdminActivity({
+          adminId: adminUser?.id,
+          eventType: 'action',
+          action: result?.deleted ? 'Deleted user account' : 'Attempted user deletion (partial)',
+          target: user.id,
+          details: {
+            module: 'user-management',
+            user_email: user.email || null,
+            response_message: result?.message || null,
+          },
+        });
+
+        openPopup(
+          result?.deleted ? 'Deleted' : 'Partial Success',
+          result?.message || 'User deletion completed.',
+          result?.deleted ? 'success' : 'warning'
+        );
+        await loadUsers();
+      } catch (error) {
+        openPopup('Error', error.message || 'Failed to delete user.', 'error');
+      } finally {
+        setDeletingUserId(null);
       }
     };
 
@@ -294,7 +347,7 @@ const UserManagementPage = () => {
                         <select
                           value={u.role}
                           onChange={(e) => changeUserRole(u.id, e.target.value)}
-                          disabled={changingRole === u.id}
+                          disabled={changingRole === u.id || deletingUserId === u.id}
                           className="px-2 py-1 border rounded text-xs font-medium disabled:opacity-50"
                         >
                           <option value="student">Student</option>
@@ -302,6 +355,14 @@ const UserManagementPage = () => {
                           <option value="instructor">Instructor</option>
                           <option value="admin">Admin</option>
                         </select>
+                        <button
+                          type="button"
+                          onClick={() => deleteManagedUser(u)}
+                          disabled={deletingUserId === u.id}
+                          className="px-2 py-1 ml-2 bg-red-600 text-white rounded text-xs font-semibold hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deletingUserId === u.id ? 'Deleting...' : 'Delete'}
+                        </button>
                       </td>
                     </tr>
                   );
