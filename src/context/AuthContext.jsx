@@ -10,6 +10,8 @@ import {
   setSingleSessionNotice
 } from '../utils/singleSession';
 import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySession';
+import { getPremiumPlanType, hasPremiumAccess } from '../utils/premium';
+import { fetchUserPremiumPlanType } from '../utils/premiumPlanTypes';
 
 const AuthContext = createContext();
 
@@ -115,10 +117,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const isPremium = (p) => {
-    if (!p) return false;
-    const until = p.premium_until ? new Date(p.premium_until) : null;
-    return p.role === 'admin' || p.role === 'teacher' || (until && until > new Date());
+    return hasPremiumAccess(p);
   };
+
+  const getPlanTier = (p) => getPremiumPlanType(p);
+
+  const isPremiumPlus = (p) => getPlanTier(p) === 'premium_plus';
 
   useEffect(() => {
     let isMounted = true;
@@ -254,6 +258,23 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user?.id) return;
 
+    const profileChannel = supabase
+      .channel(`profile-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => fetchProfile(user.id, { background: true })
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(profileChannel);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
     let cancelled = false;
     let refreshing = false;
 
@@ -298,12 +319,18 @@ export const AuthProvider = ({ children }) => {
         .single();
       
       if (error) throw error;
-      
-      setProfile(data);
-      writeProfileCache({ userId: data.id, profile: data });
+
+      const premiumPlanType = await fetchUserPremiumPlanType(userId);
+      const hydratedProfile = {
+        ...data,
+        premium_plan_type: premiumPlanType,
+      };
+
+      setProfile(hydratedProfile);
+      writeProfileCache({ userId: hydratedProfile.id, profile: hydratedProfile });
       setImpersonationProfile((prev) => {
         if (!prev) return null;
-        if (prev.id === data.id) {
+        if (prev.id === hydratedProfile.id) {
           clearImpersonation();
           return null;
         }
@@ -311,9 +338,9 @@ export const AuthProvider = ({ children }) => {
       });
       writeDailyLoginState({
         userId,
-        email: data.email || '',
-        role: data.role || '',
-        fullName: data.full_name || ''
+        email: hydratedProfile.email || '',
+        role: hydratedProfile.role || '',
+        fullName: hydratedProfile.full_name || ''
       });
     } catch (error) {
       if (!background) {
@@ -390,6 +417,8 @@ export const AuthProvider = ({ children }) => {
         signOut,
         fetchProfile,
         isPremium,
+        isPremiumPlus,
+        getPlanTier,
         startImpersonation,
         stopImpersonation,
       }}

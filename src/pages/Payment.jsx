@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -8,8 +8,46 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { trackPremiumEvent } from '../utils/growth';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
+const DEFAULT_URGENCY_DATE = '2026-04-15';
+const DEFAULT_URGENCY_LABEL = 'April 15, 2026';
 
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
+
+const normalizePlan = (plan, fallbackCost = 199, fallbackTierCosts = {}) => {
+  const tier = plan?.tier === 'premium_plus' ? 'premium_plus' : 'premium';
+  const tierFallbackCost = Number(fallbackTierCosts?.[tier] ?? fallbackCost) || fallbackCost;
+  return {
+    id: plan?.id || `plan_${plan?.tier || 'premium'}`,
+    name: plan?.name || (plan?.tier === 'premium_plus' ? 'Premium Plus' : 'Premium'),
+    tier,
+    cost: Number(plan?.cost ?? tierFallbackCost) || tierFallbackCost,
+    periodMonths: Number(plan?.periodMonths || 6) || 6,
+    description: plan?.description || '',
+    features: Array.isArray(plan?.features) ? plan.features.filter(Boolean) : [],
+    isActive: plan?.isActive !== false,
+    createdAt: plan?.createdAt || null,
+  };
+};
+
+const pickLatestPlansByTier = (planList = []) => {
+  const bestByTier = new Map();
+
+  planList.forEach((plan) => {
+    if (!plan?.isActive) return;
+    const tier = plan.tier === 'premium_plus' ? 'premium_plus' : 'premium';
+    const current = bestByTier.get(tier);
+    const planTime = new Date(plan.createdAt || 0).getTime();
+    const currentTime = new Date(current?.createdAt || 0).getTime();
+    if (!current || planTime >= currentTime) {
+      bestByTier.set(tier, plan);
+    }
+  });
+
+  return Array.from(bestByTier.values()).sort((a, b) => {
+    if (a.tier === b.tier) return 0;
+    return a.tier === 'premium' ? -1 : 1;
+  });
+};
 
 const buildPricing = (baseAmount, offer) => {
   if (!offer) {
@@ -53,6 +91,12 @@ const Payment = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [premiumCost, setPremiumCost] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [selectedPlanTier, setSelectedPlanTier] = useState('premium');
+  const [urgencyBanner, setUrgencyBanner] = useState({
+    effectiveDate: DEFAULT_URGENCY_DATE,
+    label: DEFAULT_URGENCY_LABEL,
+  });
   const [pricingLoading, setPricingLoading] = useState(true);
   const [offersLoading, setOffersLoading] = useState(true);
   const [offers, setOffers] = useState([]);
@@ -62,39 +106,167 @@ const Payment = () => {
   const razorpayInstanceRef = useRef(null);
   const paymentAttemptRef = useRef({ paymentId: null, finalizing: false, finalized: false });
 
+  const activePlans = useMemo(() => {
+    if (plans.length > 0) return pickLatestPlansByTier(plans);
+    return [
+      normalizePlan({
+        id: 'default_premium',
+        name: 'Premium',
+        tier: 'premium',
+        cost: premiumCost || 199,
+        periodMonths: 6,
+        description: 'Core access for all premium classes, standard notes, videos, tests, and certificates.',
+        features: [
+          'All premium classes',
+          'Protected videos and standard notes',
+          'Tests, certificates, and live sessions',
+          'Teacher support and mentorship',
+        ],
+      }, premiumCost || 199, {
+        premium: premiumCost || 199,
+        premium_plus: Math.max((premiumCost || 199) + 100, 299),
+      }),
+      normalizePlan({
+        id: 'default_premium_plus',
+        name: 'Premium Plus',
+        tier: 'premium_plus',
+        cost: Math.max((premiumCost || 199) + 100, 299),
+        periodMonths: 6,
+        description: 'Everything in Premium plus access to the separate advanced notes library.',
+        features: [
+          'Everything in Premium',
+          'Advanced notes library',
+          'Premium Plus-only study packs',
+          'Higher-value prep material',
+        ],
+      }, Math.max((premiumCost || 199) + 100, 299), {
+        premium: premiumCost || 199,
+        premium_plus: Math.max((premiumCost || 199) + 100, 299),
+      }),
+    ];
+  }, [plans, premiumCost]);
+
+  const selectedPlan = useMemo(
+    () => activePlans.find((plan) => plan.tier === selectedPlanTier) || activePlans[0] || null,
+    [activePlans, selectedPlanTier]
+  );
+
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || null;
-  const pricing = buildPricing(premiumCost || 0, selectedOffer);
+  const pricing = buildPricing(selectedPlan?.cost || premiumCost || 0, selectedOffer);
 
   useEffect(() => {
-    const loadPremiumCost = async () => {
+    const loadPricingConfig = async () => {
       try {
         const { data } = await supabase
           .from('settings')
-          .select('value')
-          .eq('key', 'premium_cost')
-          .single();
+          .select('key, value')
+          .in('key', ['premium_cost', 'premium_plus_cost', 'public_plans', 'payment_urgency_banner']);
 
-        if (data) {
-          const parsedCost = parseInt(data.value, 10);
-          setPremiumCost(Number.isFinite(parsedCost) ? parsedCost : 199);
-        } else {
-          setPremiumCost(199);
+        const settingsMap = Object.fromEntries((data || []).map((item) => [item.key, item.value]));
+        const parsedCost = parseInt(settingsMap.premium_cost, 10);
+        const fallbackPremiumCost = Number.isFinite(parsedCost) ? parsedCost : 199;
+        const parsedPremiumPlusCost = parseInt(settingsMap.premium_plus_cost, 10);
+        const fallbackPremiumPlusCost = Number.isFinite(parsedPremiumPlusCost) ? parsedPremiumPlusCost : Math.max(fallbackPremiumCost + 100, 299);
+        setPremiumCost(fallbackPremiumCost);
+        const tierCostMap = {
+          premium: fallbackPremiumCost,
+          premium_plus: fallbackPremiumPlusCost,
+        };
+
+        try {
+          const parsedPlans = settingsMap.public_plans ? JSON.parse(settingsMap.public_plans) : [];
+          const normalizedPlans = Array.isArray(parsedPlans)
+            ? parsedPlans
+                .filter((plan) => plan?.isActive)
+                .map((plan) => normalizePlan(
+                  {
+                    ...plan,
+                    cost: tierCostMap[plan?.tier === 'premium_plus' ? 'premium_plus' : 'premium'],
+                  },
+                  fallbackPremiumCost,
+                  tierCostMap
+                ))
+            : [];
+          setPlans(pickLatestPlansByTier(normalizedPlans));
+        } catch {
+          setPlans([]);
+        }
+
+        if (!settingsMap.public_plans) {
+          setPlans([
+            normalizePlan({
+              id: 'default_premium',
+              name: 'Premium',
+              tier: 'premium',
+              cost: fallbackPremiumCost,
+              periodMonths: 6,
+              description: 'Core access for all premium classes, standard notes, videos, tests, and certificates.',
+              features: [
+                'All premium classes',
+                'Protected videos and standard notes',
+                'Tests, certificates, and live sessions',
+                'Teacher support and mentorship',
+              ],
+            }, fallbackPremiumCost, tierCostMap),
+            normalizePlan({
+              id: 'default_premium_plus',
+              name: 'Premium Plus',
+              tier: 'premium_plus',
+              cost: fallbackPremiumPlusCost,
+              periodMonths: 6,
+              description: 'Everything in Premium plus access to the separate advanced notes library.',
+              features: [
+                'Everything in Premium',
+                'Advanced notes library',
+                'Premium Plus-only study packs',
+                'Higher-value prep material',
+              ],
+            }, fallbackPremiumPlusCost, tierCostMap),
+          ]);
+        }
+
+        try {
+          const parsedBanner = settingsMap.payment_urgency_banner ? JSON.parse(settingsMap.payment_urgency_banner) : null;
+          const effectiveDate = parsedBanner?.effectiveDate || DEFAULT_URGENCY_DATE;
+          setUrgencyBanner({
+            effectiveDate,
+            label: parsedBanner?.label || new Date(effectiveDate).toLocaleDateString('en-IN', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            }),
+          });
+        } catch {
+          setUrgencyBanner({
+            effectiveDate: DEFAULT_URGENCY_DATE,
+            label: DEFAULT_URGENCY_LABEL,
+          });
         }
       } catch (error) {
-        console.error('Error loading premium cost:', error);
+        console.error('Error loading payment pricing:', error);
         setPremiumCost(199);
+        setPlans([]);
       } finally {
         setPricingLoading(false);
       }
     };
 
-    loadPremiumCost();
+    loadPricingConfig();
   }, []);
 
   useEffect(() => {
+    if (!selectedPlan && activePlans[0]) {
+      setSelectedPlanTier(activePlans[0].tier);
+    }
+  }, [activePlans, selectedPlan]);
+
+  useEffect(() => {
     if (!profile?.id) return;
-    trackPremiumEvent('payment_page_viewed', 'payment_page', { offerId: searchParams.get('offer') || null }, profile.id);
-  }, [profile?.id, searchParams]);
+    trackPremiumEvent('payment_page_viewed', 'payment_page', {
+      offerId: searchParams.get('offer') || null,
+      planTier: selectedPlanTier,
+    }, profile.id);
+  }, [profile?.id, searchParams, selectedPlanTier]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -218,8 +390,8 @@ const Payment = () => {
     await fetchProfile(profile.id, { background: true });
     setSuccessMessage(
       data?.is_lifetime_free
-        ? 'Your lifetime premium access is active. No Razorpay payment was needed.'
-        : 'Your coupon covered the full amount. Premium is active now.'
+        ? `Your lifetime ${selectedPlan?.name || 'Premium'} access is active. No Razorpay payment was needed.`
+        : `Your coupon covered the full amount. ${selectedPlan?.name || 'Premium'} is active now.`
     );
     setSuccess(true);
     setLoading(false);
@@ -240,7 +412,7 @@ const Payment = () => {
 
     if (!result) return;
 
-    setSuccessMessage('Payment successful. Premium access is active now.');
+    setSuccessMessage(`Payment successful. ${selectedPlan?.name || 'Premium'} access is active now.`);
     setSuccess(true);
     setSelectedOfferId('');
     resetAttemptState();
@@ -268,6 +440,7 @@ const Payment = () => {
       const { data, error } = await supabase.functions.invoke('create-payment-order', {
         body: {
           offer_id: selectedOfferId || null,
+          plan_tier: selectedPlanTier,
         },
       });
 
@@ -300,7 +473,7 @@ const Payment = () => {
         amount: data.amount,
         currency: data.currency || 'INR',
         name: 'SkillPro',
-        description: 'Premium Access - 6 Months',
+        description: `${selectedPlan?.name || 'Premium'} Access - ${selectedPlan?.periodMonths || 6} Months`,
         image: '/skillpro-logo.png',
         order_id: data.order_id,
         handler: handleGatewaySuccess,
@@ -313,6 +486,7 @@ const Payment = () => {
           user_id: profile?.id,
           local_payment_id: data.payment_id,
           coupon_code: data.coupon_code || '',
+          plan_tier: selectedPlanTier,
         },
         theme: {
           color: '#2563eb',
@@ -357,11 +531,11 @@ const Payment = () => {
           <div className="space-y-3">
             <p className="inline-flex items-center gap-2 rounded-full bg-green-100 px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-green-700">
               <Sparkles size={14} />
-              Premium activated
+              Plan activated
             </p>
-            <h1 className="text-4xl md:text-5xl font-bold text-green-800">Welcome to Premium!</h1>
+            <h1 className="text-4xl md:text-5xl font-bold text-green-800">Welcome to {selectedPlan?.name || 'Premium'}!</h1>
             <p className="text-slate-600 text-lg">{successMessage}</p>
-            <p className="text-slate-500">You can now access all premium courses and features.</p>
+            <p className="text-slate-500">Your selected plan is ready to use.</p>
           </div>
         </div>
       </div>
@@ -373,66 +547,109 @@ const Payment = () => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Upgrade to Premium</h1>
-        <p className="text-slate-500">Apply one coupon, review the final amount, and pay only that amount.</p>
+        <p className="text-slate-500">Choose your plan, apply one coupon, and pay only the final amount.</p>
       </div>
 
       <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
         <div className="flex items-start gap-3">
           <Clock3 className="mt-0.5 text-rose-600" size={18} />
           <div>
-            <p className="font-semibold">Urgency banner</p>
+            <p className="font-semibold">Price update notice</p>
             <p className="text-sm mt-1">
-              Use a live message like “price changes on March 15, 2026” to create urgency. This page is now structured for that conversion banner.
+              Current launch pricing is live now. Plan prices change on {urgencyBanner.label}, so booking before that date locks the lower rate.
             </p>
           </div>
         </div>
       </div>
 
-      <div className="bg-gradient-to-br from-gold-400 to-gold-600 p-8 rounded-2xl text-white">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-3xl font-bold mb-2">Premium Plan</h2>
-            <p className="text-gold-100">6 Months Unlimited Access</p>
-          </div>
-          <div className="text-right">
-            <div className="text-4xl font-bold">₹{premiumCost}</div>
-            <p className="text-gold-100 text-sm">base price</p>
-          </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
+        <div className="grid gap-4 md:grid-cols-2">
+          {activePlans.map((plan) => {
+            const isSelected = selectedPlan?.tier === plan.tier;
+            return (
+              <button
+                key={plan.id}
+                type="button"
+                onClick={() => setSelectedPlanTier(plan.tier)}
+                className={`rounded-2xl border p-6 text-left transition-all ${
+                  isSelected
+                    ? plan.tier === 'premium_plus'
+                      ? 'border-indigo-500 bg-gradient-to-br from-indigo-600 to-slate-900 text-white shadow-xl'
+                      : 'border-amber-400 bg-gradient-to-br from-gold-400 to-gold-600 text-white shadow-xl'
+                    : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:shadow-md'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isSelected ? 'text-white/80' : 'text-slate-500'}`}>
+                      {plan.tier === 'premium_plus' ? 'Advanced Access' : 'Core Access'}
+                    </p>
+                    <h2 className="mt-2 text-2xl font-bold">{plan.name}</h2>
+                    <p className={`mt-2 text-sm ${isSelected ? 'text-white/80' : 'text-slate-600'}`}>
+                      {plan.description || 'Premium access for all classes and focused learning.'}
+                    </p>
+                  </div>
+                  <div className={`rounded-full px-3 py-1 text-xs font-semibold ${isSelected ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                    {isSelected ? 'Selected' : 'Choose'}
+                  </div>
+                </div>
+                <div className="mt-6">
+                  <div className="text-4xl font-bold">₹{plan.cost}</div>
+                  <p className={`mt-1 text-sm ${isSelected ? 'text-white/75' : 'text-slate-500'}`}>
+                    {plan.periodMonths || 6} months access
+                  </p>
+                </div>
+                <div className="mt-6 space-y-2">
+                  {(plan.features.length > 0 ? plan.features : [
+                    'All premium classes',
+                    plan.tier === 'premium_plus' ? 'Advanced notes library' : 'Standard notes and videos',
+                    'Tests, certificates, and live sessions',
+                  ]).map((feature, index) => (
+                    <FeatureItem key={`${plan.id}-${index}`} text={feature} dim={!isSelected} />
+                  ))}
+                </div>
+              </button>
+            );
+          })}
         </div>
-        <div className="space-y-2">
-          <FeatureItem text="Access to 50+ premium courses" />
-          <FeatureItem text="Watch unlimited course videos" />
-          <FeatureItem text="Download course notes and materials" />
-          <FeatureItem text="Take certification exams" />
-          <FeatureItem text="Earn verified certificates" />
-          <FeatureItem text="Career mentorship sessions" />
-          <FeatureItem text="Direct teacher support via chat" />
-          <FeatureItem text="Daily live classes (9-10 AM, 5-6 PM)" />
-          <FeatureItem text="Resume Builder with premium PDF export" />
-        </div>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-          <div className="flex items-center gap-2 text-emerald-800 font-semibold">
-            <Gift size={18} />
-            Referral reward
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-900">Selected Plan</h3>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{selectedPlan?.name || 'Premium'}</p>
+            <p className="mt-1 text-sm text-slate-500">
+              {selectedPlan?.tier === 'premium_plus'
+                ? 'Includes the separate Premium Plus notes library and advanced study packs.'
+                : 'Includes premium classes, standard notes, protected videos, tests, and live sessions.'}
+            </p>
+            <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
+              <p className="text-sm text-slate-500">Base price</p>
+              <p className="text-3xl font-bold text-slate-900">₹{selectedPlan?.cost || premiumCost}</p>
+            </div>
           </div>
-          <p className="mt-2 text-sm text-emerald-900">
-            Refer one paying friend and get 7 premium days automatically after their payment succeeds.
-          </p>
-        </div>
-        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
-          <div className="flex items-center gap-2 text-blue-800 font-semibold">
-            <Sparkles size={18} />
-            Premium wins
+
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div className="flex items-center gap-2 text-emerald-800 font-semibold">
+              <Gift size={18} />
+              Referral reward
+            </div>
+            <p className="mt-2 text-sm text-emerald-900">
+              Refer one paying friend and get 7 premium days automatically after their payment succeeds.
+            </p>
           </div>
-          <p className="mt-2 text-sm text-blue-900">
-            Get direct teacher support + resume builder + premium certificates + mentorship in one upgrade.
-          </p>
+
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+            <div className="flex items-center gap-2 text-blue-800 font-semibold">
+              <Sparkles size={18} />
+              Upgrade advantage
+            </div>
+            <p className="mt-2 text-sm text-blue-900">
+              Premium covers classes and core resources. Premium Plus adds the advanced notes library for deeper preparation.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -452,7 +669,7 @@ const Payment = () => {
           />
           <div>
             <p className="font-semibold text-slate-900">No coupon</p>
-            <p className="text-sm text-slate-500">Pay the full premium amount.</p>
+            <p className="text-sm text-slate-500">Pay the full selected plan amount.</p>
           </div>
         </label>
 
@@ -492,8 +709,8 @@ const Payment = () => {
         <h3 className="text-lg font-bold mb-4">Payable Summary</h3>
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between text-slate-600">
-            <span>Base premium amount</span>
-            <span>₹{roundMoney(premiumCost)}</span>
+            <span>{selectedPlan?.name || 'Premium'} amount</span>
+            <span>₹{roundMoney(selectedPlan?.cost || premiumCost)}</span>
           </div>
           <div className="flex items-center justify-between text-slate-600">
             <span>Coupon discount</span>
@@ -552,14 +769,15 @@ const Payment = () => {
           onMouseDown={() => trackPremiumEvent('payment_attempt_started', 'payment_page', {
             finalAmount: pricing.finalAmount,
             offerId: selectedOfferId || null,
+            planTier: selectedPlanTier,
           }, profile?.id || null)}
           className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-semibold transition-all"
         >
           {loading
             ? 'Processing...'
             : pricing.finalAmount > 0
-              ? `Pay ₹${pricing.finalAmount} with Razorpay`
-              : 'Activate Premium Now'}
+              ? `Pay ₹${pricing.finalAmount} for ${selectedPlan?.name || 'Premium'}`
+              : `Activate ${selectedPlan?.name || 'Premium'} Now`}
         </button>
       </div>
 
@@ -577,10 +795,10 @@ const Payment = () => {
   );
 };
 
-const FeatureItem = ({ text }) => (
+const FeatureItem = ({ text, dim = false }) => (
   <div className="flex items-center gap-2">
-    <Check className="text-gold-100" size={18} />
-    <span className="text-white">{text}</span>
+    <Check className={dim ? 'text-slate-500' : 'text-gold-100'} size={18} />
+    <span className={dim ? 'text-slate-700' : 'text-white'}>{text}</span>
   </div>
 );
 

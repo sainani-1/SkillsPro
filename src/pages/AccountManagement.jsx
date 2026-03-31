@@ -8,6 +8,8 @@ import { logAdminActivity } from '../utils/adminActivityLogger';
 import { useNavigate } from 'react-router-dom';
 import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
 import { deleteUserFromAdmin } from '../utils/adminUserDeletion';
+import { hasPremiumAccess } from '../utils/premium';
+import { clearUserPremiumPlanType } from '../utils/premiumPlanTypes';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
@@ -27,7 +29,7 @@ const AccountManagement = () => {
   const [loading, setLoading] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
-  const isPremiumActive = (premiumUntil) => premiumUntil && new Date(premiumUntil) > new Date();
+  const isPremiumActive = (userProfile) => hasPremiumAccess(userProfile);
   const isLifetimePremium = (premiumUntil) =>
     Boolean(premiumUntil) && new Date(premiumUntil).getUTCFullYear() >= 9999;
 
@@ -53,9 +55,9 @@ const AccountManagement = () => {
     if (filterType === 'locked') {
       filtered = filtered.filter(u => u.is_locked);
     } else if (filterType === 'premium') {
-      filtered = filtered.filter(u => u.premium_until && new Date(u.premium_until) > new Date());
+      filtered = filtered.filter((u) => isPremiumActive(u));
     } else if (filterType === 'no-premium') {
-      filtered = filtered.filter(u => !u.premium_until || new Date(u.premium_until) <= new Date());
+      filtered = filtered.filter((u) => !isPremiumActive(u));
     }
 
     return filtered;
@@ -164,6 +166,10 @@ const AccountManagement = () => {
         .single();
 
       if (error) throw error;
+
+      if (action === 'revoke-premium') {
+        await clearUserPremiumPlanType(selectedUser.id);
+      }
 
       if (action === 'unlock') {
         const unlockStamp = new Date().toISOString();
@@ -386,7 +392,7 @@ const AccountManagement = () => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    {isPremiumActive(user.premium_until) ? (
+                    {isPremiumActive(user) ? (
                       <div className="flex items-center gap-2">
                         <Award size={16} className="text-gold-400" />
                         <span className="text-sm font-semibold text-gold-600">
@@ -438,7 +444,7 @@ const AccountManagement = () => {
                       >
                         <Award size={14} /> Premium
                       </button>
-                      {isPremiumActive(user.premium_until) && (
+                      {isPremiumActive(user) && (
                         <button
                           onClick={() => openModal(user, 'revoke-premium')}
                           className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs font-semibold"

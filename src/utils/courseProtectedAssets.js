@@ -1,5 +1,7 @@
 import { supabase } from '../supabaseClient';
 
+const NOTES_IMAGE_TOKEN_PREFIX = '__notes_image__:';
+
 const normalizeAssetValue = (value) => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -20,11 +22,24 @@ const normalizeAssetList = (values, fallbackValue) => {
   return Array.from(new Set(normalized));
 };
 
+const encodeNotesImageToken = (value) => {
+  const normalized = normalizeAssetValue(value);
+  return normalized ? `${NOTES_IMAGE_TOKEN_PREFIX}${normalized}` : null;
+};
+
+const decodeNotesImageToken = (value) => {
+  if (typeof value !== 'string' || !value.startsWith(NOTES_IMAGE_TOKEN_PREFIX)) return null;
+  return normalizeAssetValue(value.slice(NOTES_IMAGE_TOKEN_PREFIX.length));
+};
+
 export const sanitizeCourseProtectedAssets = (assets = {}) => {
-  const notes_urls = normalizeAssetList(assets.notes_urls, assets.notes_url);
+  const rawNotes = normalizeAssetList(assets.notes_urls, assets.notes_url);
+  const notes_image_url = rawNotes.map((value) => decodeNotesImageToken(value)).find(Boolean) || normalizeAssetValue(assets.notes_image_url);
+  const notes_urls = rawNotes.filter((value) => !decodeNotesImageToken(value));
 
   return {
     video_url: normalizeAssetValue(assets.video_url),
+    notes_image_url,
     notes_urls,
     notes_url: notes_urls[0] || null,
   };
@@ -71,13 +86,19 @@ export const upsertCourseProtectedAssets = async (courseId, assets = {}) => {
   }
 
   const payload = sanitizeCourseProtectedAssets(assets);
+  const storedNotes = [
+    ...(payload.notes_image_url ? [encodeNotesImageToken(payload.notes_image_url)] : []),
+    ...payload.notes_urls,
+  ];
 
   const { error } = await supabase
     .from('course_protected_assets')
     .upsert(
       {
         course_id: courseId,
-        ...payload,
+        video_url: payload.video_url,
+        notes_urls: storedNotes,
+        notes_url: payload.notes_url,
       },
       { onConflict: 'course_id' }
     );
@@ -95,4 +116,5 @@ export const mergeCoursesWithProtectedAssets = (courses = [], assetMap = {}) =>
     video_url: assetMap?.[course.id]?.video_url || '',
     notes_url: assetMap?.[course.id]?.notes_url || '',
     notes_urls: assetMap?.[course.id]?.notes_urls || [],
+    notes_image_url: assetMap?.[course.id]?.notes_image_url || '',
   }));

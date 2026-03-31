@@ -58,17 +58,70 @@ const AdminDashboard = () => {
       });
     };
 
+    const quickActions = [
+      {
+        to: '/app/admin/user-access',
+        icon: <ShieldCheck className="text-violet-600 mb-3" size={28} />,
+        title: 'User Access',
+        description: 'Open any user account view and review their chats, classes, and profile access.'
+      },
+      {
+        to: '/app/admin/student-progress',
+        icon: <Users className="text-blue-600 mb-3" size={28} />,
+        title: 'Student Progress',
+        description: 'Track all student enrollments and certificates'
+      },
+      {
+        to: '/app/admin/manage-premium',
+        icon: <Award className="text-gold-600 mb-3" size={28} />,
+        title: 'Manage Premium',
+        description: 'Grant or revoke premium access'
+      },
+      {
+        to: '/app/admin/teacher-assignment',
+        icon: <UserPlus className="text-green-600 mb-3" size={28} />,
+        title: 'Assign Teachers',
+        description: 'Assign teachers to students'
+      },
+      {
+        to: '/app/admin/manage-premium',
+        icon: <TrendingUp className="text-indigo-600 mb-3" size={28} />,
+        title: 'Premium Analytics',
+        description: 'Track upgrade clicks, leads, pass claims, and referral rewards'
+      },
+      {
+        to: '/app/admin/lead-inbox',
+        icon: <FileText className="text-sky-600 mb-3" size={28} />,
+        title: 'Lead Inbox',
+        description: 'View homepage leads, respond, and export to Excel CSV'
+      },
+      {
+        to: '/app/admin/growth-analytics',
+        icon: <TrendingUp className="text-emerald-600 mb-3" size={28} />,
+        title: 'Growth Analytics',
+        description: 'See referrals, leads, premium events, and trials'
+      },
+      {
+        to: '/app/admin/user-access',
+        icon: <MessageCircle className="text-rose-600 mb-3" size={28} />,
+        title: 'Chats Monitor',
+        description: 'Review student and teacher chat conversations from the admin panel.'
+      }
+    ];
+
     return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-purple-600 to-blue-700 p-6 rounded-xl text-white">
-          <div className="flex items-center gap-3 mb-1">
-            <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-10 h-10 rounded-full object-contain mix-blend-multiply" />
-            <h1 className="text-2xl font-bold">Admin Control Panel</h1>
+      <div className="space-y-5 sm:space-y-6">
+        <div className="rounded-2xl bg-gradient-to-r from-purple-600 to-blue-700 p-4 text-white sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <img src="/skillpro-logo.png" alt="SkillPro logo" className="h-10 w-10 rounded-full object-contain mix-blend-multiply sm:h-12 sm:w-12" />
+            <div>
+              <h1 className="text-xl font-bold sm:text-2xl">Admin Control Panel</h1>
+              <p className="text-sm text-purple-100 sm:text-base">Manage the entire SkillPro platform</p>
+            </div>
           </div>
-          <p className="text-purple-100">Manage the entire SkillPro platform</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
           <StatCard icon={<Users className="text-blue-600" />} label="Students" value={stats.totalStudents} bgColor="bg-blue-50" />
           <StatCard icon={<Award className="text-gold-600" />} label="Premium" value={stats.premiumStudents} bgColor="bg-gold-50" />
           <StatCard icon={<UserPlus className="text-green-600" />} label="Teachers" value={stats.totalTeachers} bgColor="bg-green-50" />
@@ -81,59 +134,30 @@ const AdminDashboard = () => {
           <StatCard icon={<Check className="text-amber-600" />} label="Pass Claims" value={stats.premiumPassClaims} bgColor="bg-amber-50" />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <Link to="/app/admin/user-access" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <ShieldCheck className="text-violet-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">User Access</h3>
-            <p className="text-xs text-slate-600">Open any user account view and review their chats, classes, and profile access.</p>
-          </Link>
-          <Link to="/app/admin/student-progress" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <Users className="text-blue-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Student Progress</h3>
-            <p className="text-xs text-slate-600">Track all student enrollments and certificates</p>
-          </Link>
-          <Link to="/app/admin/manage-premium" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <Award className="text-gold-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Manage Premium</h3>
-            <p className="text-xs text-slate-600">Grant or revoke premium access</p>
-          </Link>
-          <Link to="/app/admin/teacher-assignment" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <UserPlus className="text-green-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Assign Teachers</h3>
-            <p className="text-xs text-slate-600">Assign teachers to students</p>
-          </Link>
-          <Link to="/app/admin/manage-premium" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <TrendingUp className="text-indigo-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Premium Analytics</h3>
-            <p className="text-xs text-slate-600">Track upgrade clicks, leads, pass claims, and referral rewards</p>
-          </Link>
-          <Link to="/app/admin/lead-inbox" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <FileText className="text-sky-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Lead Inbox</h3>
-            <p className="text-xs text-slate-600">View homepage leads, respond, and export to Excel CSV</p>
-          </Link>
-          <Link to="/app/admin/growth-analytics" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <TrendingUp className="text-emerald-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Growth Analytics</h3>
-            <p className="text-xs text-slate-600">See referrals, leads, premium events, and trials</p>
-          </Link>
-          <Link to="/app/admin/user-access" className="bg-white p-6 rounded-xl border hover:shadow-lg transition-shadow">
-            <MessageCircle className="text-rose-600 mb-3" size={32} />
-            <h3 className="font-bold mb-1">Chats Monitor</h3>
-            <p className="text-xs text-slate-600">Review student and teacher chat conversations from the admin panel.</p>
-          </Link>
+        <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {quickActions.map((action) => (
+            <Link
+              key={action.title}
+              to={action.to}
+              className="rounded-xl border bg-white p-4 transition-shadow hover:shadow-lg sm:p-6"
+            >
+              {action.icon}
+              <h3 className="mb-1 text-sm font-bold text-slate-900 sm:text-base">{action.title}</h3>
+              <p className="text-xs leading-5 text-slate-600">{action.description}</p>
+            </Link>
+          ))}
         </div>
       </div>
     );
 };
 
 const StatCard = ({ icon, label, value, bgColor }) => (
-  <div className={`${bgColor} p-4 rounded-xl border`}>
-    <div className="flex items-center justify-between mb-2">
+  <div className={`${bgColor} min-w-0 rounded-xl border p-3 sm:p-4`}>
+    <div className="mb-2 flex items-start justify-between gap-3">
       {icon}
-      <span className="text-2xl font-bold">{value}</span>
+      <span className="truncate text-right text-xl font-bold text-slate-900 sm:text-2xl">{value}</span>
     </div>
-    <p className="text-xs font-medium text-slate-700">{label}</p>
+    <p className="text-xs font-medium leading-4 text-slate-700 sm:text-sm">{label}</p>
   </div>
 );
 

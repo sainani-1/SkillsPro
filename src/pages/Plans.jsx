@@ -16,7 +16,15 @@ const Plans = () => {
           .eq('key', 'public_plans')
           .maybeSingle();
         const parsed = data?.value ? JSON.parse(data.value) : [];
-        const activePlans = Array.isArray(parsed) ? parsed.filter((p) => p?.isActive) : [];
+        const activePlans = Array.isArray(parsed)
+          ? parsed
+              .filter((p) => p?.isActive)
+              .map((plan) => ({
+                ...plan,
+                tier: plan?.tier === 'premium_plus' ? 'premium_plus' : 'premium',
+                features: Array.isArray(plan?.features) ? plan.features.filter(Boolean) : [],
+              }))
+          : [];
         setPlans(activePlans);
       } catch {
         setPlans([]);
@@ -60,8 +68,14 @@ const Plans = () => {
             {orderedPlans.map((plan) => (
               <div key={plan.id} className="relative bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
                 <div className="absolute top-4 right-4">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${plan.isLifetimeFree ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
-                    {plan.isLifetimeFree ? 'Best Value' : 'Popular'}
+                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                    plan.tier === 'premium_plus'
+                      ? 'bg-indigo-100 text-indigo-700'
+                      : plan.isLifetimeFree
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {plan.tier === 'premium_plus' ? 'Premium Plus' : plan.isLifetimeFree ? 'Best Value' : 'Popular'}
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-slate-900">{plan.name}</h2>
@@ -80,9 +94,19 @@ const Plans = () => {
                   <p className="text-sm text-slate-600 mt-4 min-h-[44px]">Access curated courses and features.</p>
                 )}
                 <div className="mt-5 space-y-2 text-sm text-slate-700">
-                  <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Premium learning resources</p>
-                  <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Exam and certificate access</p>
-                  <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Live class updates</p>
+                  {plan.features.length > 0 ? (
+                    plan.features.map((feature, index) => (
+                      <p key={`${plan.id}-feature-${index}`} className="flex items-center gap-2">
+                        <CheckCircle size={16} className="text-emerald-600" /> {feature}
+                      </p>
+                    ))
+                  ) : (
+                    <>
+                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Premium learning resources</p>
+                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Exam and certificate access</p>
+                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Live class updates</p>
+                    </>
+                  )}
                 </div>
                 <Link
                   to="/register"

@@ -10,6 +10,7 @@ const corsHeaders = {
 
 const PREMIUM_MONTHS = 6;
 const LIFETIME_PREMIUM_DATE = "9999-12-31T23:59:59.000Z";
+const PREMIUM_PLAN_TYPES_KEY = "premium_plan_types";
 
 type VerifyPaymentPayload = {
   payment_id?: string;
@@ -36,6 +37,51 @@ const addDaysFrom = (baseDateIso: string | null | undefined, days: number) => {
   const baseDate = baseDateIso && new Date(baseDateIso) > new Date() ? new Date(baseDateIso) : new Date();
   baseDate.setDate(baseDate.getDate() + days);
   return baseDate.toISOString();
+};
+
+const normalizePlanTier = (value: string | null | undefined) => (value === "premium_plus" ? "premium_plus" : "premium");
+
+const parsePlanTypeMap = (rawValue: string | null | undefined) => {
+  if (!rawValue) return {} as Record<string, string>;
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {} as Record<string, string>;
+    return Object.entries(parsed).reduce((acc, [userId, planType]) => {
+      const normalizedUserId = String(userId || "").trim();
+      if (!normalizedUserId) return acc;
+      acc[normalizedUserId] = normalizePlanTier(String(planType || ""));
+      return acc;
+    }, {} as Record<string, string>);
+  } catch {
+    return {} as Record<string, string>;
+  }
+};
+
+const savePlanTypeForUser = async (
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  planTier: string,
+) => {
+  const { data: existingSetting } = await adminClient
+    .from("settings")
+    .select("value")
+    .eq("key", PREMIUM_PLAN_TYPES_KEY)
+    .maybeSingle();
+
+  const planTypeMap = parsePlanTypeMap(existingSetting?.value);
+  planTypeMap[userId] = normalizePlanTier(planTier);
+
+  const { error } = await adminClient
+    .from("settings")
+    .upsert(
+      {
+        key: PREMIUM_PLAN_TYPES_KEY,
+        value: JSON.stringify(planTypeMap),
+      },
+      { onConflict: "key" },
+    );
+
+  if (error) throw error;
 };
 
 const toHex = (buffer: ArrayBuffer) =>
@@ -234,9 +280,11 @@ Deno.serve(async (req: Request) => {
   }
 
   const isLifetimeFree = Boolean(payment.metadata?.is_lifetime_free);
+  const planTier = normalizePlanTier(String(payment.metadata?.plan_tier || ""));
+  const planMonths = Number(payment.metadata?.plan_months || PREMIUM_MONTHS) || PREMIUM_MONTHS;
   const validUntil = isLifetimeFree
     ? LIFETIME_PREMIUM_DATE
-    : addMonthsFrom(profile.premium_until, PREMIUM_MONTHS);
+    : addMonthsFrom(profile.premium_until, planMonths);
 
   const { error: activationError } = await adminClient
     .from("profiles")
@@ -254,6 +302,8 @@ Deno.serve(async (req: Request) => {
       .eq("id", payment.id);
     return errorResponse("Premium activation failed.", 500);
   }
+
+  await savePlanTypeForUser(adminClient, user.id, planTier);
 
   await assignBalancedTeacherToStudent(adminClient, user.id);
 
@@ -292,5 +342,6 @@ Deno.serve(async (req: Request) => {
     payment_id: payment.id,
     valid_until: validUntil,
     is_lifetime_free: isLifetimeFree,
+    plan_tier: planTier,
   });
 });

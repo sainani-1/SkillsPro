@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -440,6 +440,11 @@ const Sidebar = () => {
               {shouldShowText && <span className="truncate text-sm font-medium">Courses</span>}
             </NavLink>
 
+            <NavLink to="/app/notes-library" className={navItemClass} title="Notes Library">
+              <FileText size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Notes Library</span>}
+            </NavLink>
+
             <NavLink to="/app/verify" className={navItemClass} title="Verify Certificate">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Verify Certificate</span>}
@@ -706,6 +711,14 @@ const Sidebar = () => {
             <NavLink to="/app/admin/manage-premium" className={navItemClass} title="Manage Premium">
               <Award size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Manage Premium</span>}
+            </NavLink>
+            <NavLink to="/app/admin/plans" className={navItemClass} title="Plan Management">
+              <CreditCard size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Plan Management</span>}
+            </NavLink>
+            <NavLink to="/app/admin/notes-library" className={navItemClass} title="Notes Library Admin">
+              <FileText size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Notes Library</span>}
             </NavLink>
             <NavLink to="/app/admin/teacher-assignment" className={navItemClass} title="Assign Teachers">
               <UserPlus size={28} />

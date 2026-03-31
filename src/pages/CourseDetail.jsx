@@ -236,6 +236,20 @@ const ContentProtectionNotice = () => (
   </div>
 );
 
+const NotesUpgradeCard = ({ title, message, ctaLabel }) => (
+  <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+    <Lock size={28} className="mx-auto text-amber-600" />
+    <p className="mt-3 font-semibold text-amber-900">{title}</p>
+    <p className="mt-1 text-sm text-amber-800">{message}</p>
+    <Link
+      to="/plans"
+      className="mt-4 inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-amber-700"
+    >
+      {ctaLabel}
+    </Link>
+  </div>
+);
+
 const AssetBlockedState = ({ icon: Icon, title, message }) => (
   <div className="text-center text-white px-6">
     <Icon size={44} className="mx-auto mb-4 text-amber-400" />
@@ -281,9 +295,11 @@ const CourseDetail = () => {
   const [driveVideoFallback, setDriveVideoFallback] = useState(false);
   const [savedVideoProgress, setSavedVideoProgress] = useState(null);
   const [resumePromptOpen, setResumePromptOpen] = useState(false);
-  const { user, profile, isPremium } = useAuth();
+  const { user, profile, isPremium, isPremiumPlus, getPlanTier } = useAuth();
   const { popupNode, openPopup } = usePopup();
   const premium = isPremium(profile);
+  const premiumPlus = isPremiumPlus(profile);
+  const planTier = getPlanTier(profile);
   const videoRef = useRef(null);
   const resumeAppliedRef = useRef(false);
   const lastSavedTimeRef = useRef(0);
@@ -488,6 +504,7 @@ const CourseDetail = () => {
       .filter(Boolean);
   }, [protectedAssets?.notes_url, protectedAssets?.notes_urls]);
   const activeNote = notesSources[activeNoteIndex] || null;
+  const notesPreviewImage = protectedAssets?.notes_image_url || '';
 
   const persistVideoProgress = (currentTime, duration) => {
     const safeCurrentTime = Number.isFinite(currentTime) ? currentTime : 0;
@@ -863,13 +880,17 @@ const CourseDetail = () => {
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 mb-6">Protected Course Notes</h2>
                     {!premium ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
-                        <Lock size={28} className="mx-auto text-amber-600" />
-                        <p className="mt-3 font-semibold text-amber-900">Premium access required</p>
-                        <p className="mt-1 text-sm text-amber-800">
-                          Only logged-in premium students can open notes.
-                        </p>
-                      </div>
+                      <NotesUpgradeCard
+                        title="Premium Plus required"
+                        message="Advanced notes are available in the Notes panel only with Premium Plus."
+                        ctaLabel="Buy Premium Plus"
+                      />
+                    ) : !premiumPlus ? (
+                      <NotesUpgradeCard
+                        title="Upgrade to Premium Plus"
+                        message="Your current Premium plan includes classes and video access. Upgrade to Premium Plus to unlock advanced notes here."
+                        ctaLabel="Upgrade to Premium Plus"
+                      />
                     ) : assetsLoading ? (
                       <LoadingSpinner message="Loading protected notes..." />
                     ) : activeNote?.blocked ? (
@@ -903,6 +924,18 @@ const CourseDetail = () => {
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                           Notes are previewed inside SkillPro only. Direct download and print actions are intentionally removed.
                         </div>
+                        {notesPreviewImage ? (
+                          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                            <img
+                              src={notesPreviewImage}
+                              alt={`${course.title} notes preview`}
+                              className="h-56 w-full object-cover sm:h-72"
+                            />
+                            <div className="border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+                              Preview image for protected notes. The original source link is not shown here.
+                            </div>
+                          </div>
+                        ) : null}
                         {notesSources.length > 1 ? (
                           <div className="flex flex-wrap gap-2">
                             {notesSources.map((note, index) => (
@@ -932,9 +965,23 @@ const CourseDetail = () => {
                         </div>
                       </div>
                     ) : (
-                      <div className="text-center py-8 text-slate-500">
-                        <FileText size={32} className="mx-auto mb-3 text-slate-300" />
-                        <p>No protected notes available yet</p>
+                      <div className="space-y-4">
+                        {notesPreviewImage ? (
+                          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                            <img
+                              src={notesPreviewImage}
+                              alt={`${course.title} notes preview`}
+                              className="h-56 w-full object-cover sm:h-72"
+                            />
+                            <div className="border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+                              Preview image for protected notes. Add a notes URL in admin if you also want an in-site document preview.
+                            </div>
+                          </div>
+                        ) : null}
+                        <div className="text-center py-8 text-slate-500">
+                          <FileText size={32} className="mx-auto mb-3 text-slate-300" />
+                          <p>No protected notes available yet</p>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -979,7 +1026,14 @@ const CourseDetail = () => {
                   <p className="text-sm text-slate-500 uppercase font-semibold">Premium status</p>
                   <p className={`font-semibold flex items-center ${premium ? 'text-emerald-600' : 'text-amber-600'}`}>
                     {premium ? <CheckCircle size={18} className="mr-2" /> : <Lock size={18} className="mr-2" />}
-                    {premium ? 'Verified premium access' : 'Upgrade required for notes and video'}
+                    {premium ? `Verified ${planTier === 'premium_plus' ? 'Premium Plus' : 'Premium'} access` : 'Upgrade required for video'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 uppercase font-semibold">Notes access</p>
+                  <p className={`font-semibold flex items-center ${premiumPlus ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {premiumPlus ? <CheckCircle size={18} className="mr-2" /> : <Lock size={18} className="mr-2" />}
+                    {premiumPlus ? 'Advanced notes unlocked' : premium ? 'Upgrade to Premium Plus for notes' : 'Buy Premium Plus for notes'}
                   </p>
                 </div>
                 <div className="pt-4 border-t border-slate-200">

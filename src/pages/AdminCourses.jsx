@@ -89,6 +89,7 @@ const AdminCourses = () => {
       description: savedDraft.description || '',
       video_url: savedDraft.video_url || '',
       thumbnail_url: savedDraft.thumbnail_url || '',
+      notes_image_url: savedDraft.notes_image_url || '',
       notes_urls: normalizeNotesDraft(savedDraft.notes_urls || savedDraft.notes_url),
       is_free: !!savedDraft.is_free,
     };
@@ -291,6 +292,7 @@ const AdminCourses = () => {
       try {
         const savedAssets = await upsertCourseProtectedAssets(course.id, {
           video_url: course.video_url,
+          notes_image_url: course.notes_image_url,
           notes_urls: course.notes_urls,
         });
         setCourses((prev) => prev.map((item) => (
@@ -327,7 +329,7 @@ const AdminCourses = () => {
     }
 
     try {
-      const { video_url, notes_urls, ...coursePayload } = newCourse;
+      const { video_url, notes_image_url, notes_urls, ...coursePayload } = newCourse;
       const { data, error } = await supabase
         .from('courses')
         .insert([{ ...coursePayload, is_free: !!newCourse.is_free }])
@@ -336,7 +338,7 @@ const AdminCourses = () => {
 
       if (error) throw error;
 
-      await upsertCourseProtectedAssets(data.id, { video_url, notes_urls });
+      await upsertCourseProtectedAssets(data.id, { video_url, notes_image_url, notes_urls });
 
       // Create default exam for the course
       const { error: examCreateError } = await supabase
@@ -364,6 +366,7 @@ const AdminCourses = () => {
         description: '',
         video_url: '',
         thumbnail_url: '',
+        notes_image_url: '',
         notes_urls: [...EMPTY_NOTES_DRAFT],
         is_free: false
       });
@@ -373,6 +376,7 @@ const AdminCourses = () => {
         description: '',
         video_url: '',
         thumbnail_url: '',
+        notes_image_url: '',
         notes_urls: [...EMPTY_NOTES_DRAFT],
         is_free: false
       });
@@ -949,6 +953,18 @@ const AdminCourses = () => {
                     />
 
                     <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Notes Preview Image URL</label>
+                      <input
+                        type="url"
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={course.notes_image_url || ''}
+                        onChange={e => handleCourseChange(course.id, 'notes_image_url', e.target.value)}
+                        placeholder="https://example.com/advanced-notes-cover.jpg"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">This image is shown only as an in-site preview card. Users do not get a clickable external link.</p>
+                    </div>
+
+                    <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-2">Description/Notes</label>
                       <textarea
                         className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24"
@@ -1126,6 +1142,21 @@ const AdminCourses = () => {
                   addButtonClassName="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
                   removeButtonClassName="inline-flex items-center justify-center rounded border border-red-200 px-2 py-2 text-red-600 hover:bg-red-50"
                 />
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Notes Preview Image URL</label>
+                  <input
+                    type="url"
+                    className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    value={selectedCourse.notes_image_url || ''}
+                    onChange={e => {
+                      setCourses(prev => prev.map(c => c.id === selectedCourse.id ? { ...c, notes_image_url: e.target.value } : c));
+                      setSelectedCourse(prev => ({ ...prev, notes_image_url: e.target.value }));
+                    }}
+                    placeholder="https://example.com/advanced-notes-cover.jpg"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">Shown inside SkillPro as a preview image only.</p>
+                </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
@@ -1430,6 +1461,20 @@ const AdminCourses = () => {
                 placeholder="https://example.com/course-notes.pdf"
               />
 
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Notes Preview Image URL
+                </label>
+                <input
+                  type="url"
+                  value={newCourse.notes_image_url}
+                  onChange={(e) => setNewCourse({ ...newCourse, notes_image_url: e.target.value })}
+                  placeholder="https://example.com/course-notes-cover.jpg"
+                  className="w-full p-2 border border-slate-300 rounded"
+                />
+                <p className="text-xs text-slate-500 mt-1">Used for the protected notes preview card inside the website only.</p>
+              </div>
+
               {/* Free/Paid Toggle */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
@@ -1454,7 +1499,7 @@ const AdminCourses = () => {
               <button
                 onClick={() => {
                   setShowNewCourseForm(false);
-                  setNewCourse({ title: '', category: '', description: '', video_url: '', thumbnail_url: '', notes_urls: [...EMPTY_NOTES_DRAFT], is_free: false });
+                  setNewCourse({ title: '', category: '', description: '', video_url: '', thumbnail_url: '', notes_image_url: '', notes_urls: [...EMPTY_NOTES_DRAFT], is_free: false });
                 }}
                 className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded hover:bg-slate-50 transition-colors font-semibold"
               >

@@ -6,11 +6,13 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const DEFAULT_PLAN_FORM = {
   name: '',
+  tier: 'premium',
   cost: '',
   isLifetimeFree: false,
   periodMonths: '6',
   validUntil: '',
   description: '',
+  features: '',
   isActive: true,
 };
 
@@ -18,6 +20,9 @@ const AdminSettings = () => {
   const [examDuration, setExamDuration] = useState(60);
   const [minQuestions, setMinQuestions] = useState(25);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [premiumPlusCost, setPremiumPlusCost] = useState(299);
+  const [paymentUrgencyDate, setPaymentUrgencyDate] = useState('2026-04-15');
+  const [paymentUrgencyLabel, setPaymentUrgencyLabel] = useState('April 15, 2026');
   const [resumeBuilderAccess, setResumeBuilderAccess] = useState('premium');
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const [registrationPaused, setRegistrationPaused] = useState(false);
@@ -42,7 +47,18 @@ const AdminSettings = () => {
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((p) => p && p.id && p.name);
+      return parsed
+        .filter((p) => p && p.id && p.name)
+        .map((plan) => ({
+          ...plan,
+          tier: plan.tier === 'premium_plus' ? 'premium_plus' : 'premium',
+          features: Array.isArray(plan.features)
+            ? plan.features.filter(Boolean)
+            : String(plan.features || '')
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean),
+        }));
     } catch {
       return [];
     }
@@ -53,18 +69,29 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['exam_duration', 'premium_cost', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
+        .in('key', ['exam_duration', 'premium_cost', 'premium_plus_cost', 'payment_urgency_banner', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
 
       if (error) throw error;
 
       (data || []).forEach((setting) => {
         if (setting.key === 'exam_duration') setExamDuration(parseInt(setting.value, 10) || 60);
         if (setting.key === 'premium_cost') setPremiumCost(parseInt(setting.value, 10) || 199);
+        if (setting.key === 'premium_plus_cost') setPremiumPlusCost(parseInt(setting.value, 10) || 299);
         if (setting.key === 'registration_paused') setRegistrationPaused(setting.value === 'true');
         if (setting.key === 'min_questions') setMinQuestions(parseInt(setting.value, 10) || 25);
         if (setting.key === 'public_plans') setPlans(parsePlans(setting.value));
         if (setting.key === 'support_contact_email') setSupportContactEmail(setting.value || '');
         if (setting.key === 'resume_builder_access') setResumeBuilderAccess(setting.value === 'free' ? 'free' : 'premium');
+        if (setting.key === 'payment_urgency_banner') {
+          try {
+            const parsed = setting.value ? JSON.parse(setting.value) : null;
+            if (parsed?.effectiveDate) setPaymentUrgencyDate(parsed.effectiveDate);
+            if (parsed?.label) setPaymentUrgencyLabel(parsed.label);
+          } catch {
+            setPaymentUrgencyDate('2026-04-15');
+            setPaymentUrgencyLabel('April 15, 2026');
+          }
+        }
       });
     } catch (error) {
       openPopup('Error', `Failed to load settings: ${error.message}`, 'error');
@@ -85,10 +112,19 @@ const AdminSettings = () => {
       setSavingGeneral(true);
       await saveSetting('exam_duration', examDuration);
       await saveSetting('premium_cost', premiumCost);
+      await saveSetting('premium_plus_cost', premiumPlusCost);
       await saveSetting('registration_paused', registrationPaused);
       await saveSetting('min_questions', minQuestions);
       await saveSetting('support_contact_email', supportContactEmail.trim());
       await saveSetting('resume_builder_access', resumeBuilderAccess);
+      await saveSetting('payment_urgency_banner', JSON.stringify({
+        effectiveDate: paymentUrgencyDate,
+        label: paymentUrgencyLabel.trim() || new Date(paymentUrgencyDate).toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }),
+      }));
       openPopup('Success', 'General settings saved successfully.', 'success');
     } catch (error) {
       openPopup('Error', `Failed to save settings: ${error.message}`, 'error');
@@ -120,11 +156,16 @@ const AdminSettings = () => {
     const newPlan = {
       id: `plan_${Date.now()}`,
       name: planForm.name.trim(),
+      tier: planForm.tier === 'premium_plus' ? 'premium_plus' : 'premium',
       cost: planForm.isLifetimeFree ? 0 : Number(planForm.cost),
       isLifetimeFree: !!planForm.isLifetimeFree,
       periodMonths: planForm.periodMonths ? Number(planForm.periodMonths) : null,
       validUntil: planForm.validUntil || null,
       description: planForm.description.trim() || null,
+      features: planForm.features
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
       isActive: !!planForm.isActive,
       createdAt: new Date().toISOString(),
     };
@@ -203,6 +244,16 @@ const AdminSettings = () => {
             />
           </div>
           <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Default Premium Plus Cost (INR)</label>
+            <input
+              type="number"
+              min="0"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              value={premiumPlusCost}
+              onChange={(e) => setPremiumPlusCost(parseInt(e.target.value, 10) || 299)}
+            />
+          </div>
+          <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Support Contact Email</label>
             <input
               type="email"
@@ -211,6 +262,26 @@ const AdminSettings = () => {
               value={supportContactEmail}
               onChange={(e) => setSupportContactEmail(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Urgency Date</label>
+            <input
+              type="date"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              value={paymentUrgencyDate}
+              onChange={(e) => setPaymentUrgencyDate(e.target.value)}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Urgency Banner Label</label>
+            <input
+              type="text"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              placeholder="April 15, 2026"
+              value={paymentUrgencyLabel}
+              onChange={(e) => setPaymentUrgencyLabel(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-slate-500">This text appears on the payment page urgency banner.</p>
           </div>
           <div className="flex items-end">
             <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -278,6 +349,17 @@ const AdminSettings = () => {
             />
           </div>
           <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Plan Tier</label>
+            <select
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              value={planForm.tier}
+              onChange={(e) => setPlanForm((p) => ({ ...p, tier: e.target.value }))}
+            >
+              <option value="premium">Premium</option>
+              <option value="premium_plus">Premium Plus</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Cost (INR)</label>
             <input
               type="number"
@@ -318,6 +400,17 @@ const AdminSettings = () => {
               value={planForm.description}
               onChange={(e) => setPlanForm((p) => ({ ...p, description: e.target.value }))}
             />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Plan Features</label>
+            <textarea
+              rows={4}
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              placeholder={`One feature per line\nAll classes\nRegular notes\nAdvanced notes`}
+              value={planForm.features}
+              onChange={(e) => setPlanForm((p) => ({ ...p, features: e.target.value }))}
+            />
+            <p className="mt-1 text-xs text-slate-500">Add one feature per line. This is useful for Premium and Premium Plus.</p>
           </div>
           <div className="md:col-span-2 flex flex-wrap gap-6">
             <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -363,11 +456,17 @@ const AdminSettings = () => {
               <div key={plan.id} className="border border-slate-200 rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <p className="font-semibold text-slate-900">{plan.name}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {plan.tier === 'premium_plus' ? 'Premium Plus' : 'Premium'}
+                  </p>
                   <p className="text-sm text-slate-600">
                     {plan.isLifetimeFree ? 'Lifetime Free' : `INR ${plan.cost || 0}`} | Period: {plan.periodMonths || '-'} month(s)
                     {plan.validUntil ? ` | Valid until: ${new Date(plan.validUntil).toLocaleDateString('en-IN')}` : ''}
                   </p>
                   {plan.description ? <p className="text-xs text-slate-500 mt-1">{plan.description}</p> : null}
+                  {Array.isArray(plan.features) && plan.features.length > 0 ? (
+                    <p className="text-xs text-slate-500 mt-1">{plan.features.join(' • ')}</p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button

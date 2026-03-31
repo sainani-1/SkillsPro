@@ -59,6 +59,7 @@ import AILearningPath from './pages/AILearningPath';
 import AdminExamOverrides from './pages/AdminExamOverrides';
 import InterviewPrep from './pages/InterviewPrep';
 import PremiumStatus from './pages/PremiumStatus';
+import NotesLibrary from './pages/NotesLibrary';
 import Offers from './pages/Offers';
 import AdminExamRetakes from './pages/AdminExamRetakes';
 import AdminActiveCoupons from './pages/AdminActiveCoupons';
@@ -109,6 +110,7 @@ import ClassFeedback from './pages/ClassFeedback';
 import AdminAutoAssignedStudents from './pages/AdminAutoAssignedStudents';
 import AdminMFARules from './pages/AdminMFARules';
 import AdminMultiSessionAlerts from './pages/AdminMultiSessionAlerts';
+import AdminNotesLibrary from './pages/AdminNotesLibrary';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -311,6 +313,7 @@ function App() {
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
           <Route index element={<Dashboard />} />
           <Route path="courses" element={<CourseList />} />
+          <Route path="notes-library" element={<NotesLibrary />} />
           <Route path="all-in-one" element={<StaffAllInOneRoute><LiveExamProctoring forcedPanel="all-in-one" /></StaffAllInOneRoute>} />
           <Route path="write-test" element={<StudentWriteTest />} />
           <Route path="course/:courseId" element={<CourseDetail />} />
@@ -375,6 +378,8 @@ function App() {
           <Route path="admin/user-access" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
           <Route path="admin/user-access/:userId" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />
+          <Route path="admin/plans" element={<AdminRoute><AdminSettings /></AdminRoute>} />
+          <Route path="admin/notes-library" element={<AdminRoute><AdminNotesLibrary /></AdminRoute>} />
           <Route path="admin/teacher-assignment" element={<AdminRoute><TeacherAssignment /></AdminRoute>} />
           <Route path="admin/student-reassignments" element={<AdminRoute><AdminStudentReassignments /></AdminRoute>} />
           <Route path="admin/auto-assigned-students" element={<AdminRoute><AdminAutoAssignedStudents /></AdminRoute>} />

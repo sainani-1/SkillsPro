@@ -25,6 +25,63 @@ type OfferRow = {
 
 type CreateOrderPayload = {
   offer_id?: string | null;
+  plan_tier?: string | null;
+};
+
+const PREMIUM_PLAN_TYPES_KEY = "premium_plan_types";
+const normalizePlanTier = (value: string | null | undefined) => (value === "premium_plus" ? "premium_plus" : "premium");
+
+const parsePlanTypeMap = (rawValue: string | null | undefined) => {
+  if (!rawValue) return {} as Record<string, string>;
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {} as Record<string, string>;
+    return Object.entries(parsed).reduce((acc, [userId, planType]) => {
+      const normalizedUserId = String(userId || "").trim();
+      if (!normalizedUserId) return acc;
+      acc[normalizedUserId] = normalizePlanTier(String(planType || ""));
+      return acc;
+    }, {} as Record<string, string>);
+  } catch {
+    return {} as Record<string, string>;
+  }
+};
+
+const savePlanTypeForUser = async (
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  planTier: string,
+) => {
+  const { data: existingSetting } = await adminClient
+    .from("settings")
+    .select("value")
+    .eq("key", PREMIUM_PLAN_TYPES_KEY)
+    .maybeSingle();
+
+  const planTypeMap = parsePlanTypeMap(existingSetting?.value);
+  planTypeMap[userId] = normalizePlanTier(planTier);
+
+  const { error } = await adminClient
+    .from("settings")
+    .upsert(
+      {
+        key: PREMIUM_PLAN_TYPES_KEY,
+        value: JSON.stringify(planTypeMap),
+      },
+      { onConflict: "key" },
+    );
+
+  if (error) throw error;
+};
+
+const pickLatestPlanForTier = (plans: any[], tier: string) => {
+  return (plans || [])
+    .filter((plan) => plan?.isActive && normalizePlanTier(plan?.tier) === tier)
+    .sort((a, b) => {
+      const aTime = new Date(a?.createdAt || 0).getTime();
+      const bTime = new Date(b?.createdAt || 0).getTime();
+      return bTime - aTime;
+    })[0] ?? null;
 };
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
@@ -187,7 +244,40 @@ Deno.serve(async (req: Request) => {
     .eq("key", "premium_cost")
     .maybeSingle();
 
-  const baseAmount = parseMoney(Number.parseFloat(String(premiumSetting?.value ?? "199")) || 199);
+  const { data: premiumPlusSetting } = await adminClient
+    .from("settings")
+    .select("value")
+    .eq("key", "premium_plus_cost")
+    .maybeSingle();
+
+  const fallbackPremiumCost = parseMoney(Number.parseFloat(String(premiumSetting?.value ?? "199")) || 199);
+  const fallbackPremiumPlusCost = parseMoney(Number.parseFloat(String(premiumPlusSetting?.value ?? "")) || Math.max(fallbackPremiumCost + 100, 299));
+  const selectedPlanTier = normalizePlanTier(payload.plan_tier);
+  let selectedPlanLabel = selectedPlanTier === "premium_plus" ? "Premium Plus" : "Premium";
+  let selectedPlanCode = selectedPlanTier === "premium_plus" ? "premium_plus_6months" : "premium_6months";
+  let selectedPlanMonths = PREMIUM_MONTHS;
+  let baseAmount = selectedPlanTier === "premium_plus" ? fallbackPremiumPlusCost : fallbackPremiumCost;
+
+  const { data: publicPlansSetting } = await adminClient
+    .from("settings")
+    .select("value")
+    .eq("key", "public_plans")
+    .maybeSingle();
+
+  try {
+    const publicPlans = publicPlansSetting?.value ? JSON.parse(publicPlansSetting.value) : [];
+    if (Array.isArray(publicPlans)) {
+      const selectedPlan = pickLatestPlanForTier(publicPlans, selectedPlanTier);
+      if (selectedPlan) {
+        baseAmount = selectedPlanTier === "premium_plus" ? fallbackPremiumPlusCost : fallbackPremiumCost;
+        selectedPlanLabel = String(selectedPlan.name || selectedPlanLabel);
+        selectedPlanCode = String(selectedPlan.id || selectedPlanCode);
+        selectedPlanMonths = Number(selectedPlan.periodMonths || PREMIUM_MONTHS) || PREMIUM_MONTHS;
+      }
+    }
+  } catch {
+    // Keep fallback premium pricing if public plans cannot be parsed.
+  }
 
   let selectedOffer: OfferRow | null = null;
   if (payload.offer_id) {
@@ -237,13 +327,13 @@ Deno.serve(async (req: Request) => {
   const paymentGateway = discount.finalAmount <= 0 ? "coupon" : "razorpay";
   const validUntil = discount.isLifetimeFree
     ? LIFETIME_PREMIUM_DATE
-    : addMonthsFrom(profile.premium_until, PREMIUM_MONTHS);
+    : addMonthsFrom(profile.premium_until, selectedPlanMonths);
 
   const { data: payment, error: paymentError } = await adminClient
     .from("payments")
     .insert({
       user_id: user.id,
-      plan_code: "premium_6months",
+      plan_code: selectedPlanCode,
       gateway: paymentGateway,
       status: discount.finalAmount <= 0 ? "success" : "created",
       base_amount: baseAmount,
@@ -256,7 +346,9 @@ Deno.serve(async (req: Request) => {
       valid_until: validUntil,
       paid_at: discount.finalAmount <= 0 ? new Date().toISOString() : null,
       metadata: {
-        plan_label: "Premium Access - 6 Months",
+        plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
+        plan_tier: selectedPlanTier,
+        plan_months: selectedPlanMonths,
         coupon_name: selectedOffer?.coupon_name ?? null,
         coupon_type: selectedOffer?.discount_type ?? null,
         is_lifetime_free: discount.isLifetimeFree,
@@ -283,6 +375,8 @@ Deno.serve(async (req: Request) => {
         .eq("id", payment.id);
       return errorResponse("Payment was recorded but premium activation failed.", 500);
     }
+
+    await savePlanTypeForUser(adminClient, user.id, selectedPlanTier);
 
     await assignBalancedTeacherToStudent(adminClient, user.id);
 
@@ -343,6 +437,7 @@ Deno.serve(async (req: Request) => {
         payment_id: payment.id,
         user_id: user.id,
         coupon_code: discount.couponCode || "",
+        plan_tier: selectedPlanTier,
       },
     }),
   });
@@ -384,5 +479,6 @@ Deno.serve(async (req: Request) => {
     final_amount: discount.finalAmount,
     coupon_code: discount.couponCode,
     valid_until: validUntil,
+    plan_tier: selectedPlanTier,
   });
 });

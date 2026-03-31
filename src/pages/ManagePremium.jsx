@@ -5,6 +5,8 @@ import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { logAdminActivity } from '../utils/adminActivityLogger';
 import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
+import { formatPremiumLabel, getPremiumDaysRemaining, getPremiumPlanType, hasPremiumAccess, isLifetimePremium, isPremiumExpiringSoon } from '../utils/premium';
+import { clearUserPremiumPlanType, fetchPremiumPlanTypeMap, setUserPremiumPlanType } from '../utils/premiumPlanTypes';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
 
@@ -15,6 +17,7 @@ const ManagePremium = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [validUntil, setValidUntil] = useState('');
   const [grantLifetimePremium, setGrantLifetimePremium] = useState(false);
+  const [selectedPlanType, setSelectedPlanType] = useState('premium');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -22,9 +25,6 @@ const ManagePremium = () => {
   const [userToRevoke, setUserToRevoke] = useState(null);
   const [grantHistory, setGrantHistory] = useState([]);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
-
-  const isLifetimePremium = (premiumUntil) =>
-    Boolean(premiumUntil) && new Date(premiumUntil).getUTCFullYear() >= 9999;
 
   useEffect(() => {
     loadUsers();
@@ -51,12 +51,19 @@ const ManagePremium = () => {
   };
 
   const loadUsers = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('role', 'student')
-      .order('full_name');
-    setUsers(data || []);
+    const [{ data }, planTypeMap] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'student')
+        .order('full_name'),
+      fetchPremiumPlanTypeMap(),
+    ]);
+
+    setUsers((data || []).map((user) => ({
+      ...user,
+      premium_plan_type: planTypeMap[user.id] || 'premium',
+    })));
   };
 
   const loadGrantHistory = async () => {
@@ -135,9 +142,11 @@ const ManagePremium = () => {
       const reasonText = reason.trim();
 
       const { error: profileUpdateError } = await supabase.from('profiles').update({
-        premium_until: effectiveValidUntil
+        premium_until: effectiveValidUntil,
       }).eq('id', selectedUser.id);
       if (profileUpdateError) throw profileUpdateError;
+
+      await setUserPremiumPlanType(selectedUser.id, selectedPlanType);
 
       await assignBalancedTeacherToStudent(supabase, selectedUser.id);
 
@@ -152,8 +161,8 @@ const ManagePremium = () => {
       await pushNotification({
         title: 'Premium Granted',
         content: grantLifetimePremium
-          ? `Your premium membership now has lifetime access. Reason: ${reasonText}`
-          : `Your premium membership is active until ${new Date(effectiveValidUntil).toLocaleDateString('en-IN')}. Reason: ${reasonText}`,
+          ? `Your ${selectedPlanType === 'premium_plus' ? 'Premium Plus' : 'Premium'} membership now has lifetime access. Reason: ${reasonText}`
+          : `Your ${selectedPlanType === 'premium_plus' ? 'Premium Plus' : 'Premium'} membership is active until ${new Date(effectiveValidUntil).toLocaleDateString('en-IN')}. Reason: ${reasonText}`,
         type: 'success',
         target_role: 'student',
         target_user_id: selectedUser.id,
@@ -168,6 +177,7 @@ const ManagePremium = () => {
           module: 'manage-premium',
           user_email: selectedUser?.email || null,
           valid_until: effectiveValidUntil,
+          premium_plan_type: selectedPlanType,
           reason: reasonText,
         },
       });
@@ -183,6 +193,7 @@ const ManagePremium = () => {
       setStudentQuery('');
       setValidUntil('');
       setGrantLifetimePremium(false);
+      setSelectedPlanType('premium');
       setReason('');
       await loadUsers();
       await loadGrantHistory();
@@ -205,38 +216,62 @@ const ManagePremium = () => {
 
   const confirmRevoke = async () => {
     if (!userToRevoke) return;
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    await supabase.from('profiles').update({ premium_until: null }).eq('id', userToRevoke.id);
-    await pushNotification({
-      title: 'Premium Revoked',
-      content: 'Your premium membership was revoked by admin.',
-      type: 'warning',
-      target_role: 'student',
-      target_user_id: userToRevoke.id,
-      admin_id: user?.id || null,
-    });
-    await logAdminActivity({
-      adminId: user?.id,
-      eventType: 'action',
-      action: 'Revoked premium access',
-      target: userToRevoke?.id || null,
-      details: {
-        module: 'manage-premium',
-        user_email: userToRevoke?.email || null,
-      },
-    });
-    setShowRevokeModal(false);
-    setUserToRevoke(null);
-    setAlertModal({
-      show: true,
-      title: 'Success',
-      message: '✅ Premium access revoked successfully!',
-      type: 'success'
-    });
-    await loadUsers();
-    await loadGrantHistory();
+    setLoading(true);
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+
+      const { error: revokeError } = await supabase
+        .from('profiles')
+        .update({ premium_until: null })
+        .eq('id', userToRevoke.id);
+
+      if (revokeError) throw revokeError;
+      await clearUserPremiumPlanType(userToRevoke.id);
+
+      await pushNotification({
+        title: 'Premium Revoked',
+        content: 'Your premium membership was revoked by admin.',
+        type: 'warning',
+        target_role: 'student',
+        target_user_id: userToRevoke.id,
+        admin_id: user?.id || null,
+      });
+      await logAdminActivity({
+        adminId: user?.id,
+        eventType: 'action',
+        action: 'Revoked premium access',
+        target: userToRevoke?.id || null,
+        details: {
+          module: 'manage-premium',
+          user_email: userToRevoke?.email || null,
+        },
+      });
+      setShowRevokeModal(false);
+      setUserToRevoke(null);
+      if (selectedUser?.id === userToRevoke.id) {
+        setSelectedUser(null);
+        setStudentQuery('');
+      }
+      setAlertModal({
+        show: true,
+        title: 'Success',
+        message: 'Premium access revoked successfully.',
+        type: 'success'
+      });
+      await loadUsers();
+      await loadGrantHistory();
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'Error',
+        message: error.message || 'Failed to revoke premium access.',
+        type: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filtered = users.filter(u =>
@@ -322,6 +357,20 @@ const ManagePremium = () => {
               <p className="mt-2 text-xs text-emerald-700">Lifetime premium will be granted (no expiry).</p>
             )}
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Plan Type</label>
+            <select
+              value={selectedPlanType}
+              onChange={(e) => setSelectedPlanType(e.target.value)}
+              className="w-full border rounded-lg p-2"
+            >
+              <option value="premium">Premium</option>
+              <option value="premium_plus">Premium Plus</option>
+            </select>
+            <p className="mt-2 text-xs text-slate-500">
+              Premium Plus can be used to unlock advanced notes and extra study material.
+            </p>
+          </div>
         </div>
         <div className="mb-4">
           <label className="block text-sm font-medium mb-2">Reason</label>
@@ -358,9 +407,12 @@ const ManagePremium = () => {
         </div>
         <div className="space-y-2">
           {filtered.map(user => {
-            const isPremium = user.premium_until && new Date(user.premium_until) > new Date();
+            const isPremium = hasPremiumAccess(user);
+            const daysRemaining = getPremiumDaysRemaining(user.premium_until);
+            const expiringSoon = isPremiumExpiringSoon(user.premium_until, 5);
+            const planType = getPremiumPlanType(user);
             return (
-              <div key={user.id} className="flex items-center justify-between p-3 border rounded-lg">
+              <div key={user.id} className="flex flex-col gap-3 rounded-lg border p-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-3">
                   <img 
                     src={user.avatar_url || 'https://via.placeholder.com/40'} 
@@ -372,14 +424,19 @@ const ManagePremium = () => {
                     <p className="text-xs text-slate-500">{user.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
                   {isPremium ? (
                     <>
                       <span className="text-xs bg-gold-100 text-gold-800 px-3 py-1 rounded-full">
                         {isLifetimePremium(user.premium_until)
-                          ? 'Premium Lifetime'
-                          : `Premium until ${new Date(user.premium_until).toLocaleDateString()}`}
+                          ? `${planType === 'premium_plus' ? 'Premium Plus' : 'Premium'} Lifetime`
+                          : `${planType === 'premium_plus' ? 'Premium Plus' : 'Premium'} until ${formatPremiumLabel(user.premium_until)}`}
                       </span>
+                      {expiringSoon ? (
+                        <span className="text-xs bg-amber-100 text-amber-800 px-3 py-1 rounded-full">
+                          Expiring soon: {daysRemaining} day{daysRemaining === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
                       <button 
                         onClick={() => revokePremium(user.id)}
                         className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded-lg hover:bg-red-200"
@@ -429,7 +486,7 @@ const ManagePremium = () => {
                     <td className="py-2 text-slate-700">
                       {isLifetimePremium(g.valid_until)
                         ? 'Lifetime'
-                        : (g.valid_until ? new Date(g.valid_until).toLocaleDateString('en-IN') : 'N/A')}
+                        : (g.valid_until ? formatPremiumLabel(g.valid_until) : 'N/A')}
                     </td>
                     <td className="py-2 text-slate-700">{g.admin_name}</td>
                     <td className="py-2 text-slate-500">
@@ -462,6 +519,9 @@ const ManagePremium = () => {
                 {grantLifetimePremium
                   ? 'Lifetime'
                   : new Date(validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
+              <p className="text-sm mt-2">
+                <strong>Plan:</strong> {selectedPlanType === 'premium_plus' ? 'Premium Plus' : 'Premium'}
               </p>
               {reason && (
                 <p className="text-sm mt-2">
