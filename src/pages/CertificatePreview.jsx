@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || '/skillpro-logo.png';
+const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
+const ISSUED_SIGNATURE_URL = '/skillpro-issued-sign.svg';
 
 const generateDeterministicCode = (seed) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -129,6 +131,49 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
   ctx.fillStyle = '#1e293b';
   ctx.fillText(`Date: ${completionDate}`, 70, 760);
   ctx.fillText(`Certificate ID: ${formattedId}`, 70, 790);
+
+  try {
+    const signatureImg = new Image();
+    signatureImg.crossOrigin = 'anonymous';
+    await new Promise((resolve) => {
+      signatureImg.onload = () => {
+        ctx.drawImage(signatureImg, 945, 690, 150, 72);
+        resolve();
+      };
+      signatureImg.onerror = () => resolve();
+      signatureImg.src = FOUNDER_SIGNATURE_URL;
+    });
+  } catch (e) {
+    // Continue without founder signature image.
+  }
+
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(950, 755);
+  ctx.lineTo(1100, 755);
+  ctx.stroke();
+  ctx.textAlign = 'right';
+  ctx.font = '14px Arial';
+  ctx.fillStyle = '#1e293b';
+  ctx.fillText('Founder, SkillPro', 1100, 795);
+  ctx.font = '13px Arial';
+  ctx.fillText('Issued by SkillPro', 1100, 818);
+
+  try {
+    const issuedSignImg = new Image();
+    issuedSignImg.crossOrigin = 'anonymous';
+    await new Promise((resolve) => {
+      issuedSignImg.onload = () => {
+        ctx.drawImage(issuedSignImg, 955, 825, 140, 38);
+        resolve();
+      };
+      issuedSignImg.onerror = () => resolve();
+      issuedSignImg.src = ISSUED_SIGNATURE_URL;
+    });
+  } catch (e) {
+    // Continue without issued-by sign image.
+  }
 
   return canvas.toDataURL('image/png');
 };

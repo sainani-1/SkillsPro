@@ -40,6 +40,8 @@ const formatFallbackCertificateId = (submission) => {
 
 const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
+const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
+const ISSUED_SIGNATURE_URL = '/skillpro-issued-sign.svg';
 
 const isPermissionError = (error) => {
   const message = String(error?.message || '').toLowerCase();
@@ -141,6 +143,21 @@ const VerifyCertificate = () => {
       console.warn('Failed to load certificate logo:', err);
     }
 
+    try {
+      const signatureImg = new Image();
+      signatureImg.crossOrigin = 'anonymous';
+      await new Promise((resolve) => {
+        signatureImg.onload = () => {
+          ctx.drawImage(signatureImg, 945, 690, 150, 72);
+          resolve();
+        };
+        signatureImg.onerror = () => resolve();
+        signatureImg.src = FOUNDER_SIGNATURE_URL;
+      });
+    } catch (err) {
+      console.warn('Failed to load certificate signature:', err);
+    }
+
     if (!logoLoaded) {
       ctx.fillStyle = '#333333';
       ctx.font = 'bold 20px Arial';
@@ -208,6 +225,23 @@ const VerifyCertificate = () => {
     ctx.font = '14px Arial';
     ctx.fillStyle = '#1e293b';
     ctx.fillText('Founder, SkillPro', 1100, 795);
+    ctx.font = '13px Arial';
+    ctx.fillText('Issued by SkillPro', 1100, 818);
+
+    try {
+      const issuedSignImg = new Image();
+      issuedSignImg.crossOrigin = 'anonymous';
+      await new Promise((resolve) => {
+        issuedSignImg.onload = () => {
+          ctx.drawImage(issuedSignImg, 955, 825, 140, 38);
+          resolve();
+        };
+        issuedSignImg.onerror = () => resolve();
+        issuedSignImg.src = ISSUED_SIGNATURE_URL;
+      });
+    } catch (err) {
+      console.warn('Failed to load issued-by signature:', err);
+    }
 
     return canvas.toDataURL('image/png');
   };
