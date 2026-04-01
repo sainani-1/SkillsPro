@@ -137,7 +137,7 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
     signatureImg.crossOrigin = 'anonymous';
     await new Promise((resolve) => {
       signatureImg.onload = () => {
-        ctx.drawImage(signatureImg, 945, 690, 150, 72);
+        ctx.drawImage(signatureImg, footerCenterX - 75, 692, 150, 72);
         resolve();
       };
       signatureImg.onerror = () => resolve();
@@ -147,25 +147,19 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
     // Continue without founder signature image.
   }
 
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(950, 755);
-  ctx.lineTo(1100, 755);
-  ctx.stroke();
-  ctx.textAlign = 'right';
+  ctx.textAlign = 'center';
   ctx.font = '14px Arial';
   ctx.fillStyle = '#1e293b';
-  ctx.fillText('Founder, SkillPro', 1100, 795);
+  ctx.fillText('Founder, SkillPro', footerCenterX, 792);
   ctx.font = '13px Arial';
-  ctx.fillText('Issued by SkillPro', 1100, 818);
+  ctx.fillText('Issued by SkillPro', footerCenterX, 818);
 
   try {
     const issuedSignImg = new Image();
     issuedSignImg.crossOrigin = 'anonymous';
     await new Promise((resolve) => {
       issuedSignImg.onload = () => {
-        ctx.drawImage(issuedSignImg, 955, 825, 140, 38);
+        ctx.drawImage(issuedSignImg, footerCenterX - 70, 828, 140, 38);
         resolve();
       };
       issuedSignImg.onerror = () => resolve();
@@ -249,3 +243,4 @@ const CertificatePreview = () => {
 };
 
 export default CertificatePreview;
+  const footerCenterX = 1025;
