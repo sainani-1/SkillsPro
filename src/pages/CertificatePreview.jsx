@@ -4,7 +4,6 @@ import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || '/skillpro-logo.png';
 const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
-const ISSUED_SIGNATURE_URL = '/skillpro-issued-sign.svg';
 
 const generateDeterministicCode = (seed) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -153,21 +152,6 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
   ctx.fillText('Founder, SkillPro', footerCenterX, 792);
   ctx.font = '13px Arial';
   ctx.fillText('Issued by SkillPro', footerCenterX, 818);
-
-  try {
-    const issuedSignImg = new Image();
-    issuedSignImg.crossOrigin = 'anonymous';
-    await new Promise((resolve) => {
-      issuedSignImg.onload = () => {
-        ctx.drawImage(issuedSignImg, footerCenterX - 70, 828, 140, 38);
-        resolve();
-      };
-      issuedSignImg.onerror = () => resolve();
-      issuedSignImg.src = ISSUED_SIGNATURE_URL;
-    });
-  } catch (e) {
-    // Continue without issued-by sign image.
-  }
 
   return canvas.toDataURL('image/png');
 };

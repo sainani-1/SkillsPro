@@ -41,7 +41,6 @@ const formatFallbackCertificateId = (submission) => {
 const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
 const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
-const ISSUED_SIGNATURE_URL = '/skillpro-issued-sign.svg';
 
 const isPermissionError = (error) => {
   const message = String(error?.message || '').toLowerCase();
@@ -223,21 +222,6 @@ const VerifyCertificate = () => {
     ctx.fillText('Founder, SkillPro', footerCenterX, 792);
     ctx.font = '13px Arial';
     ctx.fillText('Issued by SkillPro', footerCenterX, 818);
-
-    try {
-      const issuedSignImg = new Image();
-      issuedSignImg.crossOrigin = 'anonymous';
-      await new Promise((resolve) => {
-        issuedSignImg.onload = () => {
-          ctx.drawImage(issuedSignImg, footerCenterX - 70, 828, 140, 38);
-          resolve();
-        };
-        issuedSignImg.onerror = () => resolve();
-        issuedSignImg.src = ISSUED_SIGNATURE_URL;
-      });
-    } catch (err) {
-      console.warn('Failed to load issued-by signature:', err);
-    }
 
     return canvas.toDataURL('image/png');
   };
