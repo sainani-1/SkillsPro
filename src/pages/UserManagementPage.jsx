@@ -218,6 +218,16 @@ const UserManagementPage = () => {
                   Instructors ({users.filter(u => u.role === 'instructor').length})
                 </button>
                 <button
+                  onClick={() => setRoleFilter('verifier')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    roleFilter === 'verifier'
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Verifiers ({users.filter(u => u.role === 'verifier').length})
+                </button>
+                <button
                   onClick={() => setRoleFilter('admin')}
                   className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                     roleFilter === 'admin' 
@@ -303,6 +313,7 @@ const UserManagementPage = () => {
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                           u.role === 'admin' ? 'bg-red-100 text-red-700' :
+                          u.role === 'verifier' ? 'bg-violet-100 text-violet-700' :
                           u.role === 'instructor' ? 'bg-indigo-100 text-indigo-700' :
                           u.role === 'teacher' ? 'bg-blue-100 text-blue-700' :
                           'bg-green-100 text-green-700'
@@ -353,6 +364,7 @@ const UserManagementPage = () => {
                           <option value="student">Student</option>
                           <option value="teacher">Teacher</option>
                           <option value="instructor">Instructor</option>
+                          <option value="verifier">Verifier</option>
                           <option value="admin">Admin</option>
                         </select>
                         <button
@@ -561,6 +573,7 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                             <option value="student">Student</option>
                             <option value="teacher">Teacher</option>
                             <option value="instructor">Instructor</option>
+                            <option value="verifier">Verifier</option>
                             <option value="admin">Admin</option>
                         </select>
                     </div>

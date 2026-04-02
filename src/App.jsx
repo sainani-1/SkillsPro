@@ -111,6 +111,10 @@ import AdminAutoAssignedStudents from './pages/AdminAutoAssignedStudents';
 import AdminMFARules from './pages/AdminMFARules';
 import AdminMultiSessionAlerts from './pages/AdminMultiSessionAlerts';
 import AdminNotesLibrary from './pages/AdminNotesLibrary';
+import StudentIdVerification from './pages/StudentIdVerification';
+import AdminIdVerifications from './pages/AdminIdVerifications';
+import AdminCertificateNameRequests from './pages/AdminCertificateNameRequests';
+import VerifierDashboard from './pages/VerifierDashboard';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -261,6 +265,15 @@ const InstructorRoute = ({ children }) => {
   return children;
 };
 
+const VerifierRoute = ({ children }) => {
+  const { profile, loading } = useAuth();
+
+  if (loading) return <LoadingSpinner message="Loading verifier panel..." />;
+  if (!profile || profile.role !== "verifier") return <Navigate to="/app" />;
+
+  return children;
+};
+
 const StaffAllInOneRoute = ({ children }) => {
   const { realProfile, profile, loading } = useAuth();
   const activeRole = realProfile?.role || profile?.role;
@@ -344,6 +357,9 @@ function App() {
           <Route path="learning-path" element={<AILearningPath />} />
           <Route path="interview-prep" element={<InterviewPrep />} />
           <Route path="premium-status" element={<PremiumStatus />} />
+          <Route path="verify-my-id" element={<StudentIdVerification />} />
+          <Route path="verify-id" element={<StudentIdVerification />} />
+          <Route path="verifymyid" element={<StudentIdVerification />} />
           <Route path="offers" element={<Offers />} />
           <Route path="coding-playground" element={<CodingPlayground />} />
           <Route path="discussion-forum" element={<DiscussionForum />} />
@@ -373,6 +389,8 @@ function App() {
           <Route path="instructor/live-attendance" element={<InstructorRoute><LiveExamProctoring forcedPanel="attendance" /></InstructorRoute>} />
           <Route path="instructor/live-alerts" element={<InstructorRoute><LiveExamProctoring forcedPanel="alerts" /></InstructorRoute>} />
           <Route path="instructor/live-messages" element={<InstructorRoute><LiveExamProctoring forcedPanel="messages" /></InstructorRoute>} />
+          <Route path="verifier" element={<VerifierRoute><VerifierDashboard /></VerifierRoute>} />
+          <Route path="verifier/id-verifications" element={<VerifierRoute><AdminIdVerifications /></VerifierRoute>} />
           <Route path="admin/student-progress" element={<AdminRoute><StudentProgress /></AdminRoute>} />
           <Route path="admin/student/:studentId" element={<AdminRoute><StudentDetail /></AdminRoute>} />
           <Route path="admin/user-access" element={<AdminRoute><AdminUserAccess /></AdminRoute>} />
@@ -380,6 +398,8 @@ function App() {
           <Route path="admin/manage-premium" element={<AdminRoute><ManagePremium /></AdminRoute>} />
           <Route path="admin/plans" element={<AdminRoute><AdminSettings /></AdminRoute>} />
           <Route path="admin/notes-library" element={<AdminRoute><AdminNotesLibrary /></AdminRoute>} />
+          <Route path="admin/id-verifications" element={<AdminRoute><AdminIdVerifications /></AdminRoute>} />
+          <Route path="admin/certificate-name-requests" element={<AdminRoute><AdminCertificateNameRequests /></AdminRoute>} />
           <Route path="admin/teacher-assignment" element={<AdminRoute><TeacherAssignment /></AdminRoute>} />
           <Route path="admin/student-reassignments" element={<AdminRoute><AdminStudentReassignments /></AdminRoute>} />
           <Route path="admin/auto-assigned-students" element={<AdminRoute><AdminAutoAssignedStudents /></AdminRoute>} />

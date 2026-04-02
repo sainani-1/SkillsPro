@@ -85,6 +85,7 @@ const Layout = () => {
       { label: 'Live Exams', path: '/app/live-exams' },
       { label: 'Write Test', path: '/app/write-test' },
       { label: 'My Certificates', path: '/app/my-certificates' },
+      { label: 'Verify My ID', path: '/app/verify-my-id' },
       { label: 'Live Classes', path: '/app/class-schedule' },
       { label: 'Premium Membership', path: '/app/premium-status' },
       { label: 'Discounts & Offers', path: '/app/offers' },
@@ -154,6 +155,8 @@ const Layout = () => {
       { label: 'Teacher Leaves', path: '/app/leaves' },
       { label: 'User Access', path: '/app/admin/user-access' },
       { label: 'Account Management', path: '/app/admin/accounts' },
+      { label: 'ID Verifications', path: '/app/admin/id-verifications' },
+      { label: 'Certificate Name Requests', path: '/app/admin/certificate-name-requests' },
       { label: 'Post Notifications', path: '/app/admin/notifications' },
       { label: 'Multi Session Alerts', path: '/app/admin/multi-session-alerts' },
       { label: 'Admin Courses', path: '/app/admin/courses' },
@@ -183,11 +186,21 @@ const Layout = () => {
       { label: 'Live Exams', path: '/app/live-exams' },
     ];
 
+    const verifierTargets = [
+      { label: 'Dashboard', path: '/app/verifier' },
+      { label: 'ID Verifications', path: '/app/verifier/id-verifications' },
+      { label: 'Notifications', path: '/app/notifications' },
+      { label: 'Settings', path: '/app/settings' },
+      { label: 'Sign Out', path: '__signout__' },
+    ];
+
     const targets =
       role === 'admin'
         ? adminTargets
         : role === 'teacher'
           ? teacherTargets
+          : role === 'verifier'
+            ? verifierTargets
           : role === 'instructor'
             ? instructorTargets
             : studentTargets;

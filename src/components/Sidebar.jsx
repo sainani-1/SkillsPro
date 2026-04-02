@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
 import { getChatReadTimes, markChatsAsRead } from '../utils/chatReadState';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const Sidebar = () => {
-  const { profile, realProfile, isImpersonating, stopImpersonation, signOut } = useAuth();
+  const { profile, realProfile, isImpersonating, stopImpersonation, signOut, isPremium, isPremiumPlus } = useAuth();
   const { unreadNotifications } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
@@ -21,6 +22,8 @@ const Sidebar = () => {
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
   const [newMultiSessionAlerts, setNewMultiSessionAlerts] = useState(0);
+  const premiumActive = isPremium(profile);
+  const premiumPlusActive = isPremiumPlus(profile);
   const isMissingTargetUserColumn = (err) => {
     const msg = String(err?.message || '').toLowerCase();
     const details = String(err?.details || '').toLowerCase();
@@ -418,6 +421,26 @@ const Sidebar = () => {
               {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
             </NavLink>
           </>
+        ) : role === 'verifier' ? (
+          <>
+            <NavLink to="/app/verifier" end className={navItemClass} title="Verifier Dashboard">
+              <LayoutDashboard size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
+            </NavLink>
+            <NavLink to="/app/verifier/id-verifications" className={navItemClass} title="ID Verifications">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">ID Verifications</span>}
+            </NavLink>
+            <NavLink to="/app/notifications" className={navItemClass} title="Notifications">
+              <Bell size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Notifications</span>}
+              {unreadNotifications > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                </span>
+              )}
+            </NavLink>
+          </>
         ) : (
           <>
             <NavLink to="/app" end className={navItemClass} title="Dashboard">
@@ -480,6 +503,12 @@ const Sidebar = () => {
         {/* Student Specific */}
         {role === 'student' && (
           <>
+            {!premiumActive && (
+              <NavLink to={buildPlanCheckoutPath('premium')} className={navItemClass} title="Buy Premium">
+                <CreditCard size={28} />
+                {shouldShowText && <span className="truncate text-sm font-medium">Buy Premium</span>}
+              </NavLink>
+            )}
             <NavLink to="/app/write-test" className={navItemClass} title="Write Test">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Write Test</span>}
@@ -487,6 +516,10 @@ const Sidebar = () => {
             <NavLink to="/app/my-certificates" className={navItemClass} title="My Certificates">
               <GraduationCap size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">My Certificates</span>}
+            </NavLink>
+            <NavLink to="/app/verify-my-id" className={navItemClass} title="Verify My ID">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Verify My ID</span>}
             </NavLink>
             <NavLink to="/app/class-schedule" className={navItemClass} title="Live Classes">
               <Video size={28} />
@@ -504,27 +537,33 @@ const Sidebar = () => {
               <FileText size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Resume Builder</span>}
             </NavLink>
-            <NavLink to="/app/coding-playground" className={navItemClass} title="Coding Playground">
-              <Code2 size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Coding Playground</span>}
-            </NavLink>
-            <NavLink to="/app/discussion-forum" className={navItemClass} title="Discussion Forum">
-              <MessageSquare size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Discussion Forum</span>}
-            </NavLink>
+            {premiumPlusActive && (
+              <>
+                <NavLink to="/app/coding-playground" className={navItemClass} title="Coding Playground">
+                  <Code2 size={28} />
+                  {shouldShowText && <span className="truncate text-sm font-medium">Coding Playground</span>}
+                </NavLink>
+                <NavLink to="/app/discussion-forum" className={navItemClass} title="Discussion Forum">
+                  <MessageSquare size={28} />
+                  {shouldShowText && <span className="truncate text-sm font-medium">Discussion Forum</span>}
+                </NavLink>
+              </>
+            )}
             <NavLink to="/app/attendance" className={navItemClass} title="Attendance">
               <ClipboardList size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Attendance</span>}
             </NavLink>
-            <NavLink to="/app/chat" className={navItemClass} title="Ask a Doubt">
-              <MessageCircle size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Ask a Doubt</span>}
-              {unreadChats > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                  {unreadChats > 9 ? '9+' : unreadChats}
-                </span>
-              )}
-            </NavLink>
+            {premiumActive && (
+              <NavLink to="/app/chat" className={navItemClass} title="Ask a Doubt">
+                <MessageCircle size={28} />
+                {shouldShowText && <span className="truncate text-sm font-medium">Ask a Doubt</span>}
+                {unreadChats > 0 && (
+                  <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                    {unreadChats > 9 ? '9+' : unreadChats}
+                  </span>
+                )}
+              </NavLink>
+            )}
             <NavLink to="/app/request-teacher" className={navItemClass} title="Request Teacher">
               <UserPlus size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Request Teacher</span>}
@@ -719,6 +758,14 @@ const Sidebar = () => {
             <NavLink to="/app/admin/notes-library" className={navItemClass} title="Notes Library Admin">
               <FileText size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Notes Library</span>}
+            </NavLink>
+            <NavLink to="/app/admin/id-verifications" className={navItemClass} title="ID Verifications">
+              <ShieldCheck size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">ID Verifications</span>}
+            </NavLink>
+            <NavLink to="/app/admin/certificate-name-requests" className={navItemClass} title="Certificate Name Requests">
+              <FileBadge size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Name Requests</span>}
             </NavLink>
             <NavLink to="/app/admin/teacher-assignment" className={navItemClass} title="Assign Teachers">
               <UserPlus size={28} />

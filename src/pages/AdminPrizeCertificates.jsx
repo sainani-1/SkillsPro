@@ -51,7 +51,7 @@ export default function AdminPrizeCertificates() {
     try {
       const { data: studentData, error: studentError } = await supabase
         .from('profiles')
-        .select('id, full_name, email')
+        .select('id, full_name, email, certificate_name, identity_verification_status')
         .eq('role', 'student')
         .order('full_name', { ascending: true });
       if (studentError) throw studentError;
@@ -139,6 +139,15 @@ export default function AdminPrizeCertificates() {
       );
     if (!matchedStudent?.id) {
       setAlertModal({ show: true, title: 'Validation', message: 'Please select a student or enter exact student email/name.', type: 'warning' });
+      return;
+    }
+    if (matchedStudent.identity_verification_status !== 'approved') {
+      setAlertModal({
+        show: true,
+        title: 'Verification Required',
+        message: 'This student must be ID verified before a certificate can be generated.',
+        type: 'warning'
+      });
       return;
     }
     const resolvedAwardName =

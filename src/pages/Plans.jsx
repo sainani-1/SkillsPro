@@ -2,6 +2,31 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { CheckCircle, Sparkles, Crown } from 'lucide-react';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
+
+const PLAN_FEATURES = {
+  premium: [
+    'Courses',
+    'Write Test',
+    'Certificates',
+    'Resume Builder',
+    'Live Classes',
+    'Normal Support',
+  ],
+  premium_plus: [
+    'Everything in Premium',
+    'Ask a Doubt',
+    'Mentoring Session Request',
+    'Notes Library',
+    'Priority Support',
+    '2 Resume Reviews per Cycle',
+    '1 Mock Interview per Month',
+    'Monthly Personal Roadmap Update',
+  ],
+};
+
+const getPlanFeatureList = (tier) =>
+  tier === 'premium_plus' ? PLAN_FEATURES.premium_plus : PLAN_FEATURES.premium;
 
 const Plans = () => {
   const [plans, setPlans] = useState([]);
@@ -65,7 +90,9 @@ const Plans = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {orderedPlans.map((plan) => (
+            {orderedPlans.map((plan) => {
+              const featureList = getPlanFeatureList(plan.tier);
+              return (
               <div key={plan.id} className="relative bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
                 <div className="absolute top-4 right-4">
                   <span className={`text-xs font-bold px-2 py-1 rounded-full ${
@@ -88,35 +115,27 @@ const Plans = () => {
                     Valid until: {new Date(plan.validUntil).toLocaleDateString('en-IN')}
                   </p>
                 ) : null}
-                {plan.description ? (
-                  <p className="text-sm text-slate-600 mt-4 min-h-[44px]">{plan.description}</p>
-                ) : (
-                  <p className="text-sm text-slate-600 mt-4 min-h-[44px]">Access curated courses and features.</p>
-                )}
+                <p className="text-sm text-slate-600 mt-4 min-h-[44px]">
+                  {plan.tier === 'premium_plus'
+                    ? 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.'
+                    : 'Courses, tests, certificates, resume builder, live classes, and normal support.'}
+                </p>
                 <div className="mt-5 space-y-2 text-sm text-slate-700">
-                  {plan.features.length > 0 ? (
-                    plan.features.map((feature, index) => (
-                      <p key={`${plan.id}-feature-${index}`} className="flex items-center gap-2">
-                        <CheckCircle size={16} className="text-emerald-600" /> {feature}
-                      </p>
-                    ))
-                  ) : (
-                    <>
-                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Premium learning resources</p>
-                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Exam and certificate access</p>
-                      <p className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-600" /> Live class updates</p>
-                    </>
-                  )}
+                  {featureList.map((feature, index) => (
+                    <p key={`${plan.id}-feature-${index}`} className="flex items-center gap-2">
+                      <CheckCircle size={16} className="text-emerald-600" /> {feature}
+                    </p>
+                  ))}
                 </div>
                 <Link
-                  to="/register"
+                  to={buildPlanCheckoutPath(plan.tier)}
                   className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gold-400 text-nani-dark font-bold py-2.5 hover:bg-gold-500 transition"
                 >
                   <Crown size={16} />
-                  Get Started
+                  {plan.tier === 'premium_plus' ? 'Buy Premium Plus' : 'Buy Premium'}
                 </Link>
               </div>
-            ))}
+            )})}
           </div>
         )}
 

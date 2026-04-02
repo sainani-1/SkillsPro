@@ -7,6 +7,7 @@ import usePopup from '../hooks/usePopup';
 import LoadingSpinner from '../components/LoadingSpinner';
 import PremiumGiftCelebration from '../components/PremiumGiftCelebration';
 import { getPremiumPlanType, hasPremiumAccess, isLifetimePremium, formatPremiumLabel, getPremiumDaysRemaining, isPremiumExpiringSoon } from '../utils/premium';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const PremiumStatus = () => {
   const { profile } = useAuth();
@@ -200,7 +201,7 @@ const PremiumStatus = () => {
 
             {!premiumDetails.isLifetime && premiumDetails.daysRemaining !== null && premiumDetails.daysRemaining <= 5 && (
               <Link
-                to="/app/payment"
+                to={buildPlanCheckoutPath('premium')}
                 className="block mt-4 bg-blue-600 text-white py-3 rounded-lg font-semibold text-center hover:bg-blue-700 transition-colors"
               >
                 Renew Premium for Rs {premiumCost}
@@ -242,10 +243,10 @@ const PremiumStatus = () => {
             </div>
 
             <Link
-              to="/app/payment"
+              to={buildPlanCheckoutPath('premium')}
               className="block bg-blue-600 text-white py-3 rounded-lg font-semibold text-center hover:bg-blue-700 transition-colors"
             >
-              Upgrade to Premium - Just Rs {premiumCost}
+              Buy Premium - Just Rs {premiumCost}
             </Link>
           </div>
         )}

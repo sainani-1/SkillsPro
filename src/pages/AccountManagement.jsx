@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
 import { deleteUserFromAdmin } from '../utils/adminUserDeletion';
 import { hasPremiumAccess } from '../utils/premium';
+import { clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
 import { clearUserPremiumPlanType } from '../utils/premiumPlanTypes';
 
 const LIFETIME_PREMIUM_DATE = '9999-12-31T23:59:59.000Z';
@@ -169,6 +170,7 @@ const AccountManagement = () => {
 
       if (action === 'revoke-premium') {
         await clearUserPremiumPlanType(selectedUser.id);
+        await clearTeacherAssignmentForStudent(supabase, selectedUser.id);
       }
 
       if (action === 'unlock') {

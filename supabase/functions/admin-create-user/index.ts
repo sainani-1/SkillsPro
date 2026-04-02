@@ -11,7 +11,7 @@ type CreatePayload = {
   password?: string;
   full_name?: string;
   phone?: string;
-  role?: "student" | "teacher" | "admin" | "instructor";
+  role?: "student" | "teacher" | "admin" | "instructor" | "verifier";
   core_subject?: string | null;
 };
 
@@ -69,7 +69,8 @@ Deno.serve(async (req: Request) => {
       | "student"
       | "teacher"
       | "admin"
-      | "instructor";
+      | "instructor"
+      | "verifier";
     const coreSubject = body.core_subject ? String(body.core_subject).trim() : null;
 
     if (!email || !fullName || !phone) {
@@ -84,8 +85,8 @@ Deno.serve(async (req: Request) => {
         headers: corsHeaders,
       });
     }
-    if (!["student", "teacher", "admin", "instructor"].includes(role)) {
-      return new Response("role must be student, teacher, instructor, or admin.", {
+    if (!["student", "teacher", "admin", "instructor", "verifier"].includes(role)) {
+      return new Response("role must be student, teacher, instructor, verifier, or admin.", {
         status: 400,
         headers: corsHeaders,
       });

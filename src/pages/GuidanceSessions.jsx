@@ -8,10 +8,11 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import useDialog from '../hooks/useDialog.jsx';
 import { trackPremiumEvent } from '../utils/growth';
 import { sendAdminNotification } from '../utils/adminNotifications';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const GuidanceSessions = () => {
   const { confirm, dialogNode } = useDialog();
-  const { profile, isPremium } = useAuth();
+  const { profile, isPremiumPlus } = useAuth();
   const [requests, setRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -33,6 +34,7 @@ const GuidanceSessions = () => {
   const [sessionLinkActiveUntil, setSessionLinkActiveUntil] = useState('');
   const [scheduling, setScheduling] = useState(false);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [premiumPlusCost, setPremiumPlusCost] = useState(299);
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
@@ -48,11 +50,14 @@ const GuidanceSessions = () => {
       const { data: settingRows } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['premium_cost', 'support_contact_email']);
+        .in('key', ['premium_cost', 'premium_plus_cost', 'support_contact_email']);
 
       const settingsMap = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value || '']));
       if (settingsMap.premium_cost) {
         setPremiumCost(parseInt(settingsMap.premium_cost, 10) || 199);
+      }
+      if (settingsMap.premium_plus_cost) {
+        setPremiumPlusCost(parseInt(settingsMap.premium_plus_cost, 10) || 299);
       }
       setSupportContactEmail(settingsMap.support_contact_email || '');
 
@@ -195,7 +200,7 @@ const GuidanceSessions = () => {
     return <LoadingSpinner message="Loading guidance sessions..." />;
   }
 
-  const studentCanRequestSession = profile.role === 'student' && isPremium(profile);
+  const studentCanRequestSession = profile.role === 'student' && isPremiumPlus(profile);
 
   const isSessionCompleted = (session) => {
     if (!session) return false;
@@ -220,11 +225,11 @@ const GuidanceSessions = () => {
     sessions.find((session) => session.request_id === requestId) || null;
 
   const submitRequest = async () => {
-    if (!isPremium(profile)) {
+    if (!isPremiumPlus(profile)) {
       setAlertModal({
         show: true,
-        title: 'Premium Required',
-        message: 'Upgrade to Premium to request mentorship/live sessions.',
+        title: 'Premium Plus Required',
+        message: 'Upgrade to Premium Plus to request mentorship/live sessions.',
         type: 'warning'
       });
       return;
@@ -504,10 +509,10 @@ const GuidanceSessions = () => {
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
                 <p className="text-sm text-amber-900 font-semibold">
-                  Premium required to request live mentorship sessions with teachers.
+                  Premium Plus required to request live mentorship sessions with teachers.
                 </p>
                 <p className="text-sm text-amber-800">
-                  Upgrade to Premium for just ₹{premiumCost} and unlock teacher guidance sessions.
+                  Upgrade to Premium Plus for just ₹{premiumPlusCost} and unlock teacher guidance sessions.
                 </p>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm text-slate-700">
@@ -527,11 +532,11 @@ const GuidanceSessions = () => {
                   <p className="text-sm text-amber-900">Need help? Please contact admin support.</p>
                 )}
                 <Link
-                  to="/app/payment"
-                  onClick={() => trackPremiumEvent('upgrade_click', 'guidance_sessions_gate', { premiumCost }, profile?.id || null)}
+                  to={buildPlanCheckoutPath('premium_plus')}
+                  onClick={() => trackPremiumEvent('upgrade_click', 'guidance_sessions_gate', { premiumPlusCost }, profile?.id || null)}
                   className="inline-flex items-center justify-center rounded-lg bg-amber-600 text-white px-4 py-2 font-semibold hover:bg-amber-700 transition-colors"
                 >
-                  Upgrade to Premium
+                  Buy Premium Plus
                 </Link>
               </div>
             )}

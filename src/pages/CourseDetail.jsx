@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   FileText,
   CheckCircle,
@@ -17,6 +17,7 @@ import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { fetchCourseProtectedAssets } from '../utils/courseProtectedAssets';
 import { readBrowserState, upsertRecentItem, writeBrowserState } from '../utils/browserState';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const APP_ORIGIN = typeof window !== 'undefined' ? window.location.origin : '';
 const VIDEO_PROGRESS_SAVE_INTERVAL_SECONDS = 5;
@@ -236,13 +237,13 @@ const ContentProtectionNotice = () => (
   </div>
 );
 
-const NotesUpgradeCard = ({ title, message, ctaLabel }) => (
+const NotesUpgradeCard = ({ title, message, ctaLabel, planTier }) => (
   <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
     <Lock size={28} className="mx-auto text-amber-600" />
     <p className="mt-3 font-semibold text-amber-900">{title}</p>
     <p className="mt-1 text-sm text-amber-800">{message}</p>
     <Link
-      to="/plans"
+      to={buildPlanCheckoutPath(planTier)}
       className="mt-4 inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-amber-700"
     >
       {ctaLabel}
@@ -297,6 +298,7 @@ const CourseDetail = () => {
   const [resumePromptOpen, setResumePromptOpen] = useState(false);
   const { user, profile, isPremium, isPremiumPlus, getPlanTier } = useAuth();
   const { popupNode, openPopup } = usePopup();
+  const navigate = useNavigate();
   const premium = isPremium(profile);
   const premiumPlus = isPremiumPlus(profile);
   const planTier = getPlanTier(profile);
@@ -681,7 +683,13 @@ const CourseDetail = () => {
                 </div>
 
                 <button
-                  onClick={handleEnroll}
+                  onClick={() => {
+                    if (!premium) {
+                      navigate(buildPlanCheckoutPath('premium'));
+                      return;
+                    }
+                    handleEnroll();
+                  }}
                   disabled={loading}
                   className="w-full bg-white text-blue-700 hover:bg-slate-50 disabled:bg-slate-300 font-bold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center"
                 >
@@ -693,7 +701,7 @@ const CourseDetail = () => {
                   ) : (
                     <>
                       <Play size={20} className="mr-2" />
-                      Enroll With Premium Access
+                      {premium ? 'Enroll With Premium Access' : 'Buy Premium To Enroll'}
                     </>
                   )}
                 </button>
@@ -884,12 +892,14 @@ const CourseDetail = () => {
                         title="Premium Plus required"
                         message="Advanced notes are available in the Notes panel only with Premium Plus."
                         ctaLabel="Buy Premium Plus"
+                        planTier="premium_plus"
                       />
                     ) : !premiumPlus ? (
                       <NotesUpgradeCard
                         title="Upgrade to Premium Plus"
                         message="Your current Premium plan includes classes and video access. Upgrade to Premium Plus to unlock advanced notes here."
                         ctaLabel="Upgrade to Premium Plus"
+                        planTier="premium_plus"
                       />
                     ) : assetsLoading ? (
                       <LoadingSpinner message="Loading protected notes..." />

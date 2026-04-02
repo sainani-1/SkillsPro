@@ -4,7 +4,7 @@ import { Award, Search, Clock3 } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { logAdminActivity } from '../utils/adminActivityLogger';
-import { assignBalancedTeacherToStudent } from '../utils/teacherAssignment';
+import { assignBalancedTeacherToStudent, clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
 import { formatPremiumLabel, getPremiumDaysRemaining, getPremiumPlanType, hasPremiumAccess, isLifetimePremium, isPremiumExpiringSoon } from '../utils/premium';
 import { clearUserPremiumPlanType, fetchPremiumPlanTypeMap, setUserPremiumPlanType } from '../utils/premiumPlanTypes';
 
@@ -229,6 +229,7 @@ const ManagePremium = () => {
 
       if (revokeError) throw revokeError;
       await clearUserPremiumPlanType(userToRevoke.id);
+      await clearTeacherAssignmentForStudent(supabase, userToRevoke.id);
 
       await pushNotification({
         title: 'Premium Revoked',

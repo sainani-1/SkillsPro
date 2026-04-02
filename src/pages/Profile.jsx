@@ -8,6 +8,7 @@ import { prepareAvatarFile } from '../utils/imageUtils';
 import { buildAvatarPublicUrl } from '../utils/avatarUtils';
 import AvatarImage from '../components/AvatarImage';
 import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
+import { getCertificateDisplayName } from '../utils/identityVerification';
 
 const Profile = () => {
   const { profile, user, fetchProfile } = useAuth();
@@ -219,6 +220,10 @@ const Profile = () => {
   if (!profile) return <div className="p-6">Loading profile...</div>;
 
   const premiumActive = profile.premium_until && new Date(profile.premium_until) > new Date();
+  const certificateName = getCertificateDisplayName(profile);
+  const verificationLabel = profile.identity_verification_status
+    ? String(profile.identity_verification_status).replace('_', ' ')
+    : 'not submitted';
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -257,6 +262,8 @@ const Profile = () => {
         <InfoCard label="Education Level" value={profile.education_level || 'Not set'} />
         <InfoCard label="Study Stream" value={profile.study_stream || 'Not set'} />
         <InfoCard label="Diploma / Board" value={profile.diploma_certificate || 'Not provided'} />
+        <InfoCard label="Certificate Name" value={certificateName} />
+        <InfoCard label="ID Verification" value={verificationLabel} />
         <InfoCard 
           label="Premium Status" 
           value={

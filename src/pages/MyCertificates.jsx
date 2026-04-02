@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
+import { getCertificateDisplayName, hasApprovedIdentity } from '../utils/identityVerification';
 
 /**
  * MyCertificates Component
@@ -106,6 +107,8 @@ const MyCertificates = () => {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(null);
   const { popupNode, openPopup } = usePopup();
+  const certificateDisplayName = getCertificateDisplayName(profile);
+  const idVerifiedForCertificates = hasApprovedIdentity(profile);
 
   /**
    * buildCertificateDataUrl()
@@ -255,7 +258,11 @@ const MyCertificates = () => {
     ctx.fillStyle = '#1565c0';
     ctx.font = 'bold 48px Georgia, serif';
     ctx.textAlign = 'center';
-    ctx.fillText(profile?.full_name || '________________________', 600, 460);
+    ctx.fillText(
+      getCertificateDisplayName(profile, { placeholder: '________________________' }),
+      600,
+      460
+    );
 
     // Line below student name
     ctx.strokeStyle = '#d4af37';
@@ -363,7 +370,7 @@ const MyCertificates = () => {
       const dataUrl = await buildCertificateDataUrl(cert, formattedId);
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: [2400, 1800] });
       pdf.addImage(dataUrl, 'PNG', 0, 0, 2400, 1800);
-      const userName = toSafeFilePart(profile?.full_name || 'User');
+      const userName = toSafeFilePart(certificateDisplayName || 'User');
       const courseName = toSafeFilePart(resolveCertificateCourseTitle(cert) || 'Course');
       const fileName = `SkillPro Certificate ${userName} ${courseName}.pdf`;
       pdf.save(fileName);
@@ -570,9 +577,15 @@ const MyCertificates = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">My Certificates</h1>
-          <p className="text-slate-500">Welcome, {profile?.full_name || 'Learner'} — your name will appear on every certificate.</p>
+          <p className="text-slate-500">Certificate name: {certificateDisplayName}</p>
         </div>
       </div>
+
+      {!idVerifiedForCertificates && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4">
+          Verify your government ID in `Verify My ID` before certificates can be issued in your name.
+        </div>
+      )}
 
       {revokedCount > 0 && (
         <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
@@ -580,7 +593,11 @@ const MyCertificates = () => {
         </div>
       )}
 
-      {certificates.length === 0 ? (
+      {!idVerifiedForCertificates ? (
+        <div className="bg-white border border-slate-100 rounded-xl p-6 shadow-sm text-center text-slate-600">
+          Your certificate section will unlock after ID verification is approved.
+        </div>
+      ) : certificates.length === 0 ? (
         <div className="bg-white border border-slate-100 rounded-xl p-6 shadow-sm text-center text-slate-600">
           No certificates yet. Complete exams with 70%+ score to earn your first one.
         </div>
@@ -604,7 +621,7 @@ const MyCertificates = () => {
                     {cert.generated_name || cert.generated_course_name || cert.course?.title || 'Certificate'}
                   </p>
                   <p className="text-xs text-slate-500">Issued on {new Date(cert.issued_at).toLocaleDateString()}</p>
-                  <p className="text-xs text-slate-500">Awarded to {profile?.full_name}</p>
+                  <p className="text-xs text-slate-500">Awarded to {certificateDisplayName}</p>
                   <p className="text-xs font-mono text-blue-600 mt-1">ID: {formatCertificateId(cert)}</p>
                   {cert.generated_type && (
                     <p className="text-xs text-indigo-700 mt-1">

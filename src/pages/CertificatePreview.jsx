@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { getCertificateDisplayName } from '../utils/identityVerification';
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || '/skillpro-logo.png';
 const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
 
@@ -32,6 +33,7 @@ const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
 
 const buildCertificateDataUrl = async (cert, formattedId) => {
+  const footerCenterX = 1025;
   const canvas = document.createElement('canvas');
   canvas.width = 2400;
   canvas.height = 1800;
@@ -110,7 +112,11 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
   ctx.fillText('WE PROUDLY PRESENT THIS CERTIFICATE TO', 600, 380);
   ctx.fillStyle = '#1565c0';
   ctx.font = 'bold 48px Georgia, serif';
-  ctx.fillText(cert.user?.full_name || '________________________', 600, 460);
+  ctx.fillText(
+    getCertificateDisplayName(cert.user, { placeholder: '________________________' }),
+    600,
+    460
+  );
   ctx.strokeStyle = '#d4af37';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -184,7 +190,7 @@ const CertificatePreview = () => {
             id,
             issued_at,
             revoked_at,
-            user:profiles!certificates_user_id_fkey(full_name, email),
+            user:profiles!certificates_user_id_fkey(full_name, certificate_name, identity_verification_status, email),
             course:courses!certificates_course_id_fkey(title, category)
           `)
           .gte('issued_at', start)
@@ -227,4 +233,3 @@ const CertificatePreview = () => {
 };
 
 export default CertificatePreview;
-  const footerCenterX = 1025;

@@ -26,6 +26,7 @@ type OfferRow = {
 type CreateOrderPayload = {
   offer_id?: string | null;
   plan_tier?: string | null;
+  coupon_code?: string | null;
 };
 
 const PREMIUM_PLAN_TYPES_KEY = "premium_plan_types";
@@ -91,6 +92,7 @@ const errorResponse = (message: string, status = 400) =>
   jsonResponse({ error: message }, status);
 
 const parseMoney = (value: number) => Math.round(value * 100) / 100;
+const escapeLikeValue = (value: string) => value.replace(/[,%]/g, "");
 
 const addMonthsFrom = (baseDateIso: string | null | undefined, months: number) => {
   const baseDate = baseDateIso && new Date(baseDateIso) > new Date() ? new Date(baseDateIso) : new Date();
@@ -280,12 +282,30 @@ Deno.serve(async (req: Request) => {
   }
 
   let selectedOffer: OfferRow | null = null;
-  if (payload.offer_id) {
-    const { data: offer, error: offerError } = await adminClient
-      .from("offers")
-      .select("id, title, coupon_name, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
-      .eq("id", payload.offer_id)
-      .maybeSingle();
+  const couponCode = String(payload.coupon_code || "").trim();
+  if (payload.offer_id || couponCode) {
+    let offer: OfferRow | null = null;
+    let offerError: Error | null = null;
+
+    if (payload.offer_id) {
+      const result = await adminClient
+        .from("offers")
+        .select("id, title, coupon_name, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
+        .eq("id", payload.offer_id)
+        .maybeSingle();
+      offer = result.data;
+      offerError = result.error;
+    } else {
+      const sanitizedCode = escapeLikeValue(couponCode);
+      const result = await adminClient
+        .from("offers")
+        .select("id, title, coupon_name, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
+        .or(`title.ilike.${sanitizedCode},coupon_name.ilike.${sanitizedCode}`)
+        .limit(1)
+        .maybeSingle();
+      offer = result.data;
+      offerError = result.error;
+    }
 
     if (offerError || !offer) {
       return errorResponse("Selected coupon was not found.", 404);

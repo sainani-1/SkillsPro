@@ -12,6 +12,7 @@ import {
 import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySession';
 import { getPremiumPlanType, hasPremiumAccess } from '../utils/premium';
 import { fetchUserPremiumPlanType } from '../utils/premiumPlanTypes';
+import { clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
 
 const AuthContext = createContext();
 
@@ -325,6 +326,19 @@ export const AuthProvider = ({ children }) => {
         ...data,
         premium_plan_type: premiumPlanType,
       };
+
+      if (
+        hydratedProfile.role === 'student' &&
+        hydratedProfile.assigned_teacher_id &&
+        !hasPremiumAccess(hydratedProfile)
+      ) {
+        try {
+          await clearTeacherAssignmentForStudent(supabase, userId);
+          hydratedProfile.assigned_teacher_id = null;
+        } catch (assignmentError) {
+          console.error('Failed to clear expired teacher assignment:', assignmentError);
+        }
+      }
 
       setProfile(hydratedProfile);
       writeProfileCache({ userId: hydratedProfile.id, profile: hydratedProfile });

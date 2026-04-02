@@ -6,6 +6,7 @@ import { AlertCircle, Check, Clock3, CreditCard, Gift, Sparkles, Ticket } from '
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { trackPremiumEvent } from '../utils/growth';
+import { normalizeCheckoutPlanTier } from '../utils/planCheckout';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const DEFAULT_URGENCY_DATE = '2026-04-15';
@@ -85,14 +86,40 @@ const getOfferLabel = (offer) => {
   return `₹${offer.discount_value} off`;
 };
 
+const isOfferExpired = (offer) =>
+  offer?.status === 'expired' || (offer?.valid_until && new Date(offer.valid_until) < new Date());
+const escapeCouponSearchValue = (value) => String(value || '').replace(/[,%]/g, '');
+const PLAN_FEATURES = {
+  premium: [
+    'Courses',
+    'Write Test',
+    'Certificates',
+    'Resume Builder',
+    'Live Classes',
+    'Normal Support',
+  ],
+  premium_plus: [
+    'Everything in Premium',
+    'Ask a Doubt',
+    'Mentoring Session Request',
+    'Notes Library',
+    'Priority Support',
+    '2 Resume Reviews per Cycle',
+    '1 Mock Interview per Month',
+    'Monthly Personal Roadmap Update',
+  ],
+};
+const getPlanFeatureList = (tier) =>
+  tier === 'premium_plus' ? PLAN_FEATURES.premium_plus : PLAN_FEATURES.premium;
+
 const Payment = () => {
-  const { profile, fetchProfile } = useAuth();
+  const { profile, fetchProfile, getPlanTier } = useAuth();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [premiumCost, setPremiumCost] = useState(null);
   const [plans, setPlans] = useState([]);
-  const [selectedPlanTier, setSelectedPlanTier] = useState('premium');
+  const [selectedPlanTier, setSelectedPlanTier] = useState(() => normalizeCheckoutPlanTier(searchParams.get('plan')));
   const [urgencyBanner, setUrgencyBanner] = useState({
     effectiveDate: DEFAULT_URGENCY_DATE,
     label: DEFAULT_URGENCY_LABEL,
@@ -101,6 +128,9 @@ const Payment = () => {
   const [offersLoading, setOffersLoading] = useState(true);
   const [offers, setOffers] = useState([]);
   const [selectedOfferId, setSelectedOfferId] = useState('');
+  const [manualCouponCode, setManualCouponCode] = useState('');
+  const [manualAppliedOffer, setManualAppliedOffer] = useState(null);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Your premium access is now active.');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const razorpayInstanceRef = useRef(null);
@@ -115,13 +145,8 @@ const Payment = () => {
         tier: 'premium',
         cost: premiumCost || 199,
         periodMonths: 6,
-        description: 'Core access for all premium classes, standard notes, videos, tests, and certificates.',
-        features: [
-          'All premium classes',
-          'Protected videos and standard notes',
-          'Tests, certificates, and live sessions',
-          'Teacher support and mentorship',
-        ],
+        description: 'Courses, tests, certificates, resume builder, live classes, and normal support.',
+        features: PLAN_FEATURES.premium,
       }, premiumCost || 199, {
         premium: premiumCost || 199,
         premium_plus: Math.max((premiumCost || 199) + 100, 299),
@@ -132,13 +157,8 @@ const Payment = () => {
         tier: 'premium_plus',
         cost: Math.max((premiumCost || 199) + 100, 299),
         periodMonths: 6,
-        description: 'Everything in Premium plus access to the separate advanced notes library.',
-        features: [
-          'Everything in Premium',
-          'Advanced notes library',
-          'Premium Plus-only study packs',
-          'Higher-value prep material',
-        ],
+        description: 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.',
+        features: PLAN_FEATURES.premium_plus,
       }, Math.max((premiumCost || 199) + 100, 299), {
         premium: premiumCost || 199,
         premium_plus: Math.max((premiumCost || 199) + 100, 299),
@@ -151,8 +171,23 @@ const Payment = () => {
     [activePlans, selectedPlanTier]
   );
 
-  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || null;
+  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
   const pricing = buildPricing(selectedPlan?.cost || premiumCost || 0, selectedOffer);
+  const currentPlanTier = getPlanTier(profile);
+  const checkoutHeading =
+    selectedPlanTier === 'premium_plus'
+      ? currentPlanTier === 'premium'
+        ? 'Upgrade to Premium Plus'
+        : 'Buy Premium Plus'
+      : currentPlanTier === 'free'
+        ? 'Buy Premium'
+        : 'Renew Premium';
+  const checkoutSubheading =
+    selectedPlanTier === 'premium_plus'
+      ? currentPlanTier === 'premium'
+        ? 'You already have Premium. Upgrade now to unlock Premium Plus support features.'
+        : 'Choose Premium Plus to unlock limited high-value support.'
+      : 'Choose your Premium plan, apply one coupon, and pay only the final amount.';
 
   useEffect(() => {
     const loadPricingConfig = async () => {
@@ -200,13 +235,8 @@ const Payment = () => {
               tier: 'premium',
               cost: fallbackPremiumCost,
               periodMonths: 6,
-              description: 'Core access for all premium classes, standard notes, videos, tests, and certificates.',
-              features: [
-                'All premium classes',
-                'Protected videos and standard notes',
-                'Tests, certificates, and live sessions',
-                'Teacher support and mentorship',
-              ],
+              description: 'Courses, tests, certificates, resume builder, live classes, and normal support.',
+              features: PLAN_FEATURES.premium,
             }, fallbackPremiumCost, tierCostMap),
             normalizePlan({
               id: 'default_premium_plus',
@@ -214,13 +244,8 @@ const Payment = () => {
               tier: 'premium_plus',
               cost: fallbackPremiumPlusCost,
               periodMonths: 6,
-              description: 'Everything in Premium plus access to the separate advanced notes library.',
-              features: [
-                'Everything in Premium',
-                'Advanced notes library',
-                'Premium Plus-only study packs',
-                'Higher-value prep material',
-              ],
+              description: 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.',
+              features: PLAN_FEATURES.premium_plus,
             }, fallbackPremiumPlusCost, tierCostMap),
           ]);
         }
@@ -259,6 +284,10 @@ const Payment = () => {
       setSelectedPlanTier(activePlans[0].tier);
     }
   }, [activePlans, selectedPlan]);
+
+  useEffect(() => {
+    setSelectedPlanTier(normalizeCheckoutPlanTier(searchParams.get('plan')));
+  }, [searchParams]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -321,6 +350,99 @@ const Payment = () => {
 
     loadOffers();
   }, [profile?.id, searchParams]);
+
+  const applyManualCoupon = async () => {
+    const normalizedCode = manualCouponCode.trim();
+    if (!normalizedCode) {
+      setAlertModal({
+        show: true,
+        title: 'Coupon Required',
+        message: 'Enter a coupon code to apply it.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    const existingOffer = offers.find((offer) => {
+      const codes = [offer?.title, offer?.coupon_name]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+      return codes.includes(normalizedCode.toLowerCase());
+    });
+
+    if (existingOffer) {
+      setSelectedOfferId(existingOffer.id);
+      setManualAppliedOffer(null);
+      setManualCouponCode(existingOffer.title || existingOffer.coupon_name || normalizedCode);
+      return;
+    }
+
+    setApplyingCoupon(true);
+    try {
+      const safeCode = escapeCouponSearchValue(normalizedCode);
+      const { data, error } = await supabase
+        .from('offers')
+        .select('*')
+        .or(`title.ilike.${safeCode},coupon_name.ilike.${safeCode}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data || isOfferExpired(data)) {
+        throw new Error('Coupon not found or expired.');
+      }
+
+      if (!data.applies_to_all) {
+        const { data: assignment } = await supabase
+          .from('offer_assignments')
+          .select('offer_id')
+          .eq('offer_id', data.id)
+          .eq('user_id', profile.id)
+          .maybeSingle();
+
+        if (!assignment) {
+          throw new Error('This coupon is not assigned to your account.');
+        }
+      }
+
+      const { data: redemption } = await supabase
+        .from('offer_redemptions')
+        .select('id, status')
+        .eq('offer_id', data.id)
+        .eq('user_id', profile.id)
+        .maybeSingle();
+
+      if (redemption?.status === 'redeemed') {
+        throw new Error('This coupon has already been redeemed.');
+      }
+
+      setSelectedOfferId('');
+      setManualAppliedOffer(data);
+      setManualCouponCode(data.title || data.coupon_name || normalizedCode);
+      setAlertModal({
+        show: true,
+        title: 'Coupon Applied',
+        message: `${data.coupon_name || data.title} has been applied to this payment.`,
+        type: 'success',
+      });
+    } catch (error) {
+      setManualAppliedOffer(null);
+      setAlertModal({
+        show: true,
+        title: 'Coupon Invalid',
+        message: error.message || 'This coupon code could not be applied.',
+        type: 'error',
+      });
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
+  const clearAppliedCoupon = () => {
+    setSelectedOfferId('');
+    setManualAppliedOffer(null);
+    setManualCouponCode('');
+  };
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -396,6 +518,8 @@ const Payment = () => {
     setSuccess(true);
     setLoading(false);
     setSelectedOfferId('');
+    setManualAppliedOffer(null);
+    setManualCouponCode('');
     resetAttemptState();
   };
 
@@ -415,6 +539,8 @@ const Payment = () => {
     setSuccessMessage(`Payment successful. ${selectedPlan?.name || 'Premium'} access is active now.`);
     setSuccess(true);
     setSelectedOfferId('');
+    setManualAppliedOffer(null);
+    setManualCouponCode('');
     resetAttemptState();
   };
 
@@ -439,7 +565,8 @@ const Payment = () => {
     try {
       const { data, error } = await supabase.functions.invoke('create-payment-order', {
         body: {
-          offer_id: selectedOfferId || null,
+          offer_id: selectedOffer?.id || null,
+          coupon_code: !selectedOffer?.id ? manualCouponCode.trim() || null : null,
           plan_tier: selectedPlanTier,
         },
       });
@@ -510,10 +637,14 @@ const Payment = () => {
       razorpay.open();
     } catch (error) {
       console.error('Payment initialization error:', error);
+      const baseMessage = error.message || 'Failed to initialize payment. Please try again.';
+      const message = baseMessage.includes('Failed to send a request to the Edge Function')
+        ? 'Payment service is not reachable right now. This usually means the Supabase Edge Functions are not deployed or the project connection is failing. Check and deploy `create-payment-order` and `verify-payment`, then try again.'
+        : baseMessage;
       setAlertModal({
         show: true,
         title: 'Payment Error',
-        message: error.message || 'Failed to initialize payment. Please try again.',
+        message,
         type: 'error',
       });
       setLoading(false);
@@ -549,8 +680,8 @@ const Payment = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Upgrade to Premium</h1>
-        <p className="text-slate-500">Choose your plan, apply one coupon, and pay only the final amount.</p>
+        <h1 className="text-2xl font-bold text-slate-900">{checkoutHeading}</h1>
+        <p className="text-slate-500">{checkoutSubheading}</p>
       </div>
 
       <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
@@ -589,7 +720,9 @@ const Payment = () => {
                     </p>
                     <h2 className="mt-2 text-2xl font-bold">{plan.name}</h2>
                     <p className={`mt-2 text-sm ${isSelected ? 'text-white/80' : 'text-slate-600'}`}>
-                      {plan.description || 'Premium access for all classes and focused learning.'}
+                      {plan.tier === 'premium_plus'
+                        ? 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.'
+                        : 'Courses, tests, certificates, resume builder, live classes, and normal support.'}
                     </p>
                   </div>
                   <div className={`rounded-full px-3 py-1 text-xs font-semibold ${isSelected ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-700'}`}>
@@ -603,11 +736,7 @@ const Payment = () => {
                   </p>
                 </div>
                 <div className="mt-6 space-y-2">
-                  {(plan.features.length > 0 ? plan.features : [
-                    'All premium classes',
-                    plan.tier === 'premium_plus' ? 'Advanced notes library' : 'Standard notes and videos',
-                    'Tests, certificates, and live sessions',
-                  ]).map((feature, index) => (
+                  {getPlanFeatureList(plan.tier).map((feature, index) => (
                     <FeatureItem key={`${plan.id}-${index}`} text={feature} dim={!isSelected} />
                   ))}
                 </div>
@@ -622,8 +751,8 @@ const Payment = () => {
             <p className="mt-2 text-2xl font-bold text-slate-900">{selectedPlan?.name || 'Premium'}</p>
             <p className="mt-1 text-sm text-slate-500">
               {selectedPlan?.tier === 'premium_plus'
-                ? 'Includes the separate Premium Plus notes library and advanced study packs.'
-                : 'Includes premium classes, standard notes, protected videos, tests, and live sessions.'}
+                ? 'Includes doubts, mentoring requests, notes access, and higher-touch support.'
+                : 'Includes courses, tests, certificates, resume builder, live classes, and normal support.'}
             </p>
             <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
               <p className="text-sm text-slate-500">Base price</p>
@@ -647,7 +776,7 @@ const Payment = () => {
               Upgrade advantage
             </div>
             <p className="mt-2 text-sm text-blue-900">
-              Premium covers classes and core resources. Premium Plus adds the advanced notes library for deeper preparation.
+              Premium covers the core learning flow. Premium Plus adds doubts, mentoring requests, notes, and higher-touch support.
             </p>
           </div>
         </div>
@@ -664,8 +793,8 @@ const Payment = () => {
           <input
             type="radio"
             name="coupon"
-            checked={!selectedOfferId}
-            onChange={() => setSelectedOfferId('')}
+            checked={!selectedOfferId && !manualAppliedOffer}
+            onChange={clearAppliedCoupon}
           />
           <div>
             <p className="font-semibold text-slate-900">No coupon</p>
@@ -673,9 +802,40 @@ const Payment = () => {
           </div>
         </label>
 
+        <div className="rounded-lg border border-slate-200 p-4">
+          <p className="font-semibold text-slate-900">Have a coupon code?</p>
+          <p className="mt-1 text-sm text-slate-500">Enter it manually and apply the matching discount.</p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <input
+              type="text"
+              value={manualCouponCode}
+              onChange={(event) => {
+                setManualCouponCode(event.target.value);
+                if (manualAppliedOffer) setManualAppliedOffer(null);
+                if (selectedOfferId) setSelectedOfferId('');
+              }}
+              placeholder="Enter coupon code"
+              className="flex-1 rounded-lg border border-slate-300 px-4 py-3"
+            />
+            <button
+              type="button"
+              onClick={applyManualCoupon}
+              disabled={applyingCoupon}
+              className="rounded-lg bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              {applyingCoupon ? 'Applying...' : 'Apply Coupon'}
+            </button>
+          </div>
+          {manualAppliedOffer ? (
+            <p className="mt-3 text-sm text-emerald-700">
+              Applied: {manualAppliedOffer.coupon_name || manualAppliedOffer.title} ({getOfferLabel(manualAppliedOffer)})
+            </p>
+          ) : null}
+        </div>
+
         {offers.length === 0 ? (
           <div className="rounded-lg border border-dashed p-4 text-sm text-slate-500">
-            No active coupons are available for your account.
+            No active coupons are listed for your account right now. You can still try a coupon code above.
           </div>
         ) : (
           <div className="space-y-3">
@@ -685,7 +845,11 @@ const Payment = () => {
                   type="radio"
                   name="coupon"
                   checked={selectedOfferId === offer.id}
-                  onChange={() => setSelectedOfferId(offer.id)}
+                  onChange={() => {
+                    setSelectedOfferId(offer.id);
+                    setManualAppliedOffer(null);
+                    setManualCouponCode(offer.title || offer.coupon_name || '');
+                  }}
                 />
                 <div className="flex-1">
                   <div className="flex items-center justify-between gap-3">

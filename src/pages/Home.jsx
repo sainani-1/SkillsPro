@@ -36,9 +36,9 @@ const Home = () => {
   const [supportEmail, setSupportEmail] = useState('');
   const highlights = [
     'Verified Certificates',
-    '1-on-1 Mentorship',
+    'Priority Support',
     'Live Doubt Sessions',
-    'AI Learning Guidance',
+    'Career-Focused Learning',
   ];
   const stats = [
     { value: '50+', label: 'premium courses' },
@@ -53,8 +53,8 @@ const Home = () => {
     },
     {
       icon: Brain,
-      title: 'AI + Mentor Support',
-      description: 'Use AI learning assistance together with teacher support when you need direction or doubt clearing.',
+      title: 'Guided Support',
+      description: 'Get platform guidance, doubt support, and structured learning help without overpromising unsupported features.',
     },
     {
       icon: Briefcase,
@@ -252,7 +252,7 @@ const Home = () => {
                 </div>
                 <div className="mt-8 rounded-2xl border border-white/15 bg-slate-950/30 p-5">
                   <p className="text-sm text-slate-200">
-                    Includes course access, mentor interaction, practice tests, certificate verification, and growth tools from a single account.
+                    Includes course access, practice tests, certificate verification, and growth tools from a single account.
                   </p>
                 </div>
                 <div className="mt-5 rounded-2xl border border-white/15 bg-white/10 p-4">
@@ -267,8 +267,8 @@ const Home = () => {
         <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
           <div className="rounded-[2rem] border border-slate-200 bg-white/80 p-6 md:p-8 shadow-lg">
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">Platform features</p>
-              <h2 className="mt-3 text-3xl md:text-4xl font-serif font-bold text-nani-dark">Everything on the index page now reflects the full product better</h2>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">Platform features</p>
+                <h2 className="mt-3 text-3xl md:text-4xl font-serif font-bold text-nani-dark">Everything on the index page now reflects the full product better</h2>
               <p className="mt-3 text-slate-600">
                 The landing page now presents the platform as a complete learning system instead of a single hero block.
               </p>
@@ -311,8 +311,8 @@ const Home = () => {
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <div className="rounded-3xl bg-white p-5 border border-slate-200">
                 <Users className="text-nani-accent" size={24} />
-                <h3 className="mt-4 text-lg font-bold text-slate-900">Mentor access</h3>
-                <p className="mt-2 text-sm text-slate-600">Support is available beyond video content through doubt clearing and teacher interaction.</p>
+                <h3 className="mt-4 text-lg font-bold text-slate-900">Support access</h3>
+                <p className="mt-2 text-sm text-slate-600">Support is available beyond video content through doubt clearing and guided interaction.</p>
               </div>
               <div className="rounded-3xl bg-white p-5 border border-slate-200">
                 <Clock3 className="text-nani-accent" size={24} />
@@ -466,7 +466,7 @@ const Home = () => {
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
                     <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Premium wins</p>
-                    <p className="mt-2 text-sm text-slate-100">Direct teacher support, resume builder, exams, and verified certificates stay tied to one premium story.</p>
+                    <p className="mt-2 text-sm text-slate-100">Resume builder, exams, support features, and verified certificates stay tied to one premium story.</p>
                   </div>
                 </div>
               </div>
@@ -498,7 +498,7 @@ const Home = () => {
                 </div>
               </div>
               <p className="mt-4 max-w-md text-sm leading-6 text-slate-600">
-                Premium courses, mentor support, trusted assessments, resume tools, and verified certificates from one platform.
+                Premium courses, support features, trusted assessments, resume tools, and verified certificates from one platform.
               </p>
             </div>
 

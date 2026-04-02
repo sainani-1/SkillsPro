@@ -4,14 +4,16 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { CheckSquare, PlayCircle } from 'lucide-react';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 export default function StudentWriteTest() {
-  const { profile } = useAuth();
+  const { profile, isPremium } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
 
   const isStudent = profile?.role === 'student';
+  const premiumActive = isPremium(profile);
 
   const sortedRows = useMemo(
     () =>
@@ -28,6 +30,13 @@ export default function StudentWriteTest() {
     const load = async () => {
       if (!profile?.id || !isStudent) {
         if (mounted) setLoading(false);
+        return;
+      }
+      if (!premiumActive) {
+        if (mounted) {
+          setRows([]);
+          setLoading(false);
+        }
         return;
       }
       setLoading(true);
@@ -114,12 +123,38 @@ export default function StudentWriteTest() {
     return () => {
       mounted = false;
     };
-  }, [profile?.id, isStudent]);
+  }, [profile?.id, isStudent, premiumActive]);
 
   if (loading) return <LoadingSpinner message="Loading tests..." />;
 
   if (!isStudent) {
     return <div className="p-6 text-slate-600">Students only.</div>;
+  }
+
+  if (!premiumActive) {
+    return (
+      <div className="p-6 space-y-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <CheckSquare size={22} /> Write Test
+          </h1>
+          <p className="text-sm text-slate-600 mt-1">Premium is required to access teacher-published tests.</p>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <p className="font-semibold text-amber-900">Buy Premium to unlock Write Test.</p>
+          <p className="mt-2 text-sm text-amber-800">
+            Premium students can access teacher-published tests, continue their practice flow, and keep results in one place.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(buildPlanCheckoutPath('premium'))}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white hover:bg-amber-700"
+          >
+            Buy Premium
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

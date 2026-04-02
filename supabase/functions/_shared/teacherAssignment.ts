@@ -123,3 +123,26 @@ export async function assignBalancedTeacherToStudent(adminClient: SupabaseLikeCl
     reusedExisting: false,
   };
 }
+
+export async function clearTeacherAssignmentForStudent(adminClient: SupabaseLikeClient, studentId: string) {
+  if (!studentId) {
+    throw new Error("Student id is required to clear teacher assignment.");
+  }
+
+  const { error: profileError } = await adminClient
+    .from("profiles")
+    .update({ assigned_teacher_id: null })
+    .eq("id", studentId);
+
+  if (profileError) throw profileError;
+
+  const { error: assignmentError } = await adminClient
+    .from("teacher_assignments")
+    .update({ active: false })
+    .eq("student_id", studentId)
+    .eq("active", true);
+
+  if (assignmentError) throw assignmentError;
+
+  return { cleared: true };
+}

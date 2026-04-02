@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { buildWhatsAppShareUrl, trackPremiumEvent } from '../utils/growth';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const ATS_SCORE = 99;
 const PDF_MARGIN = 16;
@@ -309,11 +310,11 @@ const ResumeBuilder = () => {
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <Link
-              to="/app/payment"
+              to={buildPlanCheckoutPath('premium')}
               onClick={() => trackPremiumEvent('upgrade_click', 'resume_builder_gate', { accessMode }, profile?.id || user?.id || null)}
               className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800"
             >
-              Upgrade to Premium
+              Buy Premium
             </Link>
             <Link
               to="/app/premium-status"

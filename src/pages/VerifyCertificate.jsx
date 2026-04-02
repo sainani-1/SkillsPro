@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ShieldCheck, Search, CheckCircle, XCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { getCertificateDisplayName } from '../utils/identityVerification';
 
 const generateDeterministicCode = (seed) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -195,7 +196,11 @@ const VerifyCertificate = () => {
 
     ctx.fillStyle = '#1565c0';
     ctx.font = 'bold 48px Georgia, serif';
-    ctx.fillText(cert.user?.full_name || '________________________', 600, 460);
+    ctx.fillText(
+      getCertificateDisplayName(cert.user, { placeholder: '________________________' }),
+      600,
+      460
+    );
     ctx.strokeStyle = '#d4af37';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -250,7 +255,7 @@ const VerifyCertificate = () => {
             id,
             issued_at,
             revoked_at,
-            user:profiles!certificates_user_id_fkey(full_name, email),
+            user:profiles!certificates_user_id_fkey(full_name, certificate_name, identity_verification_status, email),
             course:courses!certificates_course_id_fkey(title, category)
           `)
           .gte('issued_at', start)
@@ -280,7 +285,7 @@ const VerifyCertificate = () => {
               submitted_at,
               score_percent,
               passed,
-              user:profiles!exam_submissions_user_id_fkey(full_name, email),
+              user:profiles!exam_submissions_user_id_fkey(full_name, certificate_name, identity_verification_status, email),
               exam:exams(course_id, course:courses(title, category))
             `)
             .eq('passed', true)
@@ -311,7 +316,7 @@ const VerifyCertificate = () => {
             id,
             issued_at,
             revoked_at,
-            user:profiles!certificates_user_id_fkey(full_name, email),
+            user:profiles!certificates_user_id_fkey(full_name, certificate_name, identity_verification_status, email),
             course:courses!certificates_course_id_fkey(title, category)
           `)
           .eq('id', trimmedId)
@@ -358,7 +363,7 @@ const VerifyCertificate = () => {
           }
         }
         setResult({ valid: true, message: 'Certificate is valid and authentic!', data });
-        if (data.user?.full_name && (data.course?.title || data.generated?.award_name || data.generated?.course_name)) {
+        if (getCertificateDisplayName(data.user) && (data.course?.title || data.generated?.award_name || data.generated?.course_name)) {
           const formattedId = data._fallback ? certId.trim() : formatCertificateId(data);
           const dataUrl = await buildCertificateDataUrl(data, formattedId);
           setPreviewUrl(dataUrl);
@@ -463,7 +468,7 @@ const VerifyCertificate = () => {
             </div>
             {result.data && result.valid && (
               <div className="text-sm space-y-1 text-slate-700">
-                <p><strong>Student:</strong> {result.data.user?.full_name}</p>
+                <p><strong>Student:</strong> {getCertificateDisplayName(result.data.user)}</p>
                 <p><strong>Course:</strong> {result.data.course?.title}</p>
                 <p><strong>Category:</strong> {result.data.course?.category}</p>
                 <p><strong>Issued:</strong> {new Date(result.data.issued_at).toLocaleDateString()}</p>
@@ -481,7 +486,7 @@ const VerifyCertificate = () => {
             )}
             {result.data && !result.valid && result.data.revoked_at && (
               <div className="text-sm space-y-1 text-red-800">
-                <p><strong>Student:</strong> {result.data.user?.full_name}</p>
+                <p><strong>Student:</strong> {getCertificateDisplayName(result.data.user)}</p>
                 <p><strong>Course:</strong> {result.data.course?.title}</p>
                 <p><strong>Issued:</strong> {new Date(result.data.issued_at).toLocaleDateString()}</p>
                 <p><strong>Blocked On:</strong> {new Date(result.data.revoked_at).toLocaleString()}</p>

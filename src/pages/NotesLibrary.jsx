@@ -5,14 +5,15 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { getNotesLibrarySettingKey, getProtectedNotesPreview, parseNotesLibraryItems } from '../utils/notesLibrary';
+import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
-const UpgradeCard = ({ title, message, ctaLabel }) => (
+const UpgradeCard = ({ title, message, ctaLabel, planTier }) => (
   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center">
     <Lock size={30} className="mx-auto text-amber-600" />
     <h2 className="mt-4 text-2xl font-bold text-amber-900">{title}</h2>
     <p className="mt-2 text-sm text-amber-800">{message}</p>
     <Link
-      to="/plans"
+      to={buildPlanCheckoutPath(planTier)}
       className="mt-5 inline-flex items-center justify-center rounded-lg bg-amber-600 px-5 py-3 font-semibold text-white hover:bg-amber-700"
     >
       {ctaLabel}
@@ -74,8 +75,9 @@ const NotesLibrary = () => {
     return (
       <UpgradeCard
         title="Premium Plus required"
-        message="This separate advanced notes library is available only to Premium Plus students."
+        message="This separate advanced notes library is available only to Premium Plus students. Buy Premium Plus to continue."
         ctaLabel="Buy Premium Plus"
+        planTier="premium_plus"
       />
     );
   }
@@ -86,6 +88,7 @@ const NotesLibrary = () => {
         title="Upgrade to Premium Plus"
         message="Your current Premium plan includes classes and core access. Upgrade to Premium Plus to unlock this advanced notes library."
         ctaLabel="Upgrade to Premium Plus"
+        planTier="premium_plus"
       />
     );
   }

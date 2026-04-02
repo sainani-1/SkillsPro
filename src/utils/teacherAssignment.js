@@ -118,3 +118,26 @@ export async function assignBalancedTeacherToStudent(supabase, studentId) {
     reusedExisting: false,
   };
 }
+
+export async function clearTeacherAssignmentForStudent(supabase, studentId) {
+  if (!supabase || !studentId) {
+    throw new Error('Student id is required to clear teacher assignment.');
+  }
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({ assigned_teacher_id: null })
+    .eq('id', studentId);
+
+  if (profileError) throw profileError;
+
+  const { error: assignmentError } = await supabase
+    .from('teacher_assignments')
+    .update({ active: false })
+    .eq('student_id', studentId)
+    .eq('active', true);
+
+  if (assignmentError) throw assignmentError;
+
+  return { cleared: true };
+}
