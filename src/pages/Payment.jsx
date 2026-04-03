@@ -157,7 +157,7 @@ const Payment = () => {
         tier: 'premium_plus',
         cost: Math.max((premiumCost || 199) + 100, 299),
         periodMonths: 6,
-        description: 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.',
+        description: 'Add ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support on top of Premium.',
         features: PLAN_FEATURES.premium_plus,
       }, Math.max((premiumCost || 199) + 100, 299), {
         premium: premiumCost || 199,
@@ -244,7 +244,7 @@ const Payment = () => {
               tier: 'premium_plus',
               cost: fallbackPremiumPlusCost,
               periodMonths: 6,
-              description: 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.',
+              description: 'Add mentoring requests, the separate notes library, and higher-touch support on top of Premium.',
               features: PLAN_FEATURES.premium_plus,
             }, fallbackPremiumPlusCost, tierCostMap),
           ]);
@@ -721,8 +721,8 @@ const Payment = () => {
                     <h2 className="mt-2 text-2xl font-bold">{plan.name}</h2>
                     <p className={`mt-2 text-sm ${isSelected ? 'text-white/80' : 'text-slate-600'}`}>
                       {plan.tier === 'premium_plus'
-                        ? 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.'
-                        : 'Courses, tests, certificates, resume builder, live classes, and normal support.'}
+                        ? 'Add ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support on top of Premium.'
+                        : 'Courses, tests, certificates, resume builder preview, live classes, and normal support.'}
                     </p>
                   </div>
                   <div className={`rounded-full px-3 py-1 text-xs font-semibold ${isSelected ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-700'}`}>
@@ -751,8 +751,8 @@ const Payment = () => {
             <p className="mt-2 text-2xl font-bold text-slate-900">{selectedPlan?.name || 'Premium'}</p>
             <p className="mt-1 text-sm text-slate-500">
               {selectedPlan?.tier === 'premium_plus'
-                ? 'Includes doubts, mentoring requests, notes access, and higher-touch support.'
-                : 'Includes courses, tests, certificates, resume builder, live classes, and normal support.'}
+                ? 'Includes Premium plus ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support.'
+                : 'Includes courses, tests, certificates, resume builder preview, live classes, and normal support.'}
             </p>
             <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
               <p className="text-sm text-slate-500">Base price</p>
@@ -776,7 +776,7 @@ const Payment = () => {
               Upgrade advantage
             </div>
             <p className="mt-2 text-sm text-blue-900">
-              Premium covers the core learning flow. Premium Plus adds doubts, mentoring requests, notes, and higher-touch support.
+              Premium covers the core learning flow. Premium Plus adds ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support.
             </p>
           </div>
         </div>

@@ -117,8 +117,8 @@ const Plans = () => {
                 ) : null}
                 <p className="text-sm text-slate-600 mt-4 min-h-[44px]">
                   {plan.tier === 'premium_plus'
-                    ? 'Ask doubts, request mentoring sessions, unlock notes, and get higher-touch support.'
-                    : 'Courses, tests, certificates, resume builder, live classes, and normal support.'}
+                    ? 'Add ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support on top of Premium.'
+                    : 'Courses, tests, certificates, resume builder preview, live classes, and normal support.'}
                 </p>
                 <div className="mt-5 space-y-2 text-sm text-slate-700">
                   {featureList.map((feature, index) => (

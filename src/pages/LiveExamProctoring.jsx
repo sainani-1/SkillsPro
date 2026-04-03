@@ -776,13 +776,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const allInOneSessions = useMemo(
     () => globalMonitorableSessions.filter((session) => {
       const status = String(session.status || '').toLowerCase();
-      const hasLiveMedia =
-        Boolean(session.screen_share_connected) ||
-        Boolean(session.camera_connected) ||
-        Boolean(session.mic_connected);
-      return status === 'active' && Boolean(session.started_at) && hasLiveMedia;
+      return status === 'active' && sessionIsCurrentlyLiveForSlot(session, slots.find((row) => String(row.id) === String(session.slot_id)));
     }),
-    [globalMonitorableSessions]
+    [globalMonitorableSessions, slots]
   );
   const activeMonitoringPool = isAllInOnePanel ? allInOneSessions : monitorableSessions;
   const selectedMonitoringIndex = useMemo(
@@ -3425,7 +3421,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                           <p className="mt-1 text-sm text-slate-500">Live monitoring list for this slot. Click a student to inspect feeds, alerts, and quick actions.</p>
                         </div>
                         <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
-                          {slotSessions.filter((session) => session.status === 'active').length} active
+                          {slotSessions.filter((session) => sessionIsCurrentlyLiveForSlot(session, selectedSlot)).length} active
                         </div>
                       </div>
                       <div className="mt-4 space-y-3">

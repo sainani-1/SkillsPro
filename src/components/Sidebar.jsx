@@ -503,10 +503,18 @@ const Sidebar = () => {
         {/* Student Specific */}
         {role === 'student' && (
           <>
-            {!premiumActive && (
-              <NavLink to={buildPlanCheckoutPath('premium')} className={navItemClass} title="Buy Premium">
+            {!premiumPlusActive && (
+              <NavLink
+                to={buildPlanCheckoutPath(premiumActive ? 'premium_plus' : 'premium')}
+                className={navItemClass}
+                title={premiumActive ? 'Upgrade to Premium Plus' : 'Buy Premium'}
+              >
                 <CreditCard size={28} />
-                {shouldShowText && <span className="truncate text-sm font-medium">Buy Premium</span>}
+                {shouldShowText && (
+                  <span className="truncate text-sm font-medium">
+                    {premiumActive ? 'Upgrade Premium Plus' : 'Buy Premium'}
+                  </span>
+                )}
               </NavLink>
             )}
             <NavLink to="/app/write-test" className={navItemClass} title="Write Test">
@@ -553,17 +561,15 @@ const Sidebar = () => {
               <ClipboardList size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Attendance</span>}
             </NavLink>
-            {premiumActive && (
-              <NavLink to="/app/chat" className={navItemClass} title="Ask a Doubt">
-                <MessageCircle size={28} />
-                {shouldShowText && <span className="truncate text-sm font-medium">Ask a Doubt</span>}
-                {unreadChats > 0 && (
-                  <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                    {unreadChats > 9 ? '9+' : unreadChats}
-                  </span>
-                )}
-              </NavLink>
-            )}
+            <NavLink to="/app/chat" className={navItemClass} title="Ask a Doubt">
+              <MessageCircle size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Ask a Doubt</span>}
+              {unreadChats > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadChats > 9 ? '9+' : unreadChats}
+                </span>
+              )}
+            </NavLink>
             <NavLink to="/app/request-teacher" className={navItemClass} title="Request Teacher">
               <UserPlus size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Request Teacher</span>}

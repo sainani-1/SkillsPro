@@ -10,6 +10,7 @@ import { ensureReferralCode } from '../utils/referrals';
 import { copyText, trackPremiumEvent } from '../utils/growth';
 import { getPublicAppUrl } from '../utils/appUrl';
 import { isLifetimePremium } from '../utils/premium';
+import { formatVideoResumeLabel, getVideoCompletionPercent, readVideoProgress } from '../utils/videoProgress';
 
 // Offer congrats widget
 const OfferCongrats = ({ offer }) => (
@@ -37,12 +38,15 @@ const StudentDashboard = () => {
   const [referralCode, setReferralCode] = useState('');
   const [referralStats, setReferralStats] = useState({ registered: 0, paid: 0 });
   const [copyFeedback, setCopyFeedback] = useState('');
+  const [videoProgressByCourseId, setVideoProgressByCourseId] = useState({});
 
   const certificateCourses = new Set(certificates.map(c => c.course_id));
   const getCourseProgress = (course) => {
     if (certificateCourses.has(course.course_id) || examResults[course.course_id]?.passed) return 100;
     const raw = Number(course.progress) || 0;
-    return Math.min(Math.max(raw, 0), 100);
+    const savedVideoProgress = videoProgressByCourseId[String(course.course_id)] || null;
+    const videoPercent = getVideoCompletionPercent(savedVideoProgress);
+    return Math.min(Math.max(Math.max(raw, videoPercent), 0), 100);
   };
 
   // Derived aggregates for cards
@@ -60,6 +64,22 @@ const StudentDashboard = () => {
     fetchData();
     fetchOffers();
   }, [profile]);
+
+  useEffect(() => {
+    if (!profile?.id || courses.length === 0) {
+      setVideoProgressByCourseId({});
+      return;
+    }
+
+    const next = {};
+    courses.forEach((course) => {
+      const courseKey = String(course.course_id || course.courses?.id || '');
+      if (!courseKey) return;
+      const saved = readVideoProgress(profile.id, courseKey);
+      if (saved) next[courseKey] = saved;
+    });
+    setVideoProgressByCourseId(next);
+  }, [profile?.id, courses]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -351,7 +371,11 @@ const StudentDashboard = () => {
               <p className="text-green-100">
                 You've been assigned to <span className="font-semibold">{teacher.full_name}</span> as your teacher! 
                 You can now chat with them and attend live classes.
-              </p>
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        Video completed: {progressPercent}%
+                                        {hasResumePoint ? ` • Resume from ${formatVideoResumeLabel(savedVideoProgress.currentTime)}` : ''}
+                                      </p>
             </div>
           </div>
         </div>
@@ -405,9 +429,9 @@ const StudentDashboard = () => {
               <FileText size={14} />
               New career tool
             </p>
-            <h2 className="mt-2 text-xl font-bold text-slate-900">Build an attractive resume with live preview and PDF download.</h2>
+            <h2 className="mt-2 text-xl font-bold text-slate-900">Build an attractive resume with live preview.</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Open the resume builder, fill in your details, and generate a polished resume designed to make a strong first impression.
+              Open the resume builder, fill in your details, and review a polished resume. Premium Plus unlocks PDF download when you want to export it.
             </p>
           </div>
           <Link to="/app/resume-builder" className="inline-flex items-center justify-center rounded-xl bg-nani-dark px-5 py-3 font-semibold text-white hover:bg-nani-accent">
@@ -469,6 +493,7 @@ const StudentDashboard = () => {
           courses={courses}
           certificates={certificates}
           examResults={examResults}
+          videoProgressByCourseId={videoProgressByCourseId}
         />
       ) : null}
 
@@ -486,7 +511,10 @@ const StudentDashboard = () => {
                <div className="space-y-4">
                    {courses.length > 0 ? courses.map(c => {
                      const result = examResults[c.course_id];
-                     const daysLeft = result ? getDaysUntilRetry(result.next_attempt_allowed_at) : null;
+                      const daysLeft = result ? getDaysUntilRetry(result.next_attempt_allowed_at) : null;
+                      const savedVideoProgress = videoProgressByCourseId[String(c.course_id)] || null;
+                      const progressPercent = getCourseProgress(c);
+                      const hasResumePoint = Boolean((savedVideoProgress?.currentTime || 0) > 0) && !savedVideoProgress?.completed;
                      
                      return (
                        <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
@@ -504,7 +532,7 @@ const StudentDashboard = () => {
                                   <div className="w-24 bg-slate-200 rounded-full h-2">
                                       <div
                                         className="bg-gold-400 h-2 rounded-full"
-                                          style={{ width: `${getCourseProgress(c)}%` }}
+                                          style={{ width: `${progressPercent}%` }}
                                       ></div>
                                   </div>
                                   <div className="text-right min-w-max">
@@ -521,8 +549,8 @@ const StudentDashboard = () => {
                                         <RotateCcw size={16} /> Retry
                                       </Link>
                                     ) : (
-                                      <Link to={`/exam/${c.courses?.id}`} className="text-nani-accent font-semibold text-sm hover:underline">
-                                          Resume
+                                      <Link to={`/app/course/${c.courses?.id}`} className="text-nani-accent font-semibold text-sm hover:underline">
+                                          {hasResumePoint ? 'Resume Video' : 'Open Course'}
                                       </Link>
                                     )}
                                   </div>

@@ -18,6 +18,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { fetchCourseProtectedAssets } from '../utils/courseProtectedAssets';
 import { readBrowserState, upsertRecentItem, writeBrowserState } from '../utils/browserState';
 import { buildPlanCheckoutPath } from '../utils/planCheckout';
+import { getVideoCompletionPercent, readVideoProgress, writeVideoProgress } from '../utils/videoProgress';
 
 const APP_ORIGIN = typeof window !== 'undefined' ? window.location.origin : '';
 const VIDEO_PROGRESS_SAVE_INTERVAL_SECONDS = 5;
@@ -259,30 +260,6 @@ const AssetBlockedState = ({ icon: Icon, title, message }) => (
   </div>
 );
 
-const buildVideoProgressKey = (userId, courseId) => `course_video_progress_${userId || 'guest'}_${courseId}`;
-
-const readVideoProgress = (userId, courseId) => {
-  if (typeof window === 'undefined' || !courseId) return null;
-  try {
-    const raw = window.localStorage.getItem(buildVideoProgressKey(userId, courseId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.currentTime !== 'number') return null;
-    return parsed;
-  } catch (error) {
-    return null;
-  }
-};
-
-const writeVideoProgress = (userId, courseId, payload) => {
-  if (typeof window === 'undefined' || !courseId) return;
-  try {
-    window.localStorage.setItem(buildVideoProgressKey(userId, courseId), JSON.stringify(payload));
-  } catch (error) {
-    // Ignore storage failures.
-  }
-};
-
 const CourseDetail = () => {
   const { courseId } = useParams();
   const [activeTab, setActiveTab] = useState(() => readBrowserState(`${COURSE_TAB_KEY_PREFIX}${courseId}`, 'overview'));
@@ -514,6 +491,8 @@ const CourseDetail = () => {
     const progress = {
       currentTime: safeCurrentTime,
       duration: safeDuration,
+      completed: safeDuration > 0 && safeCurrentTime >= Math.max(safeDuration - 1, 0),
+      percent: safeDuration > 0 ? getVideoCompletionPercent({ currentTime: safeCurrentTime, duration: safeDuration }) : 0,
       updatedAt: new Date().toISOString(),
     };
     writeVideoProgress(profile?.id || user?.id, courseId, progress);
@@ -530,11 +509,15 @@ const CourseDetail = () => {
     writeVideoProgress(profile?.id || user?.id, courseId, {
       currentTime: 0,
       duration: savedVideoProgress?.duration || 0,
+      completed: false,
+      percent: 0,
       updatedAt: new Date().toISOString(),
     });
     setSavedVideoProgress((prev) => ({
       currentTime: 0,
       duration: prev?.duration || 0,
+      completed: false,
+      percent: 0,
       updatedAt: new Date().toISOString(),
     }));
   };
@@ -580,7 +563,8 @@ const CourseDetail = () => {
   };
 
   const handleVideoEnded = () => {
-    persistVideoProgress(0, videoRef.current?.duration || 0);
+    const duration = videoRef.current?.duration || 0;
+    persistVideoProgress(duration, duration);
     lastSavedTimeRef.current = 0;
   };
 
@@ -889,17 +873,10 @@ const CourseDetail = () => {
                     <h2 className="text-2xl font-bold text-slate-900 mb-6">Protected Course Notes</h2>
                     {!premium ? (
                       <NotesUpgradeCard
-                        title="Premium Plus required"
-                        message="Advanced notes are available in the Notes panel only with Premium Plus."
-                        ctaLabel="Buy Premium Plus"
-                        planTier="premium_plus"
-                      />
-                    ) : !premiumPlus ? (
-                      <NotesUpgradeCard
-                        title="Upgrade to Premium Plus"
-                        message="Your current Premium plan includes classes and video access. Upgrade to Premium Plus to unlock advanced notes here."
-                        ctaLabel="Upgrade to Premium Plus"
-                        planTier="premium_plus"
+                        title="Premium required"
+                        message="Course notes inside this course are available with Premium access."
+                        ctaLabel="Buy Premium"
+                        planTier="premium"
                       />
                     ) : assetsLoading ? (
                       <LoadingSpinner message="Loading protected notes..." />
@@ -1041,9 +1018,13 @@ const CourseDetail = () => {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 uppercase font-semibold">Notes access</p>
-                  <p className={`font-semibold flex items-center ${premiumPlus ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {premiumPlus ? <CheckCircle size={18} className="mr-2" /> : <Lock size={18} className="mr-2" />}
-                    {premiumPlus ? 'Advanced notes unlocked' : premium ? 'Upgrade to Premium Plus for notes' : 'Buy Premium Plus for notes'}
+                  <p className={`font-semibold flex items-center ${premium ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {premium ? <CheckCircle size={18} className="mr-2" /> : <Lock size={18} className="mr-2" />}
+                    {premiumPlus
+                      ? 'Course notes + Premium Plus library unlocked'
+                      : premium
+                        ? 'Course notes unlocked'
+                        : 'Buy Premium for course notes'}
                   </p>
                 </div>
                 <div className="pt-4 border-t border-slate-200">

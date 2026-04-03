@@ -10,7 +10,7 @@ import { buildPlanCheckoutPath } from '../utils/planCheckout';
 const ChatWithTeacher = () => {
   const ADMIN_USER_ACCESS_TARGET_KEY = 'admin_user_access_target';
   const navigate = useNavigate();
-  const { profile, realProfile, isImpersonating, stopImpersonation, isPremium } = useAuth();
+  const { profile, realProfile, isImpersonating, stopImpersonation, isPremiumPlus } = useAuth();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [groupId, setGroupId] = useState(null);
@@ -24,7 +24,7 @@ const ChatWithTeacher = () => {
   const [error, setError] = useState(null);
 
   const [initialLoad, setInitialLoad] = useState(true);
-  const premiumAccess = isPremium(profile);
+  const premiumAccess = isPremiumPlus(profile);
 
   if (profile?.role === 'student' && !premiumAccess) {
     return (
@@ -32,16 +32,16 @@ const ChatWithTeacher = () => {
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">
           <MessageCircle size={24} />
         </div>
-        <h1 className="mt-4 text-2xl font-bold text-slate-900">Premium Required</h1>
+        <h1 className="mt-4 text-2xl font-bold text-slate-900">Premium Plus Required</h1>
         <p className="mt-3 text-sm text-slate-600">
-          Ask a Doubt is available for Premium and Premium Plus students.
+          Ask a Doubt is available only for Premium Plus students.
         </p>
         <button
           type="button"
-          onClick={() => navigate(buildPlanCheckoutPath('premium'))}
+          onClick={() => navigate(buildPlanCheckoutPath('premium_plus'))}
           className="mt-5 rounded-xl bg-amber-500 px-5 py-3 text-sm font-semibold text-white hover:bg-amber-600"
         >
-          Buy Premium
+          Upgrade to Premium Plus
         </button>
       </div>
     );

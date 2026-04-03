@@ -45,7 +45,7 @@ const defaultResume = {
 };
 
 const ResumeBuilder = () => {
-  const { profile, user, isPremium } = useAuth();
+  const { profile, user, isPremium, isPremiumPlus } = useAuth();
   const previewRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
   const [resume, setResume] = useState(defaultResume);
@@ -112,6 +112,7 @@ const ResumeBuilder = () => {
   };
 
   const downloadResume = async () => {
+    if (!isPremiumPlus(profile)) return;
     setDownloading(true);
     try {
       const { default: jsPDF } = await import('jspdf');
@@ -261,6 +262,7 @@ const ResumeBuilder = () => {
   }
 
   const hasAccess = accessMode === 'free' || isPremium(profile);
+  const canDownload = isPremiumPlus(profile);
 
   if (!hasAccess) {
     return (
@@ -276,7 +278,7 @@ const ResumeBuilder = () => {
           <div>
             <p className="text-lg font-semibold">Premium access required</p>
             <p className="mt-2 text-sm">
-              Admin has set Resume Builder to premium-only mode. Upgrade to premium to create and download resumes.
+              Admin has set Resume Builder to premium-only mode. Upgrade to Premium to open the builder. Premium Plus unlocks PDF download.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -296,8 +298,8 @@ const ResumeBuilder = () => {
               <div className="px-4 py-3">Premium</div>
             </div>
             {[
-              ['Resume builder access', 'Preview only', 'Full access'],
-              ['PDF download', 'No', 'Yes'],
+              ['Resume builder access', 'Preview only', 'Builder preview'],
+              ['PDF download', 'No', 'Premium Plus'],
               ['Mentorship sessions', 'No', 'Yes'],
               ['Verified exams + certs', 'Limited', 'Yes'],
             ].map(([feature, free, premium]) => (
@@ -342,7 +344,9 @@ const ResumeBuilder = () => {
             </p>
             <h1 className="mt-4 text-3xl md:text-4xl font-serif font-bold">Create a resume that looks premium at first glance.</h1>
             <p className="mt-3 text-slate-200">
-              Edit your details, review the live preview, and download a polished PDF in one place.
+              {canDownload
+                ? 'Edit your details, review the live preview, and download a polished PDF in one place.'
+                : 'Edit your details and review the live preview here. Premium Plus unlocks PDF download.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
@@ -356,12 +360,13 @@ const ResumeBuilder = () => {
             </button>
             <button
               type="button"
-              onClick={downloadResume}
-              disabled={downloading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-5 py-3 font-bold text-nani-dark hover:bg-gold-500 disabled:opacity-60"
+              onClick={canDownload ? downloadResume : undefined}
+              disabled={downloading || !canDownload}
+              title={canDownload ? 'Download resume PDF' : 'Premium Plus required for PDF download'}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gold-400 px-5 py-3 font-bold text-nani-dark hover:bg-gold-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Download size={18} />
-              {downloading ? 'Preparing PDF...' : 'Download'}
+              {downloading ? 'Preparing PDF...' : canDownload ? 'Download' : 'Download locked'}
             </button>
             <a
               href={resumeWhatsAppUrl}
@@ -376,6 +381,31 @@ const ResumeBuilder = () => {
           </div>
         </div>
       </div>
+
+      {!canDownload ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">Preview Only</p>
+          <h2 className="mt-2 text-xl font-bold">PDF download is available on Premium Plus.</h2>
+          <p className="mt-2 text-sm text-amber-900">
+            Your current plan lets you build and review the resume here. Upgrade only when you want to export the PDF.
+          </p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <Link
+              to={buildPlanCheckoutPath('premium_plus')}
+              onClick={() => trackPremiumEvent('upgrade_click', 'resume_builder_download_gate', { accessMode }, profile?.id || user?.id || null)}
+              className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-5 py-3 font-semibold text-white hover:bg-amber-700"
+            >
+              Upgrade to Premium Plus
+            </Link>
+            <Link
+              to="/app/premium-status"
+              className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-white px-5 py-3 font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Compare Plans
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)] gap-6 items-start">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm space-y-5">

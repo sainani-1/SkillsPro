@@ -18,6 +18,7 @@ const PremiumStatus = () => {
   const [showGiftAnim, setShowGiftAnim] = useState(false);
   const [selectedGift, setSelectedGift] = useState(null);
   const [premiumCost, setPremiumCost] = useState(199);
+  const [premiumPlusCost, setPremiumPlusCost] = useState(299);
   const [redeemedOfferIds, setRedeemedOfferIds] = useState(new Set());
   const { popupNode, openPopup } = usePopup();
 
@@ -33,12 +34,13 @@ const PremiumStatus = () => {
 
       const { data: settingsData, error: settingsError } = await supabase
         .from('settings')
-        .select('value')
-        .eq('key', 'premium_cost')
-        .maybeSingle();
+        .select('key, value')
+        .in('key', ['premium_cost', 'premium_plus_cost']);
 
       if (!settingsError && settingsData) {
-        setPremiumCost(parseInt(settingsData.value, 10) || 199);
+        const settingsMap = Object.fromEntries((settingsData || []).map((row) => [row.key, row.value]));
+        setPremiumCost(parseInt(settingsMap.premium_cost, 10) || 199);
+        setPremiumPlusCost(parseInt(settingsMap.premium_plus_cost, 10) || 299);
       }
 
       const { data: payments, error: paymentError } = await supabase
@@ -201,10 +203,12 @@ const PremiumStatus = () => {
 
             {!premiumDetails.isLifetime && premiumDetails.daysRemaining !== null && premiumDetails.daysRemaining <= 5 && (
               <Link
-                to={buildPlanCheckoutPath('premium')}
+                to={buildPlanCheckoutPath('premium_plus')}
                 className="block mt-4 bg-blue-600 text-white py-3 rounded-lg font-semibold text-center hover:bg-blue-700 transition-colors"
               >
-                Renew Premium for Rs {premiumCost}
+                {premiumDetails.planType === 'premium_plus'
+                  ? `Renew Premium Plus for Rs ${premiumPlusCost}`
+                  : `Upgrade to Premium Plus for Rs ${premiumPlusCost}`}
               </Link>
             )}
           </div>

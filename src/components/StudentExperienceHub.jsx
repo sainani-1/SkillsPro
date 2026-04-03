@@ -14,6 +14,7 @@ import {
 import { BarChart3, Flame, Medal, MessageSquare, PlayCircle, Sparkles } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { BADGE_LEVELS, computeCurrentStreak, getBadgeForPoints, getNextBadge } from '../utils/learningActivity';
+import { getVideoCompletionPercent } from '../utils/videoProgress';
 
 function clampPercent(value) {
   return Math.min(100, Math.max(0, Math.round(value || 0)));
@@ -48,7 +49,7 @@ function makeLastSevenDays() {
   });
 }
 
-const StudentExperienceHub = ({ profile, courses, certificates, examResults }) => {
+const StudentExperienceHub = ({ profile, courses, certificates, examResults, videoProgressByCourseId = {} }) => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalPoints: 0,
@@ -123,15 +124,21 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
       const answerRows = forumAnswersResult.data || [];
       const availableCourses = allCoursesResult.data || [];
 
+      const getCoursePercent = (course) => {
+        const videoProgress = videoProgressByCourseId[String(course.course_id)] || null;
+        const videoPercent = getVideoCompletionPercent(videoProgress);
+        return Math.max(0, Math.min(100, Math.max(Number(course.progress) || 0, videoPercent)));
+      };
+
       const completedCourses = courses.filter((course) => {
         if (course.completed) return true;
-        if (Number(course.progress) >= 100) return true;
+        if (getCoursePercent(course) >= 100) return true;
         return Boolean(examResults?.[course.course_id]?.passed);
       }).length;
 
       const passedExams = Object.values(examResults || {}).filter((entry) => entry?.passed).length;
       const avgProgress = courses.length
-        ? courses.reduce((sum, course) => sum + Math.min(100, Math.max(0, Number(course.progress) || 0)), 0) / courses.length
+        ? courses.reduce((sum, course) => sum + getCoursePercent(course), 0) / courses.length
         : 0;
       const completionPercent = courses.length ? (completedCourses / courses.length) * 100 : 0;
 
@@ -178,6 +185,14 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
         const bucket = weeklyIndex.get(key);
         if (bucket) {
           bucket.minutes += getSessionDurationMinutes(row);
+        }
+      });
+
+      Object.values(videoProgressByCourseId || {}).forEach((progress) => {
+        const key = String(progress?.updatedAt || '').slice(0, 10);
+        const bucket = weeklyIndex.get(key);
+        if (bucket) {
+          bucket.minutes += Math.max(0, Math.round((Number(progress.currentTime) || 0) / 60));
         }
       });
 
@@ -234,7 +249,7 @@ const StudentExperienceHub = ({ profile, courses, certificates, examResults }) =
       cancelled = true;
       window.removeEventListener('student-experience-refresh', handleRefresh);
     };
-  }, [profile?.id, profile?.core_subject, profile?.study_stream, profile?.full_name, profile?.avatar_url, courses, certificates.length, examResults]);
+  }, [profile?.id, profile?.core_subject, profile?.study_stream, profile?.full_name, profile?.avatar_url, courses, certificates.length, examResults, videoProgressByCourseId]);
 
   return (
     <section className="space-y-6">
