@@ -117,7 +117,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
   const navItemClass = ({ isActive }) =>
     `flex min-h-[56px] items-center ${isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-7 [&>svg]:w-7 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
-  const shouldShowText = !isCollapsed || isHovered;
+  const shouldShowText = isMobile || !isCollapsed || isHovered;
 
   useEffect(() => {
     if (location.pathname !== lastPathname) {
