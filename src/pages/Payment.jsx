@@ -754,6 +754,12 @@ const Payment = () => {
         resetAttemptState();
         if (!isDesktopDevice) {
           setShowUpiAppPicker(true);
+          setAlertModal({
+            show: true,
+            title: 'Request Recorded',
+            message: `Your payment request was recorded successfully. Payment ID: ${data.payment_id}. Tag: ${data.payment_tag || paymentTag}.`,
+            type: 'success',
+          });
         }
         if (isDesktopDevice) {
           setAlertModal({
@@ -1187,11 +1193,7 @@ const Payment = () => {
                 </div>
               </div>
             )}
-            {manualRequestSummary ? (
-              <div className="rounded-lg border border-emerald-300 bg-white px-4 py-3 text-sm text-slate-700">
-                Request recorded successfully. Payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span>, tag <span className="font-semibold">{manualRequestSummary.payment_tag || paymentTag}</span>, status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
-              </div>
-            ) : null}
+            {manualRequestSummary ? null : null}
           </div>
         )}
 
