@@ -4,6 +4,7 @@ import {
   activatePaidPremium,
   normalizePlanTier,
   notifyAdminOfPaymentEvent,
+  notifyUserOfPaymentReview,
 } from "../_shared/paymentHelpers.ts";
 
 const corsHeaders = {
@@ -104,6 +105,16 @@ Deno.serve(async (req: Request) => {
     return errorResponse("Only SkillPro UPI payments can be reviewed here.", 400);
   }
 
+  const { data: profile, error: profileError } = await adminClient
+    .from("profiles")
+    .select("premium_until, full_name, email, phone")
+    .eq("id", payment.user_id)
+    .maybeSingle();
+
+  if (profileError || !profile) {
+    return errorResponse("User profile not found.", 404);
+  }
+
   const now = new Date().toISOString();
 
   if (payload.action === "reject") {
@@ -116,21 +127,22 @@ Deno.serve(async (req: Request) => {
       })
       .eq("id", payment.id);
 
+    await notifyUserOfPaymentReview({
+      email: profile?.email || null,
+      userName: profile?.full_name || null,
+      planName: String(payment.metadata?.plan_label || (normalizePlanTier(String(payment.metadata?.plan_tier || "")) === "premium_plus" ? "Premium Plus" : "Premium")),
+      amount: Number(payment.amount || 0),
+      paymentId: payment.id,
+      paymentTag: String(payment.metadata?.payment_tag || ""),
+      status: "rejected",
+      note: String(payload.note || "Payment request rejected by admin."),
+    });
+
     return jsonResponse({ status: "failed", payment_id: payment.id });
   }
 
   if (payment.status === "success") {
     return jsonResponse({ status: "success", payment_id: payment.id, valid_until: payment.valid_until });
-  }
-
-  const { data: profile, error: profileError } = await adminClient
-    .from("profiles")
-    .select("premium_until, full_name, email, phone")
-    .eq("id", payment.user_id)
-    .maybeSingle();
-
-  if (profileError || !profile) {
-    return errorResponse("User profile not found.", 404);
   }
 
   const planTier = normalizePlanTier(String(payment.metadata?.plan_tier || ""));
@@ -183,6 +195,17 @@ Deno.serve(async (req: Request) => {
     userUpiId: String(payment.metadata?.user_upi_id || ""),
     note: String(payment.metadata?.payment_note || payload.note || ""),
     status: "success",
+  });
+
+  await notifyUserOfPaymentReview({
+    email: profile.email || null,
+    userName: profile.full_name || null,
+    planName: String(payment.metadata?.plan_label || (planTier === "premium_plus" ? "Premium Plus" : "Premium")),
+    amount: Number(payment.amount || 0),
+    paymentId: payment.id,
+    paymentTag: String(payment.metadata?.payment_tag || ""),
+    status: "approved",
+    note: String(payload.note || payment.metadata?.payment_note || ""),
   });
 
   return jsonResponse({

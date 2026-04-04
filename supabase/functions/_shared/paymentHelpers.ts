@@ -240,6 +240,53 @@ export const notifyAdminOfPaymentEvent = async (
   }
 };
 
+export const notifyUserOfPaymentReview = async (options: {
+  email?: string | null;
+  userName?: string | null;
+  planName: string;
+  amount: number;
+  paymentId: string;
+  paymentTag?: string | null;
+  status: "approved" | "rejected";
+  note?: string | null;
+}) => {
+  if (!options.email) return;
+
+  const title = options.status === "approved" ? "Payment Approved" : "Payment Rejected";
+  const summary =
+    options.status === "approved"
+      ? `${options.planName} payment has been approved by SkillPro.`
+      : `${options.planName} payment request was reviewed by SkillPro.`;
+
+  const detailRows = [
+    ["User", options.userName || "-"],
+    ["Plan", options.planName],
+    ["Amount", `INR ${options.amount}`],
+    ["Payment ID", options.paymentId],
+    ["Payment Tag", options.paymentTag || "-"],
+    ["Status", options.status],
+    ["Note", options.note || "-"],
+  ]
+    .map(([label, value]) => `<tr><td style="padding:6px 10px;border:1px solid #e2e8f0;"><strong>${label}</strong></td><td style="padding:6px 10px;border:1px solid #e2e8f0;">${value}</td></tr>`)
+    .join("");
+
+  try {
+    await sendEmailIfConfigured({
+      to: options.email,
+      subject: `SkillPro ${title}: ${options.planName}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;padding:16px;color:#0f172a;">
+          <h2 style="margin:0 0 12px;">${title}</h2>
+          <p style="margin:0 0 16px;">${summary}</p>
+          <table style="border-collapse:collapse;width:100%;max-width:720px;">${detailRows}</table>
+        </div>
+      `,
+    });
+  } catch {
+    // Ignore email failures.
+  }
+};
+
 export const activatePaidPremium = async (
   adminClient: ReturnType<typeof createClient>,
   options: {

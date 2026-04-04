@@ -1189,17 +1189,8 @@ const Payment = () => {
             )}
             {manualRequestSummary ? (
               <div className="rounded-lg border border-emerald-300 bg-white px-4 py-3 text-sm text-slate-700">
-                Last request: payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span>, tag <span className="font-semibold">{manualRequestSummary.payment_tag || paymentTag}</span>, with status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
+                Request recorded successfully. Payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span>, tag <span className="font-semibold">{manualRequestSummary.payment_tag || paymentTag}</span>, status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
               </div>
-            ) : null}
-            {directUpiLink ? (
-              <button
-                type="button"
-                onClick={() => setShowUpiAppPicker(true)}
-                className="inline-flex items-center justify-center rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-800"
-              >
-                Open UPI App
-              </button>
             ) : null}
           </div>
         )}
