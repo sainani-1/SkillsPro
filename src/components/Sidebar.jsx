@@ -13,7 +13,9 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const role = profile?.role || 'student';
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
   const [isHovered, setIsHovered] = useState(false);
   const [unreadChats, setUnreadChats] = useState(0);
   const [newUserRegistrations, setNewUserRegistrations] = useState(0);
@@ -115,6 +117,18 @@ const Sidebar = () => {
     `flex min-h-[56px] items-center ${isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-7 [&>svg]:w-7 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
   const shouldShowText = !isCollapsed || isHovered;
+
+  useEffect(() => {
+    const syncSidebarForViewport = () => {
+      if (window.innerWidth < 768) {
+        setIsCollapsed(true);
+      }
+    };
+
+    syncSidebarForViewport();
+    window.addEventListener('resize', syncSidebarForViewport);
+    return () => window.removeEventListener('resize', syncSidebarForViewport);
+  }, []);
 
   // Fetch unread chats count
   useEffect(() => {

@@ -12,6 +12,7 @@ const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_URGENCY_DATE = '2026-04-15';
 const DEFAULT_URGENCY_LABEL = 'April 15, 2026';
+const createPaymentTag = () => `SP${Date.now().toString().slice(-8)}`;
 
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
 
@@ -207,6 +208,8 @@ const Payment = () => {
   const [manualAppliedOffer, setManualAppliedOffer] = useState(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Your premium access is now active.');
+  const [userUpiName, setUserUpiName] = useState('');
+  const [paymentTag] = useState(() => createPaymentTag());
   const [manualRequestSummary, setManualRequestSummary] = useState(null);
   const [showUpiAppPicker, setShowUpiAppPicker] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
@@ -252,14 +255,17 @@ const Payment = () => {
     ? null
     : offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
   const pricing = buildPricing(selectedPlan?.cost || premiumCost || 0, selectedOffer);
-  const paymentNote = `${profile?.email || 'user'} paid`;
+  const paymentNote = `${profile?.email || 'user'} paid ${paymentTag}`;
   const directUpiLink = paymentGatewayMode === 'skillpro_upi' && skillproUpiId && pricing.finalAmount > 0
     ? `upi://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}`
     : '';
-  const isAndroidDevice = typeof window !== 'undefined' && /android/i.test(window.navigator.userAgent || '');
-  const isDesktopDevice = typeof window !== 'undefined'
-    ? window.matchMedia('(min-width: 768px)').matches && !/android|iphone|ipad|ipod/i.test(window.navigator.userAgent || '')
-    : true;
+  const userAgent = typeof window !== 'undefined' ? window.navigator.userAgent || '' : '';
+  const hasTouchPoints = typeof window !== 'undefined' ? Number(window.navigator.maxTouchPoints || 0) > 1 : false;
+  const isAndroidDevice = /android/i.test(userAgent);
+  const isProbablyMobileDevice = typeof window !== 'undefined'
+    ? /android|iphone|ipad|ipod|mobile/i.test(userAgent) || hasTouchPoints
+    : false;
+  const isDesktopDevice = !isProbablyMobileDevice;
   const currentPlanTier = getPlanTier(profile);
   const checkoutHeading =
     selectedPlanTier === 'premium_plus'
@@ -548,8 +554,20 @@ const Payment = () => {
     paymentAttemptRef.current = { paymentId: null, finalizing: false, finalized: false };
   };
 
-  const openDirectUpiApp = (app) => {
+  const openDirectUpiApp = async (app) => {
     if (!directUpiLink) return;
+    try {
+      const paymentId = manualRequestSummary?.payment_id;
+      if (paymentId) {
+        const accessToken = await getFreshAccessToken();
+        await callEdgeFunction('update-payment-request', accessToken, {
+          payment_id: paymentId,
+          payment_app: app?.label || app?.id || 'Other UPI App',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save payment app selection:', error);
+    }
     if (isAndroidDevice && app?.packageName) {
       const intentUrl = `intent://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}#Intent;scheme=upi;package=${app.packageName};end`;
       window.location.href = intentUrl;
@@ -683,6 +701,17 @@ const Payment = () => {
         return;
       }
 
+      if (paymentGatewayMode === 'skillpro_upi' && !userUpiName.trim()) {
+        setAlertModal({
+          show: true,
+          title: 'UPI Name Required',
+          message: 'Please enter the UPI name used for this payment so admin can verify it.',
+          type: 'warning',
+        });
+        setLoading(false);
+        return;
+      }
+
       const data = await callEdgeFunction('create-payment-order', accessToken, {
         offer_id: paymentGatewayMode === 'skillpro_upi' ? null : selectedOffer?.id || null,
         coupon_code: paymentGatewayMode === 'skillpro_upi'
@@ -690,6 +719,8 @@ const Payment = () => {
           : manualAppliedOffer && !selectedOfferId ? manualCouponCode.trim() || null : null,
         plan_tier: selectedPlanTier,
         user_upi_id: null,
+        user_upi_name: paymentGatewayMode === 'skillpro_upi' ? userUpiName.trim() : null,
+        payment_tag: paymentGatewayMode === 'skillpro_upi' ? paymentTag : null,
       });
 
       if (!data?.payment_id) {
@@ -706,17 +737,16 @@ const Payment = () => {
         setManualRequestSummary(data);
         setLoading(false);
         resetAttemptState();
-
-        if (!isDesktopDevice && data.upi_link) {
-          window.location.href = data.upi_link;
+        if (!isDesktopDevice) {
+          setShowUpiAppPicker(true);
         }
 
         setAlertModal({
           show: true,
-          title: isDesktopDevice ? 'Waiting for Admin Approval' : 'Continue In Your UPI App',
+          title: isDesktopDevice ? 'Waiting for Admin Approval' : 'Choose UPI App',
           message: isDesktopDevice
             ? `Your payment request for Rs ${data.amount} was recorded. Open this same account on your mobile and complete the UPI payment there. Premium will activate only after admin verifies and approves the payment.`
-            : `Your UPI payment for Rs ${data.amount} is ready. After you pay in the UPI app, admin must verify and approve it before premium is activated.`,
+            : `Your payment request for Rs ${data.amount} was recorded. Now choose your UPI app and complete the payment. Premium will activate only after admin verifies and approves the payment.`,
           type: 'success',
         });
         return;
@@ -1118,18 +1148,34 @@ const Payment = () => {
                 />
               </div>
             </div>
+            <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
+              <p><span className="font-semibold">Payment Tag:</span> {paymentTag}</p>
+            </div>
             {isDesktopDevice ? (
               <div className="rounded-lg border border-emerald-200 bg-white px-4 py-4 text-sm text-emerald-900">
-                Open this same account on your mobile and use the UPI app there. On desktop we will only record the payment start request for admin.
+                Open this same account on your mobile and use the UPI app there. Desktop does not create the payment request.
               </div>
             ) : (
-              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
-                Mobile flow opens your UPI app with the exact admin-set amount and note.
+              <div className="space-y-3">
+                <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
+                  Mobile flow opens your UPI app with the exact admin-set amount and note.
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">UPI Name For Verification</label>
+                  <input
+                    type="text"
+                    value={userUpiName}
+                    onChange={(event) => setUserUpiName(event.target.value)}
+                    placeholder="Enter the UPI account name"
+                    className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
+                  />
+                  <p className="mt-2 text-xs text-emerald-800">Admin will use this name to verify your payment manually.</p>
+                </div>
               </div>
             )}
             {manualRequestSummary ? (
               <div className="rounded-lg border border-emerald-300 bg-white px-4 py-3 text-sm text-slate-700">
-                Last request: payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span> with status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
+                Last request: payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span>, tag <span className="font-semibold">{manualRequestSummary.payment_tag || paymentTag}</span>, with status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
               </div>
             ) : null}
             {directUpiLink ? (

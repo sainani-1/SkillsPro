@@ -20,6 +20,9 @@ const Layout = () => {
   const location = useLocation();
   const [panelSearch, setPanelSearch] = useState('');
   const [showPanelSearch, setShowPanelSearch] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
@@ -40,6 +43,13 @@ const Layout = () => {
     return match?.[1] || null;
   };
   // Listen to sidebar width changes
+  useEffect(() => {
+    const updateViewport = () => setIsMobileViewport(window.innerWidth < 768);
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
   useEffect(() => {
     const observer = new MutationObserver(() => {
       const sidebar = document.querySelector('aside');
@@ -488,10 +498,10 @@ const Layout = () => {
       <Sidebar />
       <div
         className="flex flex-col transition-all duration-300"
-        style={{ marginLeft: sidebarWidth, minHeight: '100vh' }}
+        style={{ marginLeft: isMobileViewport ? 80 : sidebarWidth, minHeight: '100vh' }}
       >
         {/* Top Navbar */}
-        <header className="bg-white shadow-sm h-16 flex items-center justify-between px-8 sticky top-0 z-10">
+        <header className="bg-white shadow-sm h-16 flex items-center justify-between px-3 md:px-8 sticky top-0 z-10">
           <div className="relative w-full max-w-md">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -528,7 +538,7 @@ const Layout = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center space-x-6">
+          <div className="flex items-center space-x-3 md:space-x-6">
             <div className="relative cursor-pointer" onClick={() => navigate('/app/notifications')}>
               <Bell size={20} className="text-slate-600 hover:text-blue-600 transition" />
               {unreadNotifications > 0 && (
@@ -553,7 +563,7 @@ const Layout = () => {
           </div>
         </header>
         {/* Main Content */}
-        <main className="p-8 flex-1 overflow-y-auto" style={{ height: 'calc(100vh - 64px - 48px)', maxHeight: 'calc(100vh - 64px - 48px)' }}>
+        <main className="p-3 md:p-8 flex-1 overflow-y-auto" style={{ height: 'calc(100vh - 64px - 48px)', maxHeight: 'calc(100vh - 64px - 48px)' }}>
           <Outlet />
         </main>
         {/* Footer */}

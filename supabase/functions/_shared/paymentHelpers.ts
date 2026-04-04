@@ -180,6 +180,7 @@ export const notifyAdminOfPaymentEvent = async (
     userName?: string | null;
     userPhone?: string | null;
     userUpiId?: string | null;
+    userUpiName?: string | null;
     note?: string | null;
     status?: string | null;
   },
@@ -215,6 +216,7 @@ export const notifyAdminOfPaymentEvent = async (
     ["Method", options.paymentMethod],
     ["Status", options.status || (options.eventType === "payment_success" ? "success" : "pending")],
     ["User UPI ID", options.userUpiId || "-"],
+    ["User UPI Name", options.userUpiName || "-"],
     ["Note", options.note || "-"],
     ["Payment ID", options.paymentId],
   ]

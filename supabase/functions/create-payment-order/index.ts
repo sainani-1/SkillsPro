@@ -32,6 +32,8 @@ type CreateOrderPayload = {
   plan_tier?: string | null;
   coupon_code?: string | null;
   user_upi_id?: string | null;
+  user_upi_name?: string | null;
+  payment_tag?: string | null;
 };
 
 const pickLatestPlanForTier = (plans: any[], tier: string) => {
@@ -379,6 +381,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const userUpiId = String(payload.user_upi_id || "").trim() || null;
+    const userUpiName = String(payload.user_upi_name || "").trim() || null;
+    const paymentTag = String(payload.payment_tag || "").trim() || null;
     const requestStatus = "created";
     const { data: payment, error: paymentError } = await adminClient
       .from("payments")
@@ -408,6 +412,8 @@ Deno.serve(async (req: Request) => {
           payment_request_state: userUpiId ? "request_sent" : "pending",
           admin_upi_id: configuredUpiId,
           user_upi_id: userUpiId,
+          user_upi_name: userUpiName,
+          payment_tag: paymentTag,
           admin_approval_required: true,
         },
       })
@@ -429,11 +435,13 @@ Deno.serve(async (req: Request) => {
       userName: profile.full_name || null,
       userPhone: profile.phone || null,
       userUpiId,
-      note: manualUpiNote,
+      userUpiName,
+      note: paymentTag ? `${manualUpiNote} ${paymentTag}` : manualUpiNote,
       status: payment.status,
     });
 
-    const upiLink = `upi://pay?pa=${encodeURIComponent(configuredUpiId)}&pn=${encodeURIComponent("SkillPro")}&am=${encodeURIComponent(String(discount.finalAmount))}&cu=INR&tn=${encodeURIComponent(manualUpiNote)}`;
+    const noteWithTag = paymentTag ? `${manualUpiNote} ${paymentTag}` : manualUpiNote;
+    const upiLink = `upi://pay?pa=${encodeURIComponent(configuredUpiId)}&pn=${encodeURIComponent("SkillPro")}&am=${encodeURIComponent(String(discount.finalAmount))}&cu=INR&tn=${encodeURIComponent(noteWithTag)}`;
 
     return jsonResponse({
       mode: "skillpro_upi",
@@ -444,7 +452,9 @@ Deno.serve(async (req: Request) => {
       approval_status: "waiting_admin_approval",
       upi_id: configuredUpiId,
       user_upi_id: userUpiId,
-      note: manualUpiNote,
+      user_upi_name: userUpiName,
+      payment_tag: paymentTag,
+      note: noteWithTag,
       upi_link: upiLink,
       plan_tier: selectedPlanTier,
       valid_until: validUntil,

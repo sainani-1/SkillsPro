@@ -156,7 +156,10 @@ const AdminPaymentAttempts = () => {
                       <p><span className="font-semibold text-slate-800">Created:</span> {attempt.created_at ? new Date(attempt.created_at).toLocaleString('en-IN') : '-'}</p>
                       <p><span className="font-semibold text-slate-800">Paid At:</span> {attempt.paid_at ? new Date(attempt.paid_at).toLocaleString('en-IN') : '-'}</p>
                       <p><span className="font-semibold text-slate-800">Payment ID:</span> {attempt.id}</p>
+                      <p><span className="font-semibold text-slate-800">Payment App:</span> {attempt.metadata?.payment_app || '-'}</p>
+                      <p><span className="font-semibold text-slate-800">Payment Tag:</span> {attempt.metadata?.payment_tag || '-'}</p>
                       <p><span className="font-semibold text-slate-800">User UPI ID:</span> {attempt.metadata?.user_upi_id || attempt.gateway_ref || '-'}</p>
+                      <p><span className="font-semibold text-slate-800">User UPI Name:</span> {attempt.metadata?.user_upi_name || '-'}</p>
                       <p className="md:col-span-2"><span className="font-semibold text-slate-800">Payment Note:</span> {attempt.metadata?.payment_note || '-'}</p>
                       {attempt.failure_reason ? (
                         <p className="md:col-span-2 text-rose-700"><span className="font-semibold">Failure Reason:</span> {attempt.failure_reason}</p>
