@@ -217,7 +217,6 @@ const Payment = () => {
   const [paymentTag] = useState(() => createPaymentTag());
   const [manualRequestSummary, setManualRequestSummary] = useState(null);
   const [showUpiAppPicker, setShowUpiAppPicker] = useState(false);
-  const [awaitingUpiReturn, setAwaitingUpiReturn] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const razorpayInstanceRef = useRef(null);
   const paymentAttemptRef = useRef({ paymentId: null, finalizing: false, finalized: false });
@@ -584,7 +583,6 @@ const Payment = () => {
           console.error('Failed to save payment app selection:', error);
         });
     }
-    setAwaitingUpiReturn(true);
     if (isAndroidDevice && app?.packageName) {
       const intentUrl = `intent://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}#Intent;scheme=upi;package=${app.packageName};end`;
       window.location.href = intentUrl;
@@ -593,28 +591,6 @@ const Payment = () => {
     }
     setShowUpiAppPicker(false);
   };
-
-  useEffect(() => {
-    if (!awaitingUpiReturn || typeof document === 'undefined') return undefined;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      setAwaitingUpiReturn(false);
-      setAlertModal({
-        show: true,
-        title: 'Payment Request Sent',
-        message: 'Your request went to the SkillPro team. You will get premium within 24 hours. Sorry for the inconvenience. You will be given 1 extra day.',
-        type: 'success',
-      });
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleVisibilityChange);
-    };
-  }, [awaitingUpiReturn]);
 
   const finalizePayment = async (payload, fallbackFailureMessage) => {
     if (!paymentAttemptRef.current.paymentId || paymentAttemptRef.current.finalizing || paymentAttemptRef.current.finalized) {

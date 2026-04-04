@@ -17,26 +17,14 @@ const AdminPaymentAttempts = () => {
   const loadAttempts = async () => {
     setLoading(true);
     try {
-      const { data: payments, error } = await supabase
-        .from('payments')
-        .select('id, user_id, plan_code, gateway, status, amount, final_amount, currency, failure_reason, gateway_ref, paid_at, valid_until, created_at, updated_at, metadata')
-        .order('created_at', { ascending: false })
-        .limit(300);
+      const { data, error } = await supabase.functions.invoke('list-payment-attempts', {
+        body: {},
+      });
 
       if (error) throw error;
 
-      setAttempts(payments || []);
-
-      const userIds = Array.from(new Set((payments || []).map((row) => row.user_id).filter(Boolean)));
-      if (userIds.length > 0) {
-        const { data: profileRows } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, phone')
-          .in('id', userIds);
-        setProfilesById(Object.fromEntries((profileRows || []).map((row) => [row.id, row])));
-      } else {
-        setProfilesById({});
-      }
+      setAttempts(data?.payments || []);
+      setProfilesById(data?.profilesById || {});
     } catch (error) {
       setAlertModal({
         show: true,
