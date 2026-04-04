@@ -170,16 +170,20 @@ const callEdgeFunction = async (functionName, accessToken, body) => {
 };
 
 const getFreshAccessToken = async () => {
-  const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
-  if (!refreshError && refreshedData?.session?.access_token && refreshedData?.session?.user?.id) {
-    return refreshedData.session.access_token;
-  }
-
   const { data: currentSessionData } = await supabase.auth.getSession();
   const currentToken = currentSessionData?.session?.access_token || '';
   const currentUserId = currentSessionData?.session?.user?.id || '';
   if (currentToken && currentUserId) {
     return currentToken;
+  }
+
+  try {
+    const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && refreshedData?.session?.access_token && refreshedData?.session?.user?.id) {
+      return refreshedData.session.access_token;
+    }
+  } catch (error) {
+    console.error('Session refresh failed during payment flow:', error);
   }
 
   throw new Error('Your login session has expired. Please log in again and retry payment.');
