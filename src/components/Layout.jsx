@@ -498,7 +498,7 @@ const Layout = () => {
       <Sidebar />
       <div
         className="flex flex-col transition-all duration-300"
-        style={{ marginLeft: isMobileViewport ? 80 : sidebarWidth, minHeight: '100vh' }}
+        style={{ marginLeft: isMobileViewport ? 0 : sidebarWidth, minHeight: '100vh' }}
       >
         {/* Top Navbar */}
         <header className="bg-white shadow-sm h-16 flex items-center justify-between px-3 md:px-8 sticky top-0 z-10">

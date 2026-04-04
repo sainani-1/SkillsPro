@@ -189,7 +189,7 @@ Deno.serve(async (req: Request) => {
         selectedPlanCode = String(selectedPlan.id || selectedPlanCode);
         selectedPlanMonths = Number(selectedPlan.periodMonths || PREMIUM_MONTHS) || PREMIUM_MONTHS;
         const publicPlanCost = Number(selectedPlan.cost);
-        if (Number.isFinite(publicPlanCost) && publicPlanCost > 0) {
+        if (configuredGatewayMode !== "skillpro_upi" && Number.isFinite(publicPlanCost) && publicPlanCost > 0) {
           baseAmount = parseMoney(publicPlanCost);
         }
       }

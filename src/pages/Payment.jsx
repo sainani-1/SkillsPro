@@ -191,6 +191,7 @@ const Payment = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [premiumCost, setPremiumCost] = useState(null);
+  const [premiumPlusCost, setPremiumPlusCost] = useState(null);
   const [plans, setPlans] = useState([]);
   const [selectedPlanTier, setSelectedPlanTier] = useState(() => normalizeCheckoutPlanTier(searchParams.get('plan')));
   const [urgencyBanner, setUrgencyBanner] = useState({
@@ -212,6 +213,7 @@ const Payment = () => {
   const [paymentTag] = useState(() => createPaymentTag());
   const [manualRequestSummary, setManualRequestSummary] = useState(null);
   const [showUpiAppPicker, setShowUpiAppPicker] = useState(false);
+  const [awaitingUpiReturn, setAwaitingUpiReturn] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const razorpayInstanceRef = useRef(null);
   const paymentAttemptRef = useRef({ paymentId: null, finalizing: false, finalized: false });
@@ -235,16 +237,16 @@ const Payment = () => {
         id: 'default_premium_plus',
         name: 'Premium Plus',
         tier: 'premium_plus',
-        cost: Math.max((premiumCost || 199) + 100, 299),
+        cost: premiumPlusCost || Math.max((premiumCost || 199) + 100, 299),
         periodMonths: 6,
         description: 'Add ask-a-doubt chat, mentoring requests, the separate notes library, and higher-touch support on top of Premium.',
         features: PLAN_FEATURES.premium_plus,
-      }, Math.max((premiumCost || 199) + 100, 299), {
+      }, premiumPlusCost || Math.max((premiumCost || 199) + 100, 299), {
         premium: premiumCost || 199,
-        premium_plus: Math.max((premiumCost || 199) + 100, 299),
+        premium_plus: premiumPlusCost || Math.max((premiumCost || 199) + 100, 299),
       }),
     ];
-  }, [plans, premiumCost]);
+  }, [plans, premiumCost, premiumPlusCost]);
 
   const selectedPlan = useMemo(
     () => activePlans.find((plan) => plan.tier === selectedPlanTier) || activePlans[0] || null,
@@ -254,7 +256,13 @@ const Payment = () => {
   const selectedOffer = paymentGatewayMode === 'skillpro_upi'
     ? null
     : offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
-  const pricing = buildPricing(selectedPlan?.cost || premiumCost || 0, selectedOffer);
+  const skillproBaseAmount = selectedPlanTier === 'premium_plus'
+    ? (premiumPlusCost || Math.max((premiumCost || 199) + 100, 299))
+    : (premiumCost || 199);
+  const displayBaseAmount = paymentGatewayMode === 'skillpro_upi'
+    ? skillproBaseAmount
+    : (selectedPlan?.cost || premiumCost || 0);
+  const pricing = buildPricing(displayBaseAmount, selectedOffer);
   const paymentNote = `${profile?.email || 'user'} paid ${paymentTag}`;
   const directUpiLink = paymentGatewayMode === 'skillpro_upi' && skillproUpiId && pricing.finalAmount > 0
     ? `upi://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}`
@@ -296,6 +304,7 @@ const Payment = () => {
         const parsedPremiumPlusCost = parseInt(settingsMap.premium_plus_cost, 10);
         const fallbackPremiumPlusCost = Number.isFinite(parsedPremiumPlusCost) ? parsedPremiumPlusCost : Math.max(fallbackPremiumCost + 100, 299);
         setPremiumCost(fallbackPremiumCost);
+        setPremiumPlusCost(fallbackPremiumPlusCost);
         setPaymentGatewayMode(settingsMap.payment_gateway_mode === 'skillpro_upi' ? 'skillpro_upi' : 'razorpay');
         setSkillproUpiId(settingsMap.skillpro_upi_id || '');
         setPaymentAdminEmail(settingsMap.payment_admin_email || '');
@@ -366,6 +375,7 @@ const Payment = () => {
       } catch (error) {
         console.error('Error loading payment pricing:', error);
         setPremiumCost(199);
+        setPremiumPlusCost(299);
         setPlans([]);
       } finally {
         setPricingLoading(false);
@@ -556,18 +566,21 @@ const Payment = () => {
 
   const openDirectUpiApp = async (app) => {
     if (!directUpiLink) return;
-    try {
-      const paymentId = manualRequestSummary?.payment_id;
-      if (paymentId) {
-        const accessToken = await getFreshAccessToken();
-        await callEdgeFunction('update-payment-request', accessToken, {
-          payment_id: paymentId,
-          payment_app: app?.label || app?.id || 'Other UPI App',
+    const paymentId = manualRequestSummary?.payment_id;
+    const paymentAppLabel = app?.label || app?.id || 'Other UPI App';
+    if (paymentId) {
+      getFreshAccessToken()
+        .then((accessToken) =>
+          callEdgeFunction('update-payment-request', accessToken, {
+            payment_id: paymentId,
+            payment_app: paymentAppLabel,
+          })
+        )
+        .catch((error) => {
+          console.error('Failed to save payment app selection:', error);
         });
-      }
-    } catch (error) {
-      console.error('Failed to save payment app selection:', error);
     }
+    setAwaitingUpiReturn(true);
     if (isAndroidDevice && app?.packageName) {
       const intentUrl = `intent://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}#Intent;scheme=upi;package=${app.packageName};end`;
       window.location.href = intentUrl;
@@ -576,6 +589,28 @@ const Payment = () => {
     }
     setShowUpiAppPicker(false);
   };
+
+  useEffect(() => {
+    if (!awaitingUpiReturn || typeof document === 'undefined') return undefined;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      setAwaitingUpiReturn(false);
+      setAlertModal({
+        show: true,
+        title: 'Payment Request Sent',
+        message: 'Your request went to the SkillPro team. You will get premium within 24 hours. Sorry for the inconvenience. You will be given 1 extra day.',
+        type: 'success',
+      });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [awaitingUpiReturn]);
 
   const finalizePayment = async (payload, fallbackFailureMessage) => {
     if (!paymentAttemptRef.current.paymentId || paymentAttemptRef.current.finalizing || paymentAttemptRef.current.finalized) {
@@ -740,15 +775,14 @@ const Payment = () => {
         if (!isDesktopDevice) {
           setShowUpiAppPicker(true);
         }
-
-        setAlertModal({
-          show: true,
-          title: isDesktopDevice ? 'Waiting for Admin Approval' : 'Choose UPI App',
-          message: isDesktopDevice
-            ? `Your payment request for Rs ${data.amount} was recorded. Open this same account on your mobile and complete the UPI payment there. Premium will activate only after admin verifies and approves the payment.`
-            : `Your payment request for Rs ${data.amount} was recorded. Now choose your UPI app and complete the payment. Premium will activate only after admin verifies and approves the payment.`,
-          type: 'success',
-        });
+        if (isDesktopDevice) {
+          setAlertModal({
+            show: true,
+            title: 'Waiting for Admin Approval',
+            message: `Your payment request for Rs ${data.amount} was recorded. Open this same account on your mobile and complete the UPI payment there. Premium will activate only after admin verifies and approves the payment.`,
+            type: 'success',
+          });
+        }
         return;
       }
 
@@ -936,7 +970,7 @@ const Payment = () => {
               <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 Gateway: {paymentGatewayMode === 'skillpro_upi' ? 'SkillPro UPI' : 'Razorpay'}
               </p>
-              <p className="text-3xl font-bold text-slate-900">₹{selectedPlan?.cost || premiumCost}</p>
+              <p className="text-3xl font-bold text-slate-900">₹{displayBaseAmount}</p>
             </div>
           </div>
 
@@ -1056,7 +1090,7 @@ const Payment = () => {
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between text-slate-600">
             <span>{selectedPlan?.name || 'Premium'} amount</span>
-            <span>₹{roundMoney(selectedPlan?.cost || premiumCost)}</span>
+            <span>₹{roundMoney(displayBaseAmount)}</span>
           </div>
           {paymentGatewayMode !== 'skillpro_upi' ? (
             <div className="flex items-center justify-between text-slate-600">
@@ -1127,7 +1161,7 @@ const Payment = () => {
         </div>
 
         {paymentGatewayMode === 'skillpro_upi' && pricing.finalAmount > 0 && (
-          <div className="mb-4 space-y-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+        <div className="mb-4 space-y-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:p-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">Amount</label>
@@ -1217,13 +1251,13 @@ const Payment = () => {
       />
 
       {showUpiAppPicker ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 sm:p-6 shadow-2xl">
             <h3 className="text-xl font-bold text-slate-900">Choose UPI App</h3>
             <p className="mt-2 text-sm text-slate-600">
               Amount and note are locked by admin and cannot be edited in this flow.
             </p>
-            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:p-4 text-sm text-emerald-900">
               <p><span className="font-semibold">Amount:</span> Rs {pricing.finalAmount}</p>
               <p><span className="font-semibold">UPI ID:</span> {skillproUpiId}</p>
               <p><span className="font-semibold">Note:</span> {paymentNote}</p>
