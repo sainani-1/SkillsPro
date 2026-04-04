@@ -109,11 +109,12 @@ const loadPaymentContactConfig = async (adminClient: ReturnType<typeof createCli
   const { data } = await adminClient
     .from("settings")
     .select("key, value")
-    .in("key", ["payment_admin_email", "support_contact_email"]);
+    .in("key", ["payment_admin_email", "support_contact_email", "payment_request_admin_email_enabled"]);
 
   const settingsMap = Object.fromEntries((data || []).map((item) => [item.key, item.value]));
   return {
     paymentAdminEmail: String(settingsMap.payment_admin_email || settingsMap.support_contact_email || "").trim(),
+    paymentRequestAdminEmailEnabled: settingsMap.payment_request_admin_email_enabled !== "false",
   };
 };
 
@@ -185,7 +186,7 @@ export const notifyAdminOfPaymentEvent = async (
     status?: string | null;
   },
 ) => {
-  const { paymentAdminEmail } = await loadPaymentContactConfig(adminClient);
+  const { paymentAdminEmail, paymentRequestAdminEmailEnabled } = await loadPaymentContactConfig(adminClient);
   const title =
     options.eventType === "payment_success" ? "Payment Success" : "Payment Request Created";
   const summary =
@@ -205,6 +206,7 @@ export const notifyAdminOfPaymentEvent = async (
     // Ignore notification failures.
   }
 
+  if (options.eventType === "request_created" && !paymentRequestAdminEmailEnabled) return;
   if (!paymentAdminEmail) return;
 
   const detailRows = [

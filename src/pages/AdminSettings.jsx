@@ -26,6 +26,7 @@ const AdminSettings = () => {
   const [paymentGatewayMode, setPaymentGatewayMode] = useState('razorpay');
   const [skillproUpiId, setSkillproUpiId] = useState('');
   const [paymentAdminEmail, setPaymentAdminEmail] = useState('');
+  const [paymentRequestAdminEmailEnabled, setPaymentRequestAdminEmailEnabled] = useState(true);
   const [resumeBuilderAccess, setResumeBuilderAccess] = useState('premium');
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const [registrationPaused, setRegistrationPaused] = useState(false);
@@ -72,7 +73,7 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['exam_duration', 'premium_cost', 'premium_plus_cost', 'payment_urgency_banner', 'payment_gateway_mode', 'skillpro_upi_id', 'payment_admin_email', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
+        .in('key', ['exam_duration', 'premium_cost', 'premium_plus_cost', 'payment_urgency_banner', 'payment_gateway_mode', 'skillpro_upi_id', 'payment_admin_email', 'payment_request_admin_email_enabled', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
 
       if (error) throw error;
 
@@ -87,6 +88,7 @@ const AdminSettings = () => {
         if (setting.key === 'payment_gateway_mode') setPaymentGatewayMode(setting.value === 'skillpro_upi' ? 'skillpro_upi' : 'razorpay');
         if (setting.key === 'skillpro_upi_id') setSkillproUpiId(setting.value || '');
         if (setting.key === 'payment_admin_email') setPaymentAdminEmail(setting.value || '');
+        if (setting.key === 'payment_request_admin_email_enabled') setPaymentRequestAdminEmailEnabled(setting.value !== 'false');
         if (setting.key === 'resume_builder_access') setResumeBuilderAccess(setting.value === 'free' ? 'free' : 'premium');
         if (setting.key === 'payment_urgency_banner') {
           try {
@@ -125,6 +127,7 @@ const AdminSettings = () => {
       await saveSetting('payment_gateway_mode', paymentGatewayMode);
       await saveSetting('skillpro_upi_id', skillproUpiId.trim());
       await saveSetting('payment_admin_email', paymentAdminEmail.trim());
+      await saveSetting('payment_request_admin_email_enabled', paymentRequestAdminEmailEnabled);
       await saveSetting('resume_builder_access', resumeBuilderAccess);
       await saveSetting('payment_urgency_banner', JSON.stringify({
         effectiveDate: paymentUrgencyDate,
@@ -281,6 +284,19 @@ const AdminSettings = () => {
               value={paymentAdminEmail}
               onChange={(e) => setPaymentAdminEmail(e.target.value)}
             />
+          </div>
+          <div className="md:col-span-2">
+            <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={paymentRequestAdminEmailEnabled}
+                onChange={(e) => setPaymentRequestAdminEmailEnabled(e.target.checked)}
+              />
+              Send admin email when a user submits a payment request
+            </label>
+            <p className="mt-2 text-xs text-slate-500">
+              When enabled, admin gets an email with user payment-request details as soon as the request is submitted.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Urgency Date</label>
