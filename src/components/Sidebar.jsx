@@ -115,7 +115,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
   }, [profile?.id, role, location.pathname]);
 
   const navItemClass = ({ isActive }) =>
-    `flex min-h-[56px] items-center ${isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-7 [&>svg]:w-7 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
+    `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
   const shouldShowText = isMobile || !isCollapsed || isHovered;
 
@@ -405,9 +405,9 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="p-6 border-b border-white/10 flex-shrink-0">
+      <div className={`${isMobile ? 'p-4' : 'p-6'} border-b border-white/10 flex-shrink-0`}>
         {isMobile ? (
-          <div className="mb-4 flex justify-end">
+          <div className="mb-3 flex justify-end">
             <button
               type="button"
               onClick={onClose}
@@ -419,13 +419,18 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
           </div>
         ) : null}
         <div
-          className={`flex items-center ${isCollapsed && !isHovered ? 'justify-center' : 'space-x-2'} cursor-pointer hover:opacity-80 transition-opacity`}
+          className={`flex items-center ${isMobile ? 'gap-3' : isCollapsed && !isHovered ? 'justify-center' : 'space-x-2'} cursor-pointer hover:opacity-80 transition-opacity`}
           onClick={() => navigate('/app')}
         >
-          <img src="/skillpro-logo.png" alt="SkillPro logo" className="w-10 h-10 rounded-full object-contain" />
-          {shouldShowText && <span className="font-bold text-xl tracking-tight">SkillPro</span>}
+          <img src="/skillpro-logo.png" alt="SkillPro logo" className={`${isMobile ? 'w-11 h-11' : 'w-10 h-10'} rounded-full object-contain`} />
+          {shouldShowText && (
+            <div className="min-w-0">
+              <span className="block truncate font-bold text-xl tracking-tight">SkillPro</span>
+              {isMobile ? <span className="block text-xs text-slate-400">Learning Panel</span> : null}
+            </div>
+          )}
         </div>
-        {shouldShowText && <p className="text-xs text-slate-400 mt-2 uppercase tracking-wider">{role} Panel</p>}
+        {shouldShowText && !isMobile ? <p className="text-xs text-slate-400 mt-2 uppercase tracking-wider">{role} Panel</p> : null}
         {shouldShowText && isImpersonating && (
           <div className="mt-3 rounded-lg border border-amber-300/30 bg-amber-400/10 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">
@@ -456,7 +461,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
         </button>
       ) : null}
 
-      <nav className="flex-1 p-4 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col">
+      <nav className={`flex-1 ${isMobile ? 'p-3 space-y-2' : 'p-4 space-y-3'} overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col`}>
         {role === 'instructor' ? (
           <>
             <NavLink to="/app" end className={navItemClass} title="Dashboard">
