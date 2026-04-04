@@ -31,6 +31,10 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 });
 
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.supabase = supabase;
+}
+
 const syncDailyLoginState = (session) => {
   if (!session?.user) return;
   const existing = readDailyLoginState();

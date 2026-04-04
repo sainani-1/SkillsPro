@@ -95,6 +95,7 @@ import ReportIssue from './pages/ReportIssue';
 import AdminIssueReports from './pages/AdminIssueReports';
 import AdminGrowthAnalytics from './pages/AdminGrowthAnalytics';
 import AdminLeadInbox from './pages/AdminLeadInbox';
+import AdminPaymentAttempts from './pages/AdminPaymentAttempts';
 import CodingPlayground from './pages/CodingPlayground';
 import DiscussionForum from './pages/DiscussionForum';
 import SkillBadges from './pages/SkillBadges';
@@ -419,6 +420,7 @@ function App() {
           <Route path="admin/activity-logs" element={<AdminRoute><AdminActivityLogs /></AdminRoute>} />
           <Route path="admin/growth-analytics" element={<AdminRoute><AdminGrowthAnalytics /></AdminRoute>} />
           <Route path="admin/lead-inbox" element={<AdminRoute><AdminLeadInbox /></AdminRoute>} />
+          <Route path="admin/payment-attempts" element={<AdminRoute><AdminPaymentAttempts /></AdminRoute>} />
           <Route path="admin/issue-reports" element={<AdminRoute><AdminIssueReports /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />

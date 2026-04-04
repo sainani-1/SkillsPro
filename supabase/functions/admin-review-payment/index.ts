@@ -13,13 +13,10 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-type VerifyPaymentPayload = {
+type ReviewPayload = {
   payment_id?: string;
-  status?: "success" | "failed";
-  razorpay_order_id?: string;
-  razorpay_payment_id?: string;
-  razorpay_signature?: string;
-  failure_reason?: string;
+  action?: "approve" | "reject";
+  note?: string;
 };
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
@@ -27,11 +24,6 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
 
 const errorResponse = (message: string, status = 400) =>
   jsonResponse({ error: message }, status);
-
-const toHex = (buffer: ArrayBuffer) =>
-  Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 
 const createAuthorizedClient = (supabaseUrl: string, anonKey: string, jwt: string) =>
   createClient(supabaseUrl, anonKey, {
@@ -41,20 +33,6 @@ const createAuthorizedClient = (supabaseUrl: string, anonKey: string, jwt: strin
       },
     },
   });
-
-const verifyRazorpaySignature = async (orderId: string, paymentId: string, signature: string, secret: string) => {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-
-  const signed = await crypto.subtle.sign("HMAC", key, encoder.encode(`${orderId}|${paymentId}`));
-  return toHex(signed) === signature.toLowerCase();
-};
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -68,7 +46,6 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const razorpayKeySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
 
   if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     return errorResponse("Missing Supabase environment variables.", 500);
@@ -92,42 +69,49 @@ Deno.serve(async (req: Request) => {
     return errorResponse("Invalid user session.", 401);
   }
 
-  let payload: VerifyPaymentPayload;
+  const { data: adminProfile } = await adminClient
+    .from("profiles")
+    .select("id, role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (adminProfile?.role !== "admin") {
+    return errorResponse("Admin access required.", 403);
+  }
+
+  let payload: ReviewPayload;
   try {
-    payload = (await req.json()) as VerifyPaymentPayload;
+    payload = (await req.json()) as ReviewPayload;
   } catch {
     return errorResponse("Invalid request body.", 400);
   }
 
-  if (!payload.payment_id || !payload.status) {
-    return errorResponse("payment_id and status are required.", 400);
+  if (!payload.payment_id || !payload.action) {
+    return errorResponse("payment_id and action are required.", 400);
   }
 
   const { data: payment, error: paymentError } = await adminClient
     .from("payments")
-    .select("id, user_id, gateway, gateway_order_id, coupon_offer_id, status, metadata, valid_until, amount")
+    .select("id, user_id, gateway, status, metadata, amount, valid_until")
     .eq("id", payload.payment_id)
-    .eq("user_id", user.id)
     .maybeSingle();
 
   if (paymentError || !payment) {
     return errorResponse("Payment record not found.", 404);
   }
 
-  if (payment.status === "success") {
-    return jsonResponse({ status: "success", payment_id: payment.id, valid_until: payment.valid_until });
+  if (String(payment.metadata?.payment_method || "") !== "skillpro_upi") {
+    return errorResponse("Only SkillPro UPI payments can be reviewed here.", 400);
   }
 
   const now = new Date().toISOString();
 
-  if (payload.status === "failed") {
+  if (payload.action === "reject") {
     await adminClient
       .from("payments")
       .update({
         status: "failed",
-        gateway_payment_id: payload.razorpay_payment_id ?? null,
-        gateway_ref: payload.razorpay_payment_id ?? null,
-        failure_reason: payload.failure_reason || "Payment failed or was cancelled.",
+        failure_reason: String(payload.note || "Payment request rejected by admin."),
         updated_at: now,
       })
       .eq("id", payment.id);
@@ -135,72 +119,32 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ status: "failed", payment_id: payment.id });
   }
 
-  if (payment.gateway === "razorpay") {
-    if (!payload.razorpay_order_id || !payload.razorpay_payment_id || !payload.razorpay_signature) {
-      return errorResponse("Missing Razorpay verification fields.", 400);
-    }
-    if (!payment.gateway_order_id || payment.gateway_order_id !== payload.razorpay_order_id) {
-      await adminClient
-        .from("payments")
-        .update({
-          status: "failed",
-          failure_reason: "Razorpay order mismatch.",
-          updated_at: now,
-        })
-        .eq("id", payment.id);
-      return errorResponse("Order verification failed.", 400);
-    }
-    if (!razorpayKeySecret) {
-      return errorResponse("Razorpay secret is not configured.", 500);
-    }
-
-    const verified = await verifyRazorpaySignature(
-      payload.razorpay_order_id,
-      payload.razorpay_payment_id,
-      payload.razorpay_signature,
-      razorpayKeySecret,
-    );
-
-    if (!verified) {
-      await adminClient
-        .from("payments")
-        .update({
-          status: "failed",
-          gateway_payment_id: payload.razorpay_payment_id,
-          gateway_signature: payload.razorpay_signature,
-          failure_reason: "Invalid Razorpay signature.",
-          updated_at: now,
-        })
-        .eq("id", payment.id);
-      return errorResponse("Payment signature verification failed.", 400);
-    }
-  } else {
-    return errorResponse("Automatic verification is only available for Razorpay payments.", 400);
+  if (payment.status === "success") {
+    return jsonResponse({ status: "success", payment_id: payment.id, valid_until: payment.valid_until });
   }
 
   const { data: profile, error: profileError } = await adminClient
     .from("profiles")
     .select("premium_until, full_name, email, phone")
-    .eq("id", user.id)
+    .eq("id", payment.user_id)
     .maybeSingle();
 
   if (profileError || !profile) {
     return errorResponse("User profile not found.", 404);
   }
 
-  const isLifetimeFree = Boolean(payment.metadata?.is_lifetime_free);
   const planTier = normalizePlanTier(String(payment.metadata?.plan_tier || ""));
   const planMonths = Number(payment.metadata?.plan_months || PREMIUM_MONTHS) || PREMIUM_MONTHS;
 
   let activated;
   try {
     activated = await activatePaidPremium(adminClient, {
-      userId: user.id,
+      userId: payment.user_id,
       paymentId: payment.id,
       profilePremiumUntil: profile.premium_until,
       planTier,
       planMonths,
-      isLifetimeFree,
+      isLifetimeFree: false,
     });
   } catch (error) {
     await adminClient
@@ -218,41 +162,26 @@ Deno.serve(async (req: Request) => {
     .from("payments")
     .update({
       status: "success",
-      gateway_payment_id: payload.razorpay_payment_id ?? null,
-      gateway_signature: payload.razorpay_signature ?? null,
-      gateway_ref: payload.razorpay_payment_id ?? null,
-      valid_until: activated.validUntil,
       paid_at: activated.now,
+      valid_until: activated.validUntil,
       failure_reason: null,
+      gateway_signature: String(payload.note || ""),
       updated_at: activated.now,
     })
     .eq("id", payment.id);
 
-  if (payment.coupon_offer_id) {
-    await adminClient.from("offer_redemptions").upsert(
-      {
-        offer_id: payment.coupon_offer_id,
-        user_id: user.id,
-        payment_id: payment.id,
-        status: "redeemed",
-        redeemed_at: activated.now,
-        updated_at: activated.now,
-      },
-      { onConflict: "offer_id,user_id" },
-    );
-  }
-
   await notifyAdminOfPaymentEvent(adminClient, {
-    userId: user.id,
+    userId: payment.user_id,
     paymentId: payment.id,
     eventType: "payment_success",
     planName: String(payment.metadata?.plan_label || (planTier === "premium_plus" ? "Premium Plus" : "Premium")),
     amount: Number(payment.amount || 0),
-    paymentMethod: "razorpay",
-    userEmail: profile.email || user.email || null,
+    paymentMethod: "skillpro_upi",
+    userEmail: profile.email || null,
     userName: profile.full_name || null,
     userPhone: profile.phone || null,
-    note: String(payment.metadata?.payment_note || ""),
+    userUpiId: String(payment.metadata?.user_upi_id || ""),
+    note: String(payment.metadata?.payment_note || payload.note || ""),
     status: "success",
   });
 
@@ -260,7 +189,6 @@ Deno.serve(async (req: Request) => {
     status: "success",
     payment_id: payment.id,
     valid_until: activated.validUntil,
-    is_lifetime_free: isLifetimeFree,
     plan_tier: planTier,
   });
 });

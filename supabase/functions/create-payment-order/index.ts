@@ -1,5 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { assignBalancedTeacherToStudent } from "../_shared/teacherAssignment.ts";
+import {
+  LIFETIME_PREMIUM_DATE,
+  PREMIUM_MONTHS,
+  activatePaidPremium,
+  addMonthsFrom,
+  normalizePlanTier,
+  notifyAdminOfPaymentEvent,
+} from "../_shared/paymentHelpers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,9 +14,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
-
-const PREMIUM_MONTHS = 6;
-const LIFETIME_PREMIUM_DATE = "9999-12-31T23:59:59.000Z";
 
 type OfferRow = {
   id: string;
@@ -27,52 +31,7 @@ type CreateOrderPayload = {
   offer_id?: string | null;
   plan_tier?: string | null;
   coupon_code?: string | null;
-};
-
-const PREMIUM_PLAN_TYPES_KEY = "premium_plan_types";
-const normalizePlanTier = (value: string | null | undefined) => (value === "premium_plus" ? "premium_plus" : "premium");
-
-const parsePlanTypeMap = (rawValue: string | null | undefined) => {
-  if (!rawValue) return {} as Record<string, string>;
-  try {
-    const parsed = JSON.parse(rawValue);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {} as Record<string, string>;
-    return Object.entries(parsed).reduce((acc, [userId, planType]) => {
-      const normalizedUserId = String(userId || "").trim();
-      if (!normalizedUserId) return acc;
-      acc[normalizedUserId] = normalizePlanTier(String(planType || ""));
-      return acc;
-    }, {} as Record<string, string>);
-  } catch {
-    return {} as Record<string, string>;
-  }
-};
-
-const savePlanTypeForUser = async (
-  adminClient: ReturnType<typeof createClient>,
-  userId: string,
-  planTier: string,
-) => {
-  const { data: existingSetting } = await adminClient
-    .from("settings")
-    .select("value")
-    .eq("key", PREMIUM_PLAN_TYPES_KEY)
-    .maybeSingle();
-
-  const planTypeMap = parsePlanTypeMap(existingSetting?.value);
-  planTypeMap[userId] = normalizePlanTier(planTier);
-
-  const { error } = await adminClient
-    .from("settings")
-    .upsert(
-      {
-        key: PREMIUM_PLAN_TYPES_KEY,
-        value: JSON.stringify(planTypeMap),
-      },
-      { onConflict: "key" },
-    );
-
-  if (error) throw error;
+  user_upi_id?: string | null;
 };
 
 const pickLatestPlanForTier = (plans: any[], tier: string) => {
@@ -93,18 +52,6 @@ const errorResponse = (message: string, status = 400) =>
 
 const parseMoney = (value: number) => Math.round(value * 100) / 100;
 const escapeLikeValue = (value: string) => value.replace(/[,%]/g, "");
-
-const addMonthsFrom = (baseDateIso: string | null | undefined, months: number) => {
-  const baseDate = baseDateIso && new Date(baseDateIso) > new Date() ? new Date(baseDateIso) : new Date();
-  baseDate.setMonth(baseDate.getMonth() + months);
-  return baseDate.toISOString();
-};
-
-const addDaysFrom = (baseDateIso: string | null | undefined, days: number) => {
-  const baseDate = baseDateIso && new Date(baseDateIso) > new Date() ? new Date(baseDateIso) : new Date();
-  baseDate.setDate(baseDate.getDate() + days);
-  return baseDate.toISOString();
-};
 
 const resolveDiscount = (baseAmount: number, offer: OfferRow | null) => {
   if (!offer) {
@@ -149,51 +96,15 @@ const createAuthorizedClient = (supabaseUrl: string, anonKey: string, jwt: strin
     },
   });
 
-const rewardReferralIfEligible = async (adminClient: ReturnType<typeof createClient>, referredUserId: string, paymentId: string, now: string) => {
-  const { data: referral } = await adminClient
-    .from("referrals")
-    .select("id, referrer_user_id, reward_days, status")
-    .eq("referred_user_id", referredUserId)
-    .in("status", ["joined", "qualified"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!referral?.referrer_user_id) return;
-
-  const { data: referrerProfile } = await adminClient
-    .from("profiles")
-    .select("premium_until")
-    .eq("id", referral.referrer_user_id)
-    .maybeSingle();
-
-  const rewardDays = Number(referral.reward_days || 7);
-  const rewardedPremiumUntil = addDaysFrom(referrerProfile?.premium_until, rewardDays);
-
-  await adminClient
-    .from("profiles")
-    .update({ premium_until: rewardedPremiumUntil })
-    .eq("id", referral.referrer_user_id);
-
-  await adminClient
-    .from("referrals")
-    .update({
-      status: "rewarded",
-      qualified_payment_id: paymentId,
-      rewarded_at: now,
-      updated_at: now,
-    })
-    .eq("id", referral.id);
-};
-
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  try {
+    if (req.method === "OPTIONS") {
+      return new Response("ok", { headers: corsHeaders });
+    }
 
-  if (req.method !== "POST") {
-    return errorResponse("Method not allowed.", 405);
-  }
+    if (req.method !== "POST") {
+      return errorResponse("Method not allowed.", 405);
+    }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -240,50 +151,54 @@ Deno.serve(async (req: Request) => {
     return errorResponse("User profile not found.", 404);
   }
 
-  const { data: premiumSetting } = await adminClient
+  const { data: configRows } = await adminClient
     .from("settings")
-    .select("value")
-    .eq("key", "premium_cost")
-    .maybeSingle();
+    .select("key, value")
+    .in("key", [
+      "premium_cost",
+      "premium_plus_cost",
+      "public_plans",
+      "payment_gateway_mode",
+      "skillpro_upi_id",
+    ]);
 
-  const { data: premiumPlusSetting } = await adminClient
-    .from("settings")
-    .select("value")
-    .eq("key", "premium_plus_cost")
-    .maybeSingle();
+  const config = Object.fromEntries((configRows || []).map((row) => [row.key, row.value]));
+  const fallbackPremiumCost = parseMoney(Number.parseFloat(String(config.premium_cost ?? "199")) || 199);
+  const fallbackPremiumPlusCost = parseMoney(
+    Number.parseFloat(String(config.premium_plus_cost ?? "")) || Math.max(fallbackPremiumCost + 100, 299),
+  );
+  const configuredGatewayMode = String(config.payment_gateway_mode || "razorpay").trim() === "skillpro_upi"
+    ? "skillpro_upi"
+    : "razorpay";
+  const configuredUpiId = String(config.skillpro_upi_id || "").trim();
 
-  const fallbackPremiumCost = parseMoney(Number.parseFloat(String(premiumSetting?.value ?? "199")) || 199);
-  const fallbackPremiumPlusCost = parseMoney(Number.parseFloat(String(premiumPlusSetting?.value ?? "")) || Math.max(fallbackPremiumCost + 100, 299));
   const selectedPlanTier = normalizePlanTier(payload.plan_tier);
   let selectedPlanLabel = selectedPlanTier === "premium_plus" ? "Premium Plus" : "Premium";
   let selectedPlanCode = selectedPlanTier === "premium_plus" ? "premium_plus_6months" : "premium_6months";
   let selectedPlanMonths = PREMIUM_MONTHS;
   let baseAmount = selectedPlanTier === "premium_plus" ? fallbackPremiumPlusCost : fallbackPremiumCost;
 
-  const { data: publicPlansSetting } = await adminClient
-    .from("settings")
-    .select("value")
-    .eq("key", "public_plans")
-    .maybeSingle();
-
   try {
-    const publicPlans = publicPlansSetting?.value ? JSON.parse(publicPlansSetting.value) : [];
+    const publicPlans = config.public_plans ? JSON.parse(config.public_plans) : [];
     if (Array.isArray(publicPlans)) {
       const selectedPlan = pickLatestPlanForTier(publicPlans, selectedPlanTier);
       if (selectedPlan) {
-        baseAmount = selectedPlanTier === "premium_plus" ? fallbackPremiumPlusCost : fallbackPremiumCost;
         selectedPlanLabel = String(selectedPlan.name || selectedPlanLabel);
         selectedPlanCode = String(selectedPlan.id || selectedPlanCode);
         selectedPlanMonths = Number(selectedPlan.periodMonths || PREMIUM_MONTHS) || PREMIUM_MONTHS;
+        const publicPlanCost = Number(selectedPlan.cost);
+        if (Number.isFinite(publicPlanCost) && publicPlanCost > 0) {
+          baseAmount = parseMoney(publicPlanCost);
+        }
       }
     }
   } catch {
-    // Keep fallback premium pricing if public plans cannot be parsed.
+    // Keep fallback plan configuration if public plans cannot be parsed.
   }
 
   let selectedOffer: OfferRow | null = null;
-  const couponCode = String(payload.coupon_code || "").trim();
-  if (payload.offer_id || couponCode) {
+  const couponCode = configuredGatewayMode === "skillpro_upi" ? "" : String(payload.coupon_code || "").trim();
+  if (configuredGatewayMode !== "skillpro_upi" && (payload.offer_id || couponCode)) {
     let offer: OfferRow | null = null;
     let offerError: Error | null = null;
 
@@ -343,64 +258,80 @@ Deno.serve(async (req: Request) => {
     selectedOffer = offer;
   }
 
-  const discount = resolveDiscount(baseAmount, selectedOffer);
-  const paymentGateway = discount.finalAmount <= 0 ? "coupon" : "razorpay";
+  const discount = configuredGatewayMode === "skillpro_upi"
+    ? {
+        couponCode: null,
+        discountAmount: 0,
+        finalAmount: parseMoney(baseAmount),
+        isLifetimeFree: false,
+      }
+    : resolveDiscount(baseAmount, selectedOffer);
+  if (!selectedOffer && discount.finalAmount <= 0) {
+    return errorResponse("Selected plan amount is invalid. Ask admin to configure a price greater than zero before activating premium.", 400);
+  }
+  const manualUpiNote = `${String(profile.email || user.email || user.id).trim()} paid`;
   const validUntil = discount.isLifetimeFree
     ? LIFETIME_PREMIUM_DATE
     : addMonthsFrom(profile.premium_until, selectedPlanMonths);
 
-  const { data: payment, error: paymentError } = await adminClient
-    .from("payments")
-    .insert({
-      user_id: user.id,
-      plan_code: selectedPlanCode,
-      gateway: paymentGateway,
-      status: discount.finalAmount <= 0 ? "success" : "created",
-      base_amount: baseAmount,
-      discount_amount: discount.discountAmount,
-      final_amount: discount.finalAmount,
-      amount: discount.finalAmount,
-      currency: "INR",
-      coupon_offer_id: selectedOffer?.id ?? null,
-      coupon_code: discount.couponCode,
-      valid_until: validUntil,
-      paid_at: discount.finalAmount <= 0 ? new Date().toISOString() : null,
-      metadata: {
-        plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
-        plan_tier: selectedPlanTier,
-        plan_months: selectedPlanMonths,
-        coupon_name: selectedOffer?.coupon_name ?? null,
-        coupon_type: selectedOffer?.discount_type ?? null,
-        is_lifetime_free: discount.isLifetimeFree,
-      },
-    })
-    .select("id, status")
-    .single();
+  if (configuredGatewayMode !== "skillpro_upi" && discount.finalAmount <= 0) {
+    const { data: payment, error: paymentError } = await adminClient
+      .from("payments")
+      .insert({
+        user_id: user.id,
+        plan_code: selectedPlanCode,
+        gateway: "coupon",
+        status: "success",
+        base_amount: baseAmount,
+        discount_amount: discount.discountAmount,
+        final_amount: discount.finalAmount,
+        amount: discount.finalAmount,
+        currency: "INR",
+        coupon_offer_id: selectedOffer?.id ?? null,
+        coupon_code: discount.couponCode,
+        valid_until: validUntil,
+        paid_at: new Date().toISOString(),
+        metadata: {
+          plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
+          plan_tier: selectedPlanTier,
+          plan_months: selectedPlanMonths,
+          coupon_name: selectedOffer?.coupon_name ?? null,
+          coupon_type: selectedOffer?.discount_type ?? null,
+          is_lifetime_free: discount.isLifetimeFree,
+          payment_note: manualUpiNote,
+          payment_method: "coupon",
+        },
+      })
+      .select("id")
+      .single();
 
-  if (paymentError || !payment) {
-    return errorResponse(paymentError?.message || "Failed to create payment.", 500);
-  }
+    if (paymentError || !payment) {
+      return errorResponse(paymentError?.message || "Failed to create payment.", 500);
+    }
 
-  if (discount.finalAmount <= 0) {
-    const now = new Date().toISOString();
-    const { error: profileUpdateError } = await adminClient
-      .from("profiles")
-      .update({ premium_until: validUntil })
-      .eq("id", user.id);
-
-    if (profileUpdateError) {
+    try {
+      await activatePaidPremium(adminClient, {
+        userId: user.id,
+        paymentId: payment.id,
+        profilePremiumUntil: profile.premium_until,
+        planTier: selectedPlanTier,
+        planMonths: selectedPlanMonths,
+        isLifetimeFree: discount.isLifetimeFree,
+      });
+    } catch (error) {
       await adminClient
         .from("payments")
-        .update({ status: "failed", failure_reason: profileUpdateError.message, updated_at: now })
+        .update({
+          status: "failed",
+          failure_reason: error instanceof Error ? error.message : "Premium activation failed.",
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", payment.id);
       return errorResponse("Payment was recorded but premium activation failed.", 500);
     }
 
-    await savePlanTypeForUser(adminClient, user.id, selectedPlanTier);
-
-    await assignBalancedTeacherToStudent(adminClient, user.id);
-
     if (selectedOffer?.id) {
+      const now = new Date().toISOString();
       await adminClient.from("offer_redemptions").upsert(
         {
           offer_id: selectedOffer.id,
@@ -416,7 +347,19 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    await rewardReferralIfEligible(adminClient, user.id, payment.id, now);
+    await notifyAdminOfPaymentEvent(adminClient, {
+      userId: user.id,
+      paymentId: payment.id,
+      eventType: "payment_success",
+      planName: selectedPlanLabel,
+      amount: discount.finalAmount,
+      paymentMethod: "coupon",
+      userEmail: profile.email || user.email || null,
+      userName: profile.full_name || null,
+      userPhone: profile.phone || null,
+      note: manualUpiNote,
+      status: "success",
+    });
 
     return jsonResponse({
       mode: "coupon",
@@ -428,6 +371,117 @@ Deno.serve(async (req: Request) => {
       valid_until: validUntil,
       is_lifetime_free: discount.isLifetimeFree,
     });
+  }
+
+  if (configuredGatewayMode === "skillpro_upi") {
+    if (!configuredUpiId) {
+      return errorResponse("SkillPro UPI ID is not configured.", 500);
+    }
+
+    const userUpiId = String(payload.user_upi_id || "").trim() || null;
+    const requestStatus = "created";
+    const { data: payment, error: paymentError } = await adminClient
+      .from("payments")
+      .insert({
+        user_id: user.id,
+        plan_code: selectedPlanCode,
+        gateway: "coupon",
+        status: requestStatus,
+        base_amount: baseAmount,
+        discount_amount: discount.discountAmount,
+        final_amount: discount.finalAmount,
+        amount: discount.finalAmount,
+        currency: "INR",
+        coupon_offer_id: selectedOffer?.id ?? null,
+        coupon_code: discount.couponCode,
+        valid_until: validUntil,
+        gateway_ref: userUpiId,
+        metadata: {
+          plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
+          plan_tier: selectedPlanTier,
+          plan_months: selectedPlanMonths,
+          coupon_name: selectedOffer?.coupon_name ?? null,
+          coupon_type: selectedOffer?.discount_type ?? null,
+          is_lifetime_free: false,
+          payment_note: manualUpiNote,
+          payment_method: "skillpro_upi",
+          payment_request_state: userUpiId ? "request_sent" : "pending",
+          admin_upi_id: configuredUpiId,
+          user_upi_id: userUpiId,
+          admin_approval_required: true,
+        },
+      })
+      .select("id, status")
+      .single();
+
+    if (paymentError || !payment) {
+      return errorResponse(paymentError?.message || "Failed to create payment request.", 500);
+    }
+
+    await notifyAdminOfPaymentEvent(adminClient, {
+      userId: user.id,
+      paymentId: payment.id,
+      eventType: "request_created",
+      planName: selectedPlanLabel,
+      amount: discount.finalAmount,
+      paymentMethod: userUpiId ? "skillpro_upi_request" : "skillpro_upi",
+      userEmail: profile.email || user.email || null,
+      userName: profile.full_name || null,
+      userPhone: profile.phone || null,
+      userUpiId,
+      note: manualUpiNote,
+      status: payment.status,
+    });
+
+    const upiLink = `upi://pay?pa=${encodeURIComponent(configuredUpiId)}&pn=${encodeURIComponent("SkillPro")}&am=${encodeURIComponent(String(discount.finalAmount))}&cu=INR&tn=${encodeURIComponent(manualUpiNote)}`;
+
+    return jsonResponse({
+      mode: "skillpro_upi",
+      payment_id: payment.id,
+      amount: discount.finalAmount,
+      currency: "INR",
+      status: payment.status,
+      approval_status: "waiting_admin_approval",
+      upi_id: configuredUpiId,
+      user_upi_id: userUpiId,
+      note: manualUpiNote,
+      upi_link: upiLink,
+      plan_tier: selectedPlanTier,
+      valid_until: validUntil,
+    });
+  }
+
+  const { data: payment, error: paymentError } = await adminClient
+    .from("payments")
+    .insert({
+      user_id: user.id,
+      plan_code: selectedPlanCode,
+      gateway: "razorpay",
+      status: "created",
+      base_amount: baseAmount,
+      discount_amount: discount.discountAmount,
+      final_amount: discount.finalAmount,
+      amount: discount.finalAmount,
+      currency: "INR",
+      coupon_offer_id: selectedOffer?.id ?? null,
+      coupon_code: discount.couponCode,
+      valid_until: validUntil,
+      metadata: {
+        plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
+        plan_tier: selectedPlanTier,
+        plan_months: selectedPlanMonths,
+        coupon_name: selectedOffer?.coupon_name ?? null,
+        coupon_type: selectedOffer?.discount_type ?? null,
+        is_lifetime_free: false,
+        payment_note: manualUpiNote,
+        payment_method: "razorpay",
+      },
+    })
+    .select("id")
+    .single();
+
+  if (paymentError || !payment) {
+    return errorResponse(paymentError?.message || "Failed to create payment.", 500);
   }
 
   if (!razorpayKeyId || !razorpayKeySecret) {
@@ -487,18 +541,21 @@ Deno.serve(async (req: Request) => {
     })
     .eq("id", payment.id);
 
-  return jsonResponse({
-    mode: "razorpay",
-    key_id: razorpayKeyId,
-    payment_id: payment.id,
-    order_id: razorpayOrder.id,
-    amount: razorpayOrder.amount,
-    currency: razorpayOrder.currency || "INR",
-    base_amount: baseAmount,
-    discount_amount: discount.discountAmount,
-    final_amount: discount.finalAmount,
-    coupon_code: discount.couponCode,
-    valid_until: validUntil,
-    plan_tier: selectedPlanTier,
-  });
+    return jsonResponse({
+      mode: "razorpay",
+      key_id: razorpayKeyId,
+      payment_id: payment.id,
+      order_id: razorpayOrder.id,
+      amount: razorpayOrder.amount,
+      currency: razorpayOrder.currency || "INR",
+      base_amount: baseAmount,
+      discount_amount: discount.discountAmount,
+      final_amount: discount.finalAmount,
+      coupon_code: discount.couponCode,
+      valid_until: validUntil,
+      plan_tier: selectedPlanTier,
+    });
+  } catch (error) {
+    return errorResponse(error instanceof Error ? error.message : "Unexpected payment function error.", 500);
+  }
 });

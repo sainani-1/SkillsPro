@@ -9,6 +9,7 @@ import { trackPremiumEvent } from '../utils/growth';
 import { normalizeCheckoutPlanTier } from '../utils/planCheckout';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_URGENCY_DATE = '2026-04-15';
 const DEFAULT_URGENCY_LABEL = 'April 15, 2026';
 
@@ -112,6 +113,77 @@ const PLAN_FEATURES = {
 const getPlanFeatureList = (tier) =>
   tier === 'premium_plus' ? PLAN_FEATURES.premium_plus : PLAN_FEATURES.premium;
 
+const UPI_APPS = [
+  { id: 'gpay', label: 'Google Pay', packageName: 'com.google.android.apps.nbu.paisa.user' },
+  { id: 'phonepe', label: 'PhonePe', packageName: 'com.phonepe.app' },
+  { id: 'paytm', label: 'Paytm', packageName: 'net.one97.paytm' },
+  { id: 'generic', label: 'Other UPI App', packageName: '' },
+];
+
+const getFunctionsErrorMessage = async (error, fallbackMessage) => {
+  const baseMessage = error?.message || fallbackMessage;
+  const response = error?.context;
+  if (!response || typeof response.clone !== 'function') {
+    return baseMessage;
+  }
+
+  try {
+    const payload = await response.clone().json();
+    if (payload?.error) return payload.error;
+    if (payload?.message) return payload.message;
+  } catch {
+    try {
+      const text = await response.clone().text();
+      if (text) return text;
+    } catch {
+      return baseMessage;
+    }
+  }
+
+  return baseMessage;
+};
+
+const callEdgeFunction = async (functionName, accessToken, body) => {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+    },
+    body: JSON.stringify(body),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `Edge Function ${functionName} failed.`);
+  }
+
+  return payload;
+};
+
+const getFreshAccessToken = async () => {
+  const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+  if (!refreshError && refreshedData?.session?.access_token && refreshedData?.session?.user?.id) {
+    return refreshedData.session.access_token;
+  }
+
+  const { data: currentSessionData } = await supabase.auth.getSession();
+  const currentToken = currentSessionData?.session?.access_token || '';
+  const currentUserId = currentSessionData?.session?.user?.id || '';
+  if (currentToken && currentUserId) {
+    return currentToken;
+  }
+
+  throw new Error('Your login session has expired. Please log in again and retry payment.');
+};
+
 const Payment = () => {
   const { profile, fetchProfile, getPlanTier } = useAuth();
   const [searchParams] = useSearchParams();
@@ -124,6 +196,9 @@ const Payment = () => {
     effectiveDate: DEFAULT_URGENCY_DATE,
     label: DEFAULT_URGENCY_LABEL,
   });
+  const [paymentGatewayMode, setPaymentGatewayMode] = useState('razorpay');
+  const [skillproUpiId, setSkillproUpiId] = useState('');
+  const [paymentAdminEmail, setPaymentAdminEmail] = useState('');
   const [pricingLoading, setPricingLoading] = useState(true);
   const [offersLoading, setOffersLoading] = useState(true);
   const [offers, setOffers] = useState([]);
@@ -132,6 +207,8 @@ const Payment = () => {
   const [manualAppliedOffer, setManualAppliedOffer] = useState(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Your premium access is now active.');
+  const [manualRequestSummary, setManualRequestSummary] = useState(null);
+  const [showUpiAppPicker, setShowUpiAppPicker] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const razorpayInstanceRef = useRef(null);
   const paymentAttemptRef = useRef({ paymentId: null, finalizing: false, finalized: false });
@@ -171,8 +248,18 @@ const Payment = () => {
     [activePlans, selectedPlanTier]
   );
 
-  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
+  const selectedOffer = paymentGatewayMode === 'skillpro_upi'
+    ? null
+    : offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
   const pricing = buildPricing(selectedPlan?.cost || premiumCost || 0, selectedOffer);
+  const paymentNote = `${profile?.email || 'user'} paid`;
+  const directUpiLink = paymentGatewayMode === 'skillpro_upi' && skillproUpiId && pricing.finalAmount > 0
+    ? `upi://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}`
+    : '';
+  const isAndroidDevice = typeof window !== 'undefined' && /android/i.test(window.navigator.userAgent || '');
+  const isDesktopDevice = typeof window !== 'undefined'
+    ? window.matchMedia('(min-width: 768px)').matches && !/android|iphone|ipad|ipod/i.test(window.navigator.userAgent || '')
+    : true;
   const currentPlanTier = getPlanTier(profile);
   const checkoutHeading =
     selectedPlanTier === 'premium_plus'
@@ -195,7 +282,7 @@ const Payment = () => {
         const { data } = await supabase
           .from('settings')
           .select('key, value')
-          .in('key', ['premium_cost', 'premium_plus_cost', 'public_plans', 'payment_urgency_banner']);
+          .in('key', ['premium_cost', 'premium_plus_cost', 'public_plans', 'payment_urgency_banner', 'payment_gateway_mode', 'skillpro_upi_id', 'payment_admin_email']);
 
         const settingsMap = Object.fromEntries((data || []).map((item) => [item.key, item.value]));
         const parsedCost = parseInt(settingsMap.premium_cost, 10);
@@ -203,6 +290,9 @@ const Payment = () => {
         const parsedPremiumPlusCost = parseInt(settingsMap.premium_plus_cost, 10);
         const fallbackPremiumPlusCost = Number.isFinite(parsedPremiumPlusCost) ? parsedPremiumPlusCost : Math.max(fallbackPremiumCost + 100, 299);
         setPremiumCost(fallbackPremiumCost);
+        setPaymentGatewayMode(settingsMap.payment_gateway_mode === 'skillpro_upi' ? 'skillpro_upi' : 'razorpay');
+        setSkillproUpiId(settingsMap.skillpro_upi_id || '');
+        setPaymentAdminEmail(settingsMap.payment_admin_email || '');
         const tierCostMap = {
           premium: fallbackPremiumCost,
           premium_plus: fallbackPremiumPlusCost,
@@ -294,8 +384,9 @@ const Payment = () => {
     trackPremiumEvent('payment_page_viewed', 'payment_page', {
       offerId: searchParams.get('offer') || null,
       planTier: selectedPlanTier,
+      gatewayMode: paymentGatewayMode,
     }, profile.id);
-  }, [profile?.id, searchParams, selectedPlanTier]);
+  }, [profile?.id, searchParams, selectedPlanTier, paymentGatewayMode]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -337,10 +428,8 @@ const Payment = () => {
 
         setOffers(activeOffers);
 
-        const preselectedOfferId = searchParams.get('offer');
-        if (preselectedOfferId && activeOffers.some((offer) => offer.id === preselectedOfferId)) {
-          setSelectedOfferId(preselectedOfferId);
-        }
+        // Keep offers visible, but do not auto-apply them from the URL.
+        // Users should explicitly choose a coupon before it affects the final payable amount.
       } catch (error) {
         console.error('Error loading offers:', error);
       } finally {
@@ -459,6 +548,17 @@ const Payment = () => {
     paymentAttemptRef.current = { paymentId: null, finalizing: false, finalized: false };
   };
 
+  const openDirectUpiApp = (app) => {
+    if (!directUpiLink) return;
+    if (isAndroidDevice && app?.packageName) {
+      const intentUrl = `intent://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}#Intent;scheme=upi;package=${app.packageName};end`;
+      window.location.href = intentUrl;
+    } else {
+      window.location.href = directUpiLink;
+    }
+    setShowUpiAppPicker(false);
+  };
+
   const finalizePayment = async (payload, fallbackFailureMessage) => {
     if (!paymentAttemptRef.current.paymentId || paymentAttemptRef.current.finalizing || paymentAttemptRef.current.finalized) {
       return null;
@@ -467,16 +567,12 @@ const Payment = () => {
     paymentAttemptRef.current.finalizing = true;
 
     try {
-      const { data, error } = await supabase.functions.invoke('verify-payment', {
-        body: {
-          payment_id: paymentAttemptRef.current.paymentId,
-          ...payload,
-        },
-      });
+      const accessToken = await getFreshAccessToken();
 
-      if (error) {
-        throw new Error(error.message || fallbackFailureMessage || 'Failed to finalize payment.');
-      }
+      const data = await callEdgeFunction('verify-payment', accessToken, {
+        payment_id: paymentAttemptRef.current.paymentId,
+        ...payload,
+      });
 
       paymentAttemptRef.current.finalized = true;
       if (payload.status === 'success') {
@@ -563,17 +659,38 @@ const Payment = () => {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('create-payment-order', {
-        body: {
-          offer_id: selectedOffer?.id || null,
-          coupon_code: !selectedOffer?.id ? manualCouponCode.trim() || null : null,
-          plan_tier: selectedPlanTier,
-        },
-      });
+      const accessToken = await getFreshAccessToken();
 
-      if (error) {
-        throw new Error(error.message || 'Failed to create payment order.');
+      if (paymentGatewayMode === 'skillpro_upi' && !skillproUpiId.trim()) {
+        setAlertModal({
+          show: true,
+          title: 'Payment Setup Incomplete',
+          message: 'SkillPro UPI is selected, but no admin UPI ID is configured yet. Please ask admin to save the SkillPro UPI ID in Admin Settings.',
+          type: 'warning',
+        });
+        setLoading(false);
+        return;
       }
+
+      if (paymentGatewayMode === 'skillpro_upi' && isDesktopDevice) {
+        setAlertModal({
+          show: true,
+          title: 'Pay On Mobile',
+          message: 'UPI payment is available only on mobile. Please open this same account on your mobile and complete the payment there.',
+          type: 'info',
+        });
+        setLoading(false);
+        return;
+      }
+
+      const data = await callEdgeFunction('create-payment-order', accessToken, {
+        offer_id: paymentGatewayMode === 'skillpro_upi' ? null : selectedOffer?.id || null,
+        coupon_code: paymentGatewayMode === 'skillpro_upi'
+          ? null
+          : manualAppliedOffer && !selectedOfferId ? manualCouponCode.trim() || null : null,
+        plan_tier: selectedPlanTier,
+        user_upi_id: null,
+      });
 
       if (!data?.payment_id) {
         throw new Error('Payment record was not created.');
@@ -584,6 +701,26 @@ const Payment = () => {
         finalizing: false,
         finalized: false,
       };
+
+      if (data.mode === 'skillpro_upi') {
+        setManualRequestSummary(data);
+        setLoading(false);
+        resetAttemptState();
+
+        if (!isDesktopDevice && data.upi_link) {
+          window.location.href = data.upi_link;
+        }
+
+        setAlertModal({
+          show: true,
+          title: isDesktopDevice ? 'Waiting for Admin Approval' : 'Continue In Your UPI App',
+          message: isDesktopDevice
+            ? `Your payment request for Rs ${data.amount} was recorded. Open this same account on your mobile and complete the UPI payment there. Premium will activate only after admin verifies and approves the payment.`
+            : `Your UPI payment for Rs ${data.amount} is ready. After you pay in the UPI app, admin must verify and approve it before premium is activated.`,
+          type: 'success',
+        });
+        return;
+      }
 
       if (data.mode === 'coupon' || Number(data.final_amount || 0) <= 0) {
         await handleDirectActivationSuccess(data);
@@ -639,8 +776,8 @@ const Payment = () => {
       console.error('Payment initialization error:', error);
       const baseMessage = error.message || 'Failed to initialize payment. Please try again.';
       const message = baseMessage.includes('Failed to send a request to the Edge Function')
-        ? 'Payment service is not reachable right now. This usually means the Supabase Edge Functions are not deployed or the project connection is failing. Check and deploy `create-payment-order` and `verify-payment`, then try again.'
-        : baseMessage;
+          ? 'Payment service is not reachable right now. This usually means the Supabase Edge Functions are not deployed or the project connection is failing. Check and deploy `create-payment-order` and `verify-payment`, then try again.'
+          : baseMessage;
       setAlertModal({
         show: true,
         title: 'Payment Error',
@@ -676,6 +813,16 @@ const Payment = () => {
   if (pricingLoading || premiumCost === null || offersLoading) {
     return <LoadingSpinner message="Loading payment details..." />;
   }
+
+  const buttonLabel = loading
+    ? 'Processing...'
+    : pricing.finalAmount > 0
+      ? paymentGatewayMode === 'skillpro_upi'
+        ? isDesktopDevice
+          ? 'Pay On Mobile'
+          : `Pay Rs ${pricing.finalAmount} via UPI`
+        : `Pay Rs ${pricing.finalAmount} for ${selectedPlan?.name || 'Premium'}`
+      : `Activate ${selectedPlan?.name || 'Premium'} Now`;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -756,6 +903,9 @@ const Payment = () => {
             </p>
             <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
               <p className="text-sm text-slate-500">Base price</p>
+              <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Gateway: {paymentGatewayMode === 'skillpro_upi' ? 'SkillPro UPI' : 'Razorpay'}
+              </p>
               <p className="text-3xl font-bold text-slate-900">₹{selectedPlan?.cost || premiumCost}</p>
             </div>
           </div>
@@ -782,6 +932,7 @@ const Payment = () => {
         </div>
       </div>
 
+      {paymentGatewayMode !== 'skillpro_upi' && (
       <div className="bg-white rounded-xl p-6 border space-y-4">
         <div className="flex items-center gap-2">
           <Ticket className="text-pink-600" size={20} />
@@ -868,6 +1019,7 @@ const Payment = () => {
           </div>
         )}
       </div>
+      )}
 
       <div className="bg-white rounded-xl p-6 border">
         <h3 className="text-lg font-bold mb-4">Payable Summary</h3>
@@ -876,24 +1028,31 @@ const Payment = () => {
             <span>{selectedPlan?.name || 'Premium'} amount</span>
             <span>₹{roundMoney(selectedPlan?.cost || premiumCost)}</span>
           </div>
-          <div className="flex items-center justify-between text-slate-600">
-            <span>Coupon discount</span>
-            <span>- ₹{pricing.discountAmount}</span>
-          </div>
+          {paymentGatewayMode !== 'skillpro_upi' ? (
+            <div className="flex items-center justify-between text-slate-600">
+              <span>Coupon discount</span>
+              <span>- Rs {pricing.discountAmount}</span>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between border-t pt-3 text-lg font-bold text-slate-900">
             <span>Final payable amount</span>
             <span>₹{pricing.finalAmount}</span>
           </div>
-          {pricing.isLifetimeFree && (
+          {paymentGatewayMode !== 'skillpro_upi' && pricing.isLifetimeFree && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
               This coupon gives lifetime premium. Razorpay will be skipped and access will activate immediately.
             </div>
           )}
-          {!pricing.isLifetimeFree && pricing.finalAmount <= 0 && (
+          {paymentGatewayMode !== 'skillpro_upi' && !pricing.isLifetimeFree && pricing.finalAmount <= 0 && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
               Your coupon covers the full amount. No online payment is required.
             </div>
           )}
+          {paymentGatewayMode === 'skillpro_upi' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Premium stays pending after the request is created. It will activate only after admin verifies the payment and approves it.
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -903,7 +1062,7 @@ const Payment = () => {
           Payment Processing
         </h3>
 
-        {!RAZORPAY_KEY_ID && pricing.finalAmount > 0 && (
+        {paymentGatewayMode === 'razorpay' && !RAZORPAY_KEY_ID && pricing.finalAmount > 0 && (
           <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
             <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={18} />
             <p className="text-sm text-yellow-800">
@@ -915,7 +1074,11 @@ const Payment = () => {
         <div className="mb-4 space-y-2 text-sm text-slate-600">
           <div className="flex items-center gap-2">
             <Check className="text-green-600" size={16} />
-            <span>Only the final discounted amount is sent to Razorpay</span>
+            <span>
+              {paymentGatewayMode === 'skillpro_upi'
+                ? 'The amount is fixed by admin for the selected plan and cannot be edited'
+                : 'Only the final discounted amount is sent to Razorpay'}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Check className="text-green-600" size={16} />
@@ -925,23 +1088,74 @@ const Payment = () => {
             <Check className="text-green-600" size={16} />
             <span>Redeemed coupons cannot be used again</span>
           </div>
+          {paymentGatewayMode === 'skillpro_upi' ? (
+            <div className="flex items-center gap-2">
+              <Clock3 className="text-amber-600" size={16} />
+              <span>SkillPro UPI requests stay in waiting for admin approval until admin verifies the payment</span>
+            </div>
+          ) : null}
         </div>
+
+        {paymentGatewayMode === 'skillpro_upi' && pricing.finalAmount > 0 && (
+          <div className="mb-4 space-y-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">Amount</label>
+                <input
+                  type="text"
+                  value={`Rs ${pricing.finalAmount}`}
+                  readOnly
+                  className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">Payment Note</label>
+                <input
+                  type="text"
+                  value={paymentNote}
+                  readOnly
+                  className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
+                />
+              </div>
+            </div>
+            {isDesktopDevice ? (
+              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-4 text-sm text-emerald-900">
+                Open this same account on your mobile and use the UPI app there. On desktop we will only record the payment start request for admin.
+              </div>
+            ) : (
+              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
+                Mobile flow opens your UPI app with the exact admin-set amount and note.
+              </div>
+            )}
+            {manualRequestSummary ? (
+              <div className="rounded-lg border border-emerald-300 bg-white px-4 py-3 text-sm text-slate-700">
+                Last request: payment ID <span className="font-semibold">{manualRequestSummary.payment_id}</span> with status <span className="font-semibold">{manualRequestSummary.approval_status || 'waiting_admin_approval'}</span>. Premium will remain pending until admin approves this payment.
+              </div>
+            ) : null}
+            {directUpiLink ? (
+              <button
+                type="button"
+                onClick={() => setShowUpiAppPicker(true)}
+                className="inline-flex items-center justify-center rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-800"
+              >
+                Open UPI App
+              </button>
+            ) : null}
+          </div>
+        )}
 
         <button
           onClick={handlePayment}
-          disabled={loading || (pricing.finalAmount > 0 && !RAZORPAY_KEY_ID)}
+          disabled={loading || (paymentGatewayMode === 'razorpay' && pricing.finalAmount > 0 && !RAZORPAY_KEY_ID)}
           onMouseDown={() => trackPremiumEvent('payment_attempt_started', 'payment_page', {
             finalAmount: pricing.finalAmount,
             offerId: selectedOfferId || null,
             planTier: selectedPlanTier,
+            gatewayMode: paymentGatewayMode,
           }, profile?.id || null)}
           className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-semibold transition-all"
         >
-          {loading
-            ? 'Processing...'
-            : pricing.finalAmount > 0
-              ? `Pay ₹${pricing.finalAmount} for ${selectedPlan?.name || 'Premium'}`
-              : `Activate ${selectedPlan?.name || 'Premium'} Now`}
+          {buttonLabel}
         </button>
       </div>
 
@@ -955,6 +1169,41 @@ const Payment = () => {
           setLoading(false);
         }}
       />
+
+      {showUpiAppPicker ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-slate-900">Choose UPI App</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Amount and note are locked by admin and cannot be edited in this flow.
+            </p>
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <p><span className="font-semibold">Amount:</span> Rs {pricing.finalAmount}</p>
+              <p><span className="font-semibold">UPI ID:</span> {skillproUpiId}</p>
+              <p><span className="font-semibold">Note:</span> {paymentNote}</p>
+            </div>
+            <div className="mt-5 space-y-3">
+              {UPI_APPS.map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => openDirectUpiApp(app)}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left font-semibold text-slate-900 hover:bg-slate-50"
+                >
+                  {app.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUpiAppPicker(false)}
+              className="mt-4 w-full rounded-lg bg-slate-100 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -967,3 +1216,5 @@ const FeatureItem = ({ text, dim = false }) => (
 );
 
 export default Payment;
+
+

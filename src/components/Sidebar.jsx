@@ -876,6 +876,10 @@ const Sidebar = () => {
               <Mail size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Lead Inbox</span>}
             </NavLink>
+            <NavLink to="/app/admin/payment-attempts" className={navItemClass} title="Payment Attempts">
+              <CreditCard size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Payment Attempts</span>}
+            </NavLink>
             <NavLink to="/app/admin/growth-analytics" className={navItemClass} title="Growth Analytics">
               <BarChart3 size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Growth Analytics</span>}

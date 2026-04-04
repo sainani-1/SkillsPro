@@ -49,6 +49,8 @@ const PremiumStatus = () => {
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false });
 
+      const successfulPayments = (payments || []).filter((payment) => payment.status === 'success');
+
       if (!paymentError) {
         setPaymentHistory(payments || []);
       }
@@ -97,7 +99,7 @@ const PremiumStatus = () => {
           daysRemaining,
           isLifetime: lifetime,
           planType,
-          grantedBy: payments && payments.length > 0 ? 'paid' : (uniqueOffers.length > 0 ? 'gift' : 'admin'),
+          grantedBy: successfulPayments.length > 0 ? 'paid' : (uniqueOffers.length > 0 ? 'gift' : 'admin'),
         });
       } else {
         setPremiumDetails({

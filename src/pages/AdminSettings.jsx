@@ -23,6 +23,9 @@ const AdminSettings = () => {
   const [premiumPlusCost, setPremiumPlusCost] = useState(299);
   const [paymentUrgencyDate, setPaymentUrgencyDate] = useState('2026-04-15');
   const [paymentUrgencyLabel, setPaymentUrgencyLabel] = useState('April 15, 2026');
+  const [paymentGatewayMode, setPaymentGatewayMode] = useState('razorpay');
+  const [skillproUpiId, setSkillproUpiId] = useState('');
+  const [paymentAdminEmail, setPaymentAdminEmail] = useState('');
   const [resumeBuilderAccess, setResumeBuilderAccess] = useState('premium');
   const [supportContactEmail, setSupportContactEmail] = useState('');
   const [registrationPaused, setRegistrationPaused] = useState(false);
@@ -69,7 +72,7 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['exam_duration', 'premium_cost', 'premium_plus_cost', 'payment_urgency_banner', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
+        .in('key', ['exam_duration', 'premium_cost', 'premium_plus_cost', 'payment_urgency_banner', 'payment_gateway_mode', 'skillpro_upi_id', 'payment_admin_email', 'registration_paused', 'min_questions', 'public_plans', 'support_contact_email', 'resume_builder_access']);
 
       if (error) throw error;
 
@@ -81,6 +84,9 @@ const AdminSettings = () => {
         if (setting.key === 'min_questions') setMinQuestions(parseInt(setting.value, 10) || 25);
         if (setting.key === 'public_plans') setPlans(parsePlans(setting.value));
         if (setting.key === 'support_contact_email') setSupportContactEmail(setting.value || '');
+        if (setting.key === 'payment_gateway_mode') setPaymentGatewayMode(setting.value === 'skillpro_upi' ? 'skillpro_upi' : 'razorpay');
+        if (setting.key === 'skillpro_upi_id') setSkillproUpiId(setting.value || '');
+        if (setting.key === 'payment_admin_email') setPaymentAdminEmail(setting.value || '');
         if (setting.key === 'resume_builder_access') setResumeBuilderAccess(setting.value === 'free' ? 'free' : 'premium');
         if (setting.key === 'payment_urgency_banner') {
           try {
@@ -116,6 +122,9 @@ const AdminSettings = () => {
       await saveSetting('registration_paused', registrationPaused);
       await saveSetting('min_questions', minQuestions);
       await saveSetting('support_contact_email', supportContactEmail.trim());
+      await saveSetting('payment_gateway_mode', paymentGatewayMode);
+      await saveSetting('skillpro_upi_id', skillproUpiId.trim());
+      await saveSetting('payment_admin_email', paymentAdminEmail.trim());
       await saveSetting('resume_builder_access', resumeBuilderAccess);
       await saveSetting('payment_urgency_banner', JSON.stringify({
         effectiveDate: paymentUrgencyDate,
@@ -264,6 +273,16 @@ const AdminSettings = () => {
             />
           </div>
           <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Admin Email</label>
+            <input
+              type="email"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              placeholder="payments@yourdomain.com"
+              value={paymentAdminEmail}
+              onChange={(e) => setPaymentAdminEmail(e.target.value)}
+            />
+          </div>
+          <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Urgency Date</label>
             <input
               type="date"
@@ -271,6 +290,49 @@ const AdminSettings = () => {
               value={paymentUrgencyDate}
               onChange={(e) => setPaymentUrgencyDate(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Payment Gateway Mode</label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setPaymentGatewayMode('razorpay')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  paymentGatewayMode === 'razorpay'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                Razorpay
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentGatewayMode('skillpro_upi')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  paymentGatewayMode === 'skillpro_upi'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                SkillPro UPI
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Razorpay uses the current checkout flow. SkillPro UPI creates fixed-amount UPI requests/manual review records.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">SkillPro UPI ID</label>
+            <input
+              type="text"
+              className="w-full p-3 border border-slate-300 rounded-lg"
+              placeholder="example@upi"
+              value={skillproUpiId}
+              onChange={(e) => setSkillproUpiId(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Used only when payment gateway mode is set to SkillPro UPI.
+            </p>
           </div>
           <div className="md:col-span-2">
             <label className="block text-sm font-semibold text-slate-700 mb-1">Payment Urgency Banner Label</label>
