@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
-import { Bell, Search } from 'lucide-react';
+import { Bell, Menu, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import AvatarImage from './AvatarImage';
@@ -23,6 +23,7 @@ const Layout = () => {
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
@@ -49,6 +50,12 @@ const Layout = () => {
     window.addEventListener('resize', updateViewport);
     return () => window.removeEventListener('resize', updateViewport);
   }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport) {
+      setMobileSidebarOpen(false);
+    }
+  }, [isMobileViewport]);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -495,14 +502,29 @@ const Layout = () => {
         type={toast.type}
         onClose={() => setToast((prev) => ({ ...prev, show: false }))}
       />
-      <Sidebar />
+      <Sidebar
+        isMobile={isMobileViewport}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => setMobileSidebarOpen(false)}
+      />
       <div
         className="flex flex-col transition-all duration-300"
         style={{ marginLeft: isMobileViewport ? 0 : sidebarWidth, minHeight: '100vh' }}
       >
         {/* Top Navbar */}
         <header className="bg-white shadow-sm h-16 flex items-center justify-between px-3 md:px-8 sticky top-0 z-10">
-          <div className="relative w-full max-w-md">
+          <div className="flex items-center gap-3 w-full">
+            {isMobileViewport ? (
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-700"
+                aria-label="Open menu"
+              >
+                <Menu size={20} />
+              </button>
+            ) : null}
+            <div className="relative w-full max-w-md">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={panelSearch}
@@ -537,6 +559,7 @@ const Layout = () => {
                 ))}
               </div>
             )}
+            </div>
           </div>
           <div className="flex items-center space-x-3 md:space-x-6">
             <div className="relative cursor-pointer" onClick={() => navigate('/app/notifications')}>

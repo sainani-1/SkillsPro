@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
 import { getChatReadTimes, markChatsAsRead } from '../utils/chatReadState';
 import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
-const Sidebar = () => {
+const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) => {
   const { profile, realProfile, isImpersonating, stopImpersonation, signOut, isPremium, isPremiumPlus } = useAuth();
   const { unreadNotifications } = useNotifications();
   const navigate = useNavigate();
@@ -24,6 +24,7 @@ const Sidebar = () => {
   const [newGuidanceRequests, setNewGuidanceRequests] = useState(0);
   const [newStartupIdeas, setNewStartupIdeas] = useState(0);
   const [newMultiSessionAlerts, setNewMultiSessionAlerts] = useState(0);
+  const [lastPathname, setLastPathname] = useState(location.pathname);
   const premiumActive = isPremium(profile);
   const premiumPlusActive = isPremiumPlus(profile);
   const isMissingTargetUserColumn = (err) => {
@@ -117,6 +118,15 @@ const Sidebar = () => {
     `flex min-h-[56px] items-center ${isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-7 [&>svg]:w-7 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
   const shouldShowText = !isCollapsed || isHovered;
+
+  useEffect(() => {
+    if (location.pathname !== lastPathname) {
+      setLastPathname(location.pathname);
+      if (isMobile && mobileOpen) {
+        onClose();
+      }
+    }
+  }, [isMobile, lastPathname, location.pathname, mobileOpen, onClose]);
 
   useEffect(() => {
     const syncSidebarForViewport = () => {
@@ -375,14 +385,39 @@ const Sidebar = () => {
     return () => clearInterval(interval);
   }, [profile?.id, role, location.pathname]);
 
+  const sidebarWidthClass = isCollapsed && !isHovered ? 'w-20' : 'w-64';
+  const desktopSidebarClass = `${sidebarWidthClass} bg-nani-dark text-white h-screen flex flex-col fixed left-0 top-0 transition-all duration-600 z-30`;
+  const mobileSidebarClass = `w-[88vw] max-w-[320px] bg-nani-dark text-white h-screen flex flex-col fixed left-0 top-0 z-50 transform transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`;
+
   return (
+    <>
+    {isMobile && mobileOpen ? (
+      <button
+        type="button"
+        className="fixed inset-0 z-40 bg-slate-950/50"
+        onClick={onClose}
+        aria-label="Close menu overlay"
+      />
+    ) : null}
     <aside
-      className={`${isCollapsed && !isHovered ? 'w-20' : 'w-64'} bg-nani-dark text-white h-screen flex flex-col fixed left-0 top-0 transition-all duration-600 z-30`}
+      className={isMobile ? mobileSidebarClass : desktopSidebarClass}
       style={{ minHeight: '100vh' }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="p-6 border-b border-white/10 flex-shrink-0">
+        {isMobile ? (
+          <div className="mb-4 flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white"
+              aria-label="Close menu"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        ) : null}
         <div
           className={`flex items-center ${isCollapsed && !isHovered ? 'justify-center' : 'space-x-2'} cursor-pointer hover:opacity-80 transition-opacity`}
           onClick={() => navigate('/app')}
@@ -411,13 +446,15 @@ const Sidebar = () => {
       </div>
 
       {/* Toggle Button */}
-      <button
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute top-20 -right-4 bg-gold-400 text-nani-dark rounded-full p-2 shadow-lg hover:bg-gold-300 transition-colors z-20"
-        title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-      >
-        {isCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-      </button>
+      {!isMobile ? (
+        <button
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          className="absolute top-20 -right-4 bg-gold-400 text-nani-dark rounded-full p-2 shadow-lg hover:bg-gold-300 transition-colors z-20"
+          title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+        >
+          {isCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+        </button>
+      ) : null}
 
       <nav className="flex-1 p-4 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col">
         {role === 'instructor' ? (
@@ -950,6 +987,7 @@ const Sidebar = () => {
         </div>
       </nav>
     </aside>
+    </>
   );
 };
 
