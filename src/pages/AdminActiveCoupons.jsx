@@ -40,6 +40,8 @@ const AdminActiveCoupons = () => {
               <div className="text-slate-700 text-sm">{offer.is_lifetime_free ? 'Lifetime Free' : offer.discount_type === 'percent' ? `${offer.discount_value}% Off` : `Flat ₹${offer.discount_value} Off`}</div>
               <div className="text-xs text-slate-500">Created: {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : '—'}</div>
               <div className="text-xs text-slate-400">Applies To: {offer.applies_to_all ? 'All Users' : 'Specific Users'}</div>
+              <div className="text-xs text-slate-400">Plan Scope: {offer.applicable_plan === 'premium' ? 'Premium Only' : offer.applicable_plan === 'premium_plus' ? 'Premium Plus Only' : 'Premium + Premium Plus'}</div>
+              <div className="text-xs text-slate-400">Visibility: {offer.is_listed === false ? 'Unlisted / Admin Only' : 'Listed Publicly'}</div>
               <button className="bg-red-500 text-white px-4 py-2 rounded font-semibold mt-2 w-max" onClick={async () => {
                 await supabase.from('offers').delete().eq('id', offer.id);
                 setCoupons(coupons.filter(o => o.id !== offer.id));

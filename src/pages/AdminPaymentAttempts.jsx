@@ -139,11 +139,14 @@ const AdminPaymentAttempts = () => {
                       <p><span className="font-semibold text-slate-800">Email:</span> {user.email || '-'}</p>
                       <p><span className="font-semibold text-slate-800">Phone:</span> {user.phone || '-'}</p>
                       <p><span className="font-semibold text-slate-800">Gateway:</span> {attempt.metadata?.payment_method || attempt.gateway}</p>
-                      <p><span className="font-semibold text-slate-800">Amount:</span> Rs {attempt.final_amount ?? attempt.amount ?? 0}</p>
+                      <p><span className="font-semibold text-slate-800">Base Amount:</span> Rs {attempt.base_amount ?? attempt.amount ?? 0}</p>
+                      <p><span className="font-semibold text-slate-800">Coupon Discount:</span> Rs {attempt.discount_amount ?? 0}</p>
+                      <p><span className="font-semibold text-slate-800">Paid Amount:</span> Rs {attempt.final_amount ?? attempt.amount ?? 0}</p>
                       <p><span className="font-semibold text-slate-800">Status:</span> {attempt.metadata?.payment_request_state || attempt.status}</p>
                       <p><span className="font-semibold text-slate-800">Created:</span> {attempt.created_at ? new Date(attempt.created_at).toLocaleString('en-IN') : '-'}</p>
                       <p><span className="font-semibold text-slate-800">Paid At:</span> {attempt.paid_at ? new Date(attempt.paid_at).toLocaleString('en-IN') : '-'}</p>
                       <p><span className="font-semibold text-slate-800">Payment ID:</span> {attempt.id}</p>
+                      <p><span className="font-semibold text-slate-800">Coupon Code:</span> {attempt.coupon_code || attempt.metadata?.coupon_code || '-'}</p>
                       <p><span className="font-semibold text-slate-800">Payment App:</span> {attempt.metadata?.payment_app || '-'}</p>
                       <p><span className="font-semibold text-slate-800">Payment Tag:</span> {attempt.metadata?.payment_tag || '-'}</p>
                       <p><span className="font-semibold text-slate-800">User UPI ID:</span> {attempt.metadata?.user_upi_id || attempt.gateway_ref || '-'}</p>

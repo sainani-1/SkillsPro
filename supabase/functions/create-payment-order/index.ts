@@ -18,7 +18,9 @@ const corsHeaders = {
 type OfferRow = {
   id: string;
   title: string | null;
+  coupon_code?: string | null;
   coupon_name: string | null;
+  applicable_plan?: string | null;
   discount_type: string | null;
   discount_value: number | string | null;
   is_lifetime_free: boolean | null;
@@ -65,7 +67,7 @@ const resolveDiscount = (baseAmount: number, offer: OfferRow | null) => {
     };
   }
 
-  const couponCode = String(offer.title || offer.coupon_name || "").trim() || null;
+  const couponCode = String(offer.coupon_code || offer.title || offer.coupon_name || "").trim() || null;
   if (offer.is_lifetime_free || offer.discount_type === "lifetime_free") {
     return {
       couponCode,
@@ -87,6 +89,16 @@ const resolveDiscount = (baseAmount: number, offer: OfferRow | null) => {
     finalAmount: parseMoney(Math.max(0, baseAmount - discountAmount)),
     isLifetimeFree: false,
   };
+};
+
+const getOfferApplicablePlan = (offer: OfferRow | null) => {
+  const value = String(offer?.applicable_plan || "both").trim();
+  return value === "premium" || value === "premium_plus" ? value : "both";
+};
+
+const isOfferApplicableToPlan = (offer: OfferRow | null, planTier: string) => {
+  const applicablePlan = getOfferApplicablePlan(offer);
+  return applicablePlan === "both" || applicablePlan === planTier;
 };
 
 const createAuthorizedClient = (supabaseUrl: string, anonKey: string, jwt: string) =>
@@ -199,15 +211,15 @@ Deno.serve(async (req: Request) => {
   }
 
   let selectedOffer: OfferRow | null = null;
-  const couponCode = configuredGatewayMode === "skillpro_upi" ? "" : String(payload.coupon_code || "").trim();
-  if (configuredGatewayMode !== "skillpro_upi" && (payload.offer_id || couponCode)) {
+  const couponCode = String(payload.coupon_code || "").trim();
+  if (payload.offer_id || couponCode) {
     let offer: OfferRow | null = null;
     let offerError: Error | null = null;
 
     if (payload.offer_id) {
       const result = await adminClient
         .from("offers")
-        .select("id, title, coupon_name, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
+        .select("id, title, coupon_code, coupon_name, applicable_plan, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
         .eq("id", payload.offer_id)
         .maybeSingle();
       offer = result.data;
@@ -216,8 +228,8 @@ Deno.serve(async (req: Request) => {
       const sanitizedCode = escapeLikeValue(couponCode);
       const result = await adminClient
         .from("offers")
-        .select("id, title, coupon_name, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
-        .or(`title.ilike.${sanitizedCode},coupon_name.ilike.${sanitizedCode}`)
+        .select("id, title, coupon_code, coupon_name, applicable_plan, discount_type, discount_value, is_lifetime_free, applies_to_all, valid_until, status")
+        .or(`coupon_code.ilike.${sanitizedCode},title.ilike.${sanitizedCode},coupon_name.ilike.${sanitizedCode}`)
         .limit(1)
         .maybeSingle();
       offer = result.data;
@@ -231,6 +243,9 @@ Deno.serve(async (req: Request) => {
     const isExpired = Boolean(offer.valid_until && new Date(offer.valid_until) < new Date());
     if (offer.status === "expired" || isExpired) {
       return errorResponse("Selected coupon has expired.", 400);
+    }
+    if (!isOfferApplicableToPlan(offer, selectedPlanTier)) {
+      return errorResponse("This coupon is not valid for the selected plan.", 400);
     }
 
     if (!offer.applies_to_all) {
@@ -260,14 +275,7 @@ Deno.serve(async (req: Request) => {
     selectedOffer = offer;
   }
 
-  const discount = configuredGatewayMode === "skillpro_upi"
-    ? {
-        couponCode: null,
-        discountAmount: 0,
-        finalAmount: parseMoney(baseAmount),
-        isLifetimeFree: false,
-      }
-    : resolveDiscount(baseAmount, selectedOffer);
+  const discount = resolveDiscount(baseAmount, selectedOffer);
   if (!selectedOffer && discount.finalAmount <= 0) {
     return errorResponse("Selected plan amount is invalid. Ask admin to configure a price greater than zero before activating premium.", 400);
   }

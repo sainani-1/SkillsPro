@@ -11,6 +11,8 @@ const AdminSendGift = () => {
   const [couponName, setCouponName] = useState('');
   const [discountType, setDiscountType] = useState('percent');
   const [discountValue, setDiscountValue] = useState('');
+  const [applicablePlan, setApplicablePlan] = useState('both');
+  const [isListed, setIsListed] = useState(true);
   const [isLifetimeFree, setIsLifetimeFree] = useState(false);
   const [validUntil, setValidUntil] = useState('');
   const [showAnimation, setShowAnimation] = useState(false);
@@ -75,11 +77,16 @@ const AdminSendGift = () => {
       const { data: offerData, error: offerError } = await supabase.from('offers').insert([
         {
           title: couponCode,
+          coupon_code: couponCode,
           coupon_name: couponName,
-          description: isLifetimeFree ? 'Lifetime free access' : `${discountType === 'percent' ? discountValue + '% off' : 'Flat ' + discountValue + ' off'}`,
+          description: isLifetimeFree
+            ? `Lifetime free access for ${applicablePlan === 'both' ? 'Premium and Premium Plus' : applicablePlan === 'premium_plus' ? 'Premium Plus' : 'Premium'}`
+            : `${discountType === 'percent' ? discountValue + '% off' : 'Flat ' + discountValue + ' off'} for ${applicablePlan === 'both' ? 'Premium and Premium Plus' : applicablePlan === 'premium_plus' ? 'Premium Plus' : 'Premium'}`,
           discount_type: isLifetimeFree ? 'lifetime_free' : discountType,
           discount_value: isLifetimeFree ? null : discountValue,
           is_lifetime_free: isLifetimeFree,
+          applicable_plan: applicablePlan,
+          is_listed: isListed,
           applies_to_all: recipientType === 'all',
           valid_until: validUntilTimestamp,
           created_by: admin.id
@@ -148,6 +155,21 @@ const AdminSendGift = () => {
         </select>
         <label className="ml-6 font-semibold text-pink-600">Lifetime Free:</label>
         <input type="checkbox" checked={isLifetimeFree} onChange={e => setIsLifetimeFree(e.target.checked)} className="ml-2 accent-pink-500 scale-125" />
+      </div>
+      <div className="mb-6">
+        <label className="font-semibold text-pink-600">Valid For Plan:</label>
+        <select value={applicablePlan} onChange={e => setApplicablePlan(e.target.value)} className="ml-2 border-2 border-pink-300 rounded-lg px-3 py-2 bg-white focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all">
+          <option value="both">Premium + Premium Plus</option>
+          <option value="premium">Premium Only</option>
+          <option value="premium_plus">Premium Plus Only</option>
+        </select>
+      </div>
+      <div className="mb-6 flex items-center">
+        <label className="font-semibold text-pink-600">Show In Offers:</label>
+        <input type="checkbox" checked={isListed} onChange={e => setIsListed(e.target.checked)} className="ml-3 accent-pink-500 scale-125" />
+        <span className="ml-3 text-sm text-slate-500">
+          {isListed ? 'Visible in Discounts & Offers pages' : 'Hidden coupon. Users must type the code manually.'}
+        </span>
       </div>
       {!isLifetimeFree && (
         <div className="mb-6">

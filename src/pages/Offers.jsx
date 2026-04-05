@@ -34,7 +34,9 @@ const Offers = () => {
 
       // Merge and deduplicate offers
       const allOffers = [...assignedOffers, ...(globalOffers || [])];
-      const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex(o => o.id === offer.id) === idx);
+      const uniqueOffers = allOffers.filter((offer, idx, arr) =>
+        offer && offer.is_listed !== false && arr.findIndex(o => o.id === offer.id) === idx
+      );
       setOffers(uniqueOffers);
       setRedeemedOfferIds(new Set((redemptions || []).filter(r => r.status === 'redeemed').map(r => r.offer_id)));
       setLoading(false);

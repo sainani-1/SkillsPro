@@ -81,7 +81,9 @@ const PremiumStatus = () => {
         .eq('user_id', profile.id);
 
       const allOffers = [...assignedOffers, ...(globalOffers || [])];
-      const uniqueOffers = allOffers.filter((offer, idx, arr) => offer && arr.findIndex((item) => item.id === offer.id) === idx);
+      const uniqueOffers = allOffers.filter((offer, idx, arr) =>
+        offer && offer.is_listed !== false && arr.findIndex((item) => item.id === offer.id) === idx
+      );
 
       setGifts(uniqueOffers);
       setRedeemedOfferIds(new Set((redemptions || []).filter((row) => row.status === 'redeemed').map((row) => row.offer_id)));

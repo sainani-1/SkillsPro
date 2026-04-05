@@ -70,7 +70,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: payments, error: paymentsError } = await adminClient
       .from("payments")
-      .select("id, user_id, plan_code, gateway, status, amount, final_amount, currency, failure_reason, gateway_ref, paid_at, valid_until, created_at, updated_at, metadata")
+      .select("id, user_id, plan_code, gateway, status, amount, base_amount, discount_amount, final_amount, coupon_code, currency, failure_reason, gateway_ref, paid_at, valid_until, created_at, updated_at, metadata")
       .order("created_at", { ascending: false })
       .limit(300);
 

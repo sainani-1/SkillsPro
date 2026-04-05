@@ -88,6 +88,31 @@ const getOfferLabel = (offer) => {
   return `₹${offer.discount_value} off`;
 };
 
+const getOfferCode = (offer) =>
+  String(offer?.coupon_code || offer?.title || offer?.coupon_name || '').trim();
+
+const getOfferDisplayName = (offer) =>
+  offer?.coupon_name || offer?.title || offer?.coupon_code || 'Coupon';
+
+const getOfferApplicablePlan = (offer) => {
+  const value = String(offer?.applicable_plan || 'both').trim();
+  return value === 'premium' || value === 'premium_plus' ? value : 'both';
+};
+
+const isOfferApplicableToPlan = (offer, planTier) => {
+  const applicablePlan = getOfferApplicablePlan(offer);
+  return applicablePlan === 'both' || applicablePlan === normalizeCheckoutPlanTier(planTier);
+};
+
+const isOfferListed = (offer) => offer?.is_listed !== false;
+
+const getOfferApplicablePlanLabel = (offer) => {
+  const applicablePlan = getOfferApplicablePlan(offer);
+  if (applicablePlan === 'premium') return 'Premium only';
+  if (applicablePlan === 'premium_plus') return 'Premium Plus only';
+  return 'Premium + Premium Plus';
+};
+
 const isOfferExpired = (offer) =>
   offer?.status === 'expired' || (offer?.valid_until && new Date(offer.valid_until) < new Date());
 const escapeCouponSearchValue = (value) => String(value || '').replace(/[,%]/g, '');
@@ -256,9 +281,7 @@ const Payment = () => {
     [activePlans, selectedPlanTier]
   );
 
-  const selectedOffer = paymentGatewayMode === 'skillpro_upi'
-    ? null
-    : offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
+  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || manualAppliedOffer || null;
   const skillproBaseAmount = selectedPlanTier === 'premium_plus'
     ? (premiumPlusCost || Math.max((premiumCost || 199) + 100, 299))
     : (premiumCost || 199);
@@ -266,6 +289,8 @@ const Payment = () => {
     ? skillproBaseAmount
     : (selectedPlan?.cost || premiumCost || 0);
   const pricing = buildPricing(displayBaseAmount, selectedOffer);
+  const appliedCouponCode = getOfferCode(selectedOffer);
+  const appliedCouponName = getOfferDisplayName(selectedOffer);
   const paymentNote = `${profile?.email || 'user'} paid ${paymentTag}`;
   const directUpiLink = paymentGatewayMode === 'skillpro_upi' && skillproUpiId && pricing.finalAmount > 0
     ? `upi://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}`
@@ -442,7 +467,10 @@ const Payment = () => {
 
         const activeOffers = deduped.filter((offer) => {
           const expired = offer.status === 'expired' || (offer.valid_until && new Date(offer.valid_until) < new Date());
-          return !expired && !redeemedOfferIds.has(offer.id);
+          return !expired
+            && !redeemedOfferIds.has(offer.id)
+            && isOfferApplicableToPlan(offer, selectedPlanTier)
+            && isOfferListed(offer);
         });
 
         setOffers(activeOffers);
@@ -457,7 +485,19 @@ const Payment = () => {
     };
 
     loadOffers();
-  }, [profile?.id, searchParams]);
+  }, [profile?.id, searchParams, selectedPlanTier]);
+
+  useEffect(() => {
+    const requestedOfferId = searchParams.get('offer');
+    if (!requestedOfferId || offers.length === 0) return;
+
+    const requestedOffer = offers.find((offer) => offer.id === requestedOfferId);
+    if (!requestedOffer) return;
+
+    setSelectedOfferId(requestedOffer.id);
+    setManualAppliedOffer(null);
+    setManualCouponCode(getOfferCode(requestedOffer));
+  }, [offers, searchParams]);
 
   const applyManualCoupon = async () => {
     const normalizedCode = manualCouponCode.trim();
@@ -472,7 +512,7 @@ const Payment = () => {
     }
 
     const existingOffer = offers.find((offer) => {
-      const codes = [offer?.title, offer?.coupon_name]
+      const codes = [offer?.coupon_code, offer?.title, offer?.coupon_name]
         .filter(Boolean)
         .map((value) => String(value).trim().toLowerCase());
       return codes.includes(normalizedCode.toLowerCase());
@@ -481,7 +521,7 @@ const Payment = () => {
     if (existingOffer) {
       setSelectedOfferId(existingOffer.id);
       setManualAppliedOffer(null);
-      setManualCouponCode(existingOffer.title || existingOffer.coupon_name || normalizedCode);
+      setManualCouponCode(getOfferCode(existingOffer) || normalizedCode);
       return;
     }
 
@@ -491,13 +531,16 @@ const Payment = () => {
       const { data, error } = await supabase
         .from('offers')
         .select('*')
-        .or(`title.ilike.${safeCode},coupon_name.ilike.${safeCode}`)
+        .or(`coupon_code.ilike.${safeCode},title.ilike.${safeCode},coupon_name.ilike.${safeCode}`)
         .limit(1)
         .maybeSingle();
 
       if (error) throw error;
       if (!data || isOfferExpired(data)) {
         throw new Error('Coupon not found or expired.');
+      }
+      if (!isOfferApplicableToPlan(data, selectedPlanTier)) {
+        throw new Error(`This coupon is only valid for ${getOfferApplicablePlanLabel(data)}.`);
       }
 
       if (!data.applies_to_all) {
@@ -526,11 +569,11 @@ const Payment = () => {
 
       setSelectedOfferId('');
       setManualAppliedOffer(data);
-      setManualCouponCode(data.title || data.coupon_name || normalizedCode);
+      setManualCouponCode(getOfferCode(data) || normalizedCode);
       setAlertModal({
         show: true,
         title: 'Coupon Applied',
-        message: `${data.coupon_name || data.title} has been applied to this payment.`,
+        message: `${getOfferDisplayName(data)} has been applied to this payment.`,
         type: 'success',
       });
     } catch (error) {
@@ -728,10 +771,8 @@ const Payment = () => {
       }
 
       const data = await callEdgeFunction('create-payment-order', accessToken, {
-        offer_id: paymentGatewayMode === 'skillpro_upi' ? null : selectedOffer?.id || null,
-        coupon_code: paymentGatewayMode === 'skillpro_upi'
-          ? null
-          : manualAppliedOffer && !selectedOfferId ? manualCouponCode.trim() || null : null,
+        offer_id: selectedOffer?.id || null,
+        coupon_code: manualAppliedOffer && !selectedOfferId ? manualCouponCode.trim() || null : null,
         plan_tier: selectedPlanTier,
         user_upi_id: null,
         user_upi_name: paymentGatewayMode === 'skillpro_upi' ? userUpiName.trim() : null,
@@ -982,7 +1023,6 @@ const Payment = () => {
         </div>
       </div>
 
-      {paymentGatewayMode !== 'skillpro_upi' && (
       <div className="bg-white rounded-xl p-6 border space-y-4">
         <div className="flex items-center gap-2">
           <Ticket className="text-pink-600" size={20} />
@@ -1049,19 +1089,25 @@ const Payment = () => {
                   onChange={() => {
                     setSelectedOfferId(offer.id);
                     setManualAppliedOffer(null);
-                    setManualCouponCode(offer.title || offer.coupon_name || '');
+                    setManualCouponCode(getOfferCode(offer));
                   }}
                 />
                 <div className="flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-slate-900">{offer.coupon_name || offer.title}</p>
+                    <p className="font-semibold text-slate-900">{getOfferDisplayName(offer)}</p>
                     <span className="rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-pink-700">
                       {getOfferLabel(offer)}
                     </span>
                   </div>
                   <p className="text-sm text-slate-500 mt-1">{offer.description || 'Coupon discount applied at checkout.'}</p>
+                  <p className="mt-2 text-xs font-medium text-slate-500">
+                    Valid for: {getOfferApplicablePlanLabel(offer)}
+                  </p>
+                  <p className="mt-2 inline-flex max-w-full items-center rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 break-all">
+                    Coupon code: {getOfferCode(offer) || 'Unavailable'}
+                  </p>
                   <p className="text-xs text-slate-400 mt-2">
-                    Code: {offer.title} {offer.valid_until ? `• Valid till ${new Date(offer.valid_until).toLocaleDateString('en-IN')}` : ''}
+                    {offer.valid_until ? `Valid till ${new Date(offer.valid_until).toLocaleDateString('en-IN')}` : 'No expiry date'}
                   </p>
                 </div>
               </label>
@@ -1069,7 +1115,6 @@ const Payment = () => {
           </div>
         )}
       </div>
-      )}
 
       <div className="bg-white rounded-xl p-6 border">
         <h3 className="text-lg font-bold mb-4">Payable Summary</h3>
@@ -1078,22 +1123,26 @@ const Payment = () => {
             <span>{selectedPlan?.name || 'Premium'} amount</span>
             <span>₹{roundMoney(displayBaseAmount)}</span>
           </div>
-          {paymentGatewayMode !== 'skillpro_upi' ? (
-            <div className="flex items-center justify-between text-slate-600">
-              <span>Coupon discount</span>
-              <span>- Rs {pricing.discountAmount}</span>
+          <div className="flex items-center justify-between text-slate-600">
+            <span>Coupon discount</span>
+            <span>- Rs {pricing.discountAmount}</span>
+          </div>
+          {selectedOffer ? (
+            <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-pink-900">
+              <p className="font-semibold">Applied coupon: {appliedCouponName}</p>
+              <p className="mt-1 break-all text-xs text-pink-800">Code: {appliedCouponCode || 'Unavailable'}</p>
             </div>
           ) : null}
           <div className="flex items-center justify-between border-t pt-3 text-lg font-bold text-slate-900">
             <span>Final payable amount</span>
             <span>₹{pricing.finalAmount}</span>
           </div>
-          {paymentGatewayMode !== 'skillpro_upi' && pricing.isLifetimeFree && (
+          {pricing.isLifetimeFree && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
-              This coupon gives lifetime premium. Razorpay will be skipped and access will activate immediately.
+              This coupon gives lifetime premium. Online payment will be skipped and access will activate immediately.
             </div>
           )}
-          {paymentGatewayMode !== 'skillpro_upi' && !pricing.isLifetimeFree && pricing.finalAmount <= 0 && (
+          {!pricing.isLifetimeFree && pricing.finalAmount <= 0 && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
               Your coupon covers the full amount. No online payment is required.
             </div>
