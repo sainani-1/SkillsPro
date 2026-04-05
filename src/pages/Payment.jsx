@@ -228,8 +228,6 @@ const Payment = () => {
     label: DEFAULT_URGENCY_LABEL,
   });
   const [paymentGatewayMode, setPaymentGatewayMode] = useState('razorpay');
-  const [skillproUpiId, setSkillproUpiId] = useState('');
-  const [paymentAdminEmail, setPaymentAdminEmail] = useState('');
   const [pricingLoading, setPricingLoading] = useState(true);
   const [offersLoading, setOffersLoading] = useState(true);
   const [offers, setOffers] = useState([]);
@@ -238,7 +236,6 @@ const Payment = () => {
   const [manualAppliedOffer, setManualAppliedOffer] = useState(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Your premium access is now active.');
-  const [userUpiName, setUserUpiName] = useState('');
   const [paymentTag] = useState(() => createPaymentTag());
   const [manualRequestSummary, setManualRequestSummary] = useState(null);
   const [showUpiAppPicker, setShowUpiAppPicker] = useState(false);
@@ -291,10 +288,6 @@ const Payment = () => {
   const pricing = buildPricing(displayBaseAmount, selectedOffer);
   const appliedCouponCode = getOfferCode(selectedOffer);
   const appliedCouponName = getOfferDisplayName(selectedOffer);
-  const paymentNote = `${profile?.email || 'user'} paid ${paymentTag}`;
-  const directUpiLink = paymentGatewayMode === 'skillpro_upi' && skillproUpiId && pricing.finalAmount > 0
-    ? `upi://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}`
-    : '';
   const userAgent = typeof window !== 'undefined' ? window.navigator.userAgent || '' : '';
   const hasTouchPoints = typeof window !== 'undefined' ? Number(window.navigator.maxTouchPoints || 0) > 1 : false;
   const isAndroidDevice = /android/i.test(userAgent);
@@ -324,7 +317,7 @@ const Payment = () => {
         const { data } = await supabase
           .from('settings')
           .select('key, value')
-          .in('key', ['premium_cost', 'premium_plus_cost', 'public_plans', 'payment_urgency_banner', 'payment_gateway_mode', 'skillpro_upi_id', 'payment_admin_email']);
+          .in('key', ['premium_cost', 'premium_plus_cost', 'public_plans', 'payment_urgency_banner', 'payment_gateway_mode']);
 
         const settingsMap = Object.fromEntries((data || []).map((item) => [item.key, item.value]));
         const parsedCost = parseInt(settingsMap.premium_cost, 10);
@@ -334,8 +327,6 @@ const Payment = () => {
         setPremiumCost(fallbackPremiumCost);
         setPremiumPlusCost(fallbackPremiumPlusCost);
         setPaymentGatewayMode(settingsMap.payment_gateway_mode === 'skillpro_upi' ? 'skillpro_upi' : 'razorpay');
-        setSkillproUpiId(settingsMap.skillpro_upi_id || '');
-        setPaymentAdminEmail(settingsMap.payment_admin_email || '');
         const tierCostMap = {
           premium: fallbackPremiumCost,
           premium_plus: fallbackPremiumPlusCost,
@@ -611,6 +602,7 @@ const Payment = () => {
   };
 
   const openDirectUpiApp = async (app) => {
+    const directUpiLink = manualRequestSummary?.upi_link || '';
     if (!directUpiLink) return;
     const paymentId = manualRequestSummary?.payment_id;
     const paymentAppLabel = app?.label || app?.id || 'Other UPI App';
@@ -627,7 +619,7 @@ const Payment = () => {
         });
     }
     if (isAndroidDevice && app?.packageName) {
-      const intentUrl = `intent://pay?pa=${encodeURIComponent(skillproUpiId)}&pn=${encodeURIComponent('SkillPro')}&am=${encodeURIComponent(String(pricing.finalAmount))}&cu=INR&tn=${encodeURIComponent(paymentNote)}#Intent;scheme=upi;package=${app.packageName};end`;
+      const intentUrl = `intent://${directUpiLink.replace(/^upi:\/\//, '')}#Intent;scheme=upi;package=${app.packageName};end`;
       window.location.href = intentUrl;
     } else {
       window.location.href = directUpiLink;
@@ -737,17 +729,6 @@ const Payment = () => {
     try {
       const accessToken = await getFreshAccessToken();
 
-      if (paymentGatewayMode === 'skillpro_upi' && !skillproUpiId.trim()) {
-        setAlertModal({
-          show: true,
-          title: 'Payment Setup Incomplete',
-          message: 'SkillPro UPI is selected, but no admin UPI ID is configured yet. Please ask admin to save the SkillPro UPI ID in Admin Settings.',
-          type: 'warning',
-        });
-        setLoading(false);
-        return;
-      }
-
       if (paymentGatewayMode === 'skillpro_upi' && isDesktopDevice) {
         setAlertModal({
           show: true,
@@ -759,23 +740,10 @@ const Payment = () => {
         return;
       }
 
-      if (paymentGatewayMode === 'skillpro_upi' && !userUpiName.trim()) {
-        setAlertModal({
-          show: true,
-          title: 'UPI Name Required',
-          message: 'Please enter the UPI name used for this payment so admin can verify it.',
-          type: 'warning',
-        });
-        setLoading(false);
-        return;
-      }
-
       const data = await callEdgeFunction('create-payment-order', accessToken, {
         offer_id: selectedOffer?.id || null,
         coupon_code: manualAppliedOffer && !selectedOfferId ? manualCouponCode.trim() || null : null,
         plan_tier: selectedPlanTier,
-        user_upi_id: null,
-        user_upi_name: paymentGatewayMode === 'skillpro_upi' ? userUpiName.trim() : null,
         payment_tag: paymentGatewayMode === 'skillpro_upi' ? paymentTag : null,
       });
 
@@ -798,7 +766,7 @@ const Payment = () => {
           setAlertModal({
             show: true,
             title: 'Request Recorded',
-            message: `Your payment request was recorded successfully. Payment ID: ${data.payment_id}. Tag: ${data.payment_tag || paymentTag}.`,
+            message: `Your payment request was recorded successfully. Payment ID: ${data.payment_id}.`,
             type: 'success',
           });
         }
@@ -1207,14 +1175,9 @@ const Payment = () => {
                   className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">Payment Note</label>
-                <input
-                  type="text"
-                  value={paymentNote}
-                  readOnly
-                  className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
-                />
+              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
+                <p className="font-semibold">Private payment launch</p>
+                <p className="mt-1">Receiver number and other identifiers stay hidden in this panel.</p>
               </div>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
@@ -1227,18 +1190,7 @@ const Payment = () => {
             ) : (
               <div className="space-y-3">
                 <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-900">
-                  Mobile flow opens your UPI app with the exact admin-set amount and note.
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900">UPI Name For Verification</label>
-                  <input
-                    type="text"
-                    value={userUpiName}
-                    onChange={(event) => setUserUpiName(event.target.value)}
-                    placeholder="Enter the UPI account name"
-                    className="w-full rounded-lg border border-emerald-300 bg-white px-4 py-3 text-slate-900"
-                  />
-                  <p className="mt-2 text-xs text-emerald-800">Admin will use this name to verify your payment manually.</p>
+                  Mobile flow opens your UPI app with the exact admin-set amount while keeping receiver details private in this panel.
                 </div>
               </div>
             )}
@@ -1277,12 +1229,11 @@ const Payment = () => {
           <div className="w-full max-w-md rounded-2xl bg-white p-4 sm:p-6 shadow-2xl">
             <h3 className="text-xl font-bold text-slate-900">Choose UPI App</h3>
             <p className="mt-2 text-sm text-slate-600">
-              Amount and note are locked by admin and cannot be edited in this flow.
+              Amount is locked by admin and receiver details stay private in this flow.
             </p>
             <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:p-4 text-sm text-emerald-900">
               <p><span className="font-semibold">Amount:</span> Rs {pricing.finalAmount}</p>
-              <p><span className="font-semibold">UPI ID:</span> {skillproUpiId}</p>
-              <p><span className="font-semibold">Note:</span> {paymentNote}</p>
+              <p>Receiver details are sent privately to the selected UPI app.</p>
             </div>
             <div className="mt-5 space-y-3">
               {UPI_APPS.map((app) => (

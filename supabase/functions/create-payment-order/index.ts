@@ -33,8 +33,6 @@ type CreateOrderPayload = {
   offer_id?: string | null;
   plan_tier?: string | null;
   coupon_code?: string | null;
-  user_upi_id?: string | null;
-  user_upi_name?: string | null;
   payment_tag?: string | null;
 };
 
@@ -174,6 +172,7 @@ Deno.serve(async (req: Request) => {
       "public_plans",
       "payment_gateway_mode",
       "skillpro_upi_id",
+      "payment_admin_phone",
     ]);
 
   const config = Object.fromEntries((configRows || []).map((row) => [row.key, row.value]));
@@ -185,6 +184,8 @@ Deno.serve(async (req: Request) => {
     ? "skillpro_upi"
     : "razorpay";
   const configuredUpiId = String(config.skillpro_upi_id || "").trim();
+  const configuredPaymentPhone = String(config.payment_admin_phone || "").trim();
+  const configuredPaymentAddress = configuredPaymentPhone || configuredUpiId;
 
   const selectedPlanTier = normalizePlanTier(payload.plan_tier);
   let selectedPlanLabel = selectedPlanTier === "premium_plus" ? "Premium Plus" : "Premium";
@@ -279,7 +280,7 @@ Deno.serve(async (req: Request) => {
   if (!selectedOffer && discount.finalAmount <= 0) {
     return errorResponse("Selected plan amount is invalid. Ask admin to configure a price greater than zero before activating premium.", 400);
   }
-  const manualUpiNote = `${String(profile.email || user.email || user.id).trim()} paid`;
+  const manualUpiNote = "SkillPro payment";
   const validUntil = discount.isLifetimeFree
     ? LIFETIME_PREMIUM_DATE
     : addMonthsFrom(profile.premium_until, selectedPlanMonths);
@@ -384,12 +385,10 @@ Deno.serve(async (req: Request) => {
   }
 
   if (configuredGatewayMode === "skillpro_upi") {
-    if (!configuredUpiId) {
-      return errorResponse("SkillPro UPI ID is not configured.", 500);
+    if (!configuredPaymentAddress) {
+      return errorResponse("SkillPro payment destination is not configured.", 500);
     }
 
-    const userUpiId = String(payload.user_upi_id || "").trim() || null;
-    const userUpiName = String(payload.user_upi_name || "").trim() || null;
     const paymentTag = String(payload.payment_tag || "").trim() || null;
     const requestStatus = "created";
     const { data: payment, error: paymentError } = await adminClient
@@ -407,7 +406,7 @@ Deno.serve(async (req: Request) => {
         coupon_offer_id: selectedOffer?.id ?? null,
         coupon_code: discount.couponCode,
         valid_until: validUntil,
-        gateway_ref: userUpiId,
+        gateway_ref: null,
         metadata: {
           plan_label: `${selectedPlanLabel} Access - ${selectedPlanMonths} Months`,
           plan_tier: selectedPlanTier,
@@ -417,10 +416,7 @@ Deno.serve(async (req: Request) => {
           is_lifetime_free: false,
           payment_note: manualUpiNote,
           payment_method: "skillpro_upi",
-          payment_request_state: userUpiId ? "request_sent" : "pending",
-          admin_upi_id: configuredUpiId,
-          user_upi_id: userUpiId,
-          user_upi_name: userUpiName,
+          payment_request_state: "request_sent",
           payment_tag: paymentTag,
           admin_approval_required: true,
         },
@@ -438,18 +434,16 @@ Deno.serve(async (req: Request) => {
       eventType: "request_created",
       planName: selectedPlanLabel,
       amount: discount.finalAmount,
-      paymentMethod: userUpiId ? "skillpro_upi_request" : "skillpro_upi",
+      paymentMethod: configuredPaymentPhone ? "skillpro_upi_number" : "skillpro_upi",
       userEmail: profile.email || user.email || null,
       userName: profile.full_name || null,
       userPhone: profile.phone || null,
-      userUpiId,
-      userUpiName,
       note: paymentTag ? `${manualUpiNote} ${paymentTag}` : manualUpiNote,
       status: payment.status,
     });
 
     const noteWithTag = paymentTag ? `${manualUpiNote} ${paymentTag}` : manualUpiNote;
-    const upiLink = `upi://pay?pa=${encodeURIComponent(configuredUpiId)}&pn=${encodeURIComponent("SkillPro")}&am=${encodeURIComponent(String(discount.finalAmount))}&cu=INR&tn=${encodeURIComponent(noteWithTag)}`;
+    const upiLink = `upi://pay?pa=${encodeURIComponent(configuredPaymentAddress)}&pn=${encodeURIComponent("SkillPro")}&am=${encodeURIComponent(String(discount.finalAmount))}&cu=INR&tn=${encodeURIComponent(noteWithTag)}`;
 
     return jsonResponse({
       mode: "skillpro_upi",
@@ -458,11 +452,7 @@ Deno.serve(async (req: Request) => {
       currency: "INR",
       status: payment.status,
       approval_status: "waiting_admin_approval",
-      upi_id: configuredUpiId,
-      user_upi_id: userUpiId,
-      user_upi_name: userUpiName,
       payment_tag: paymentTag,
-      note: noteWithTag,
       upi_link: upiLink,
       plan_tier: selectedPlanTier,
       valid_until: validUntil,
