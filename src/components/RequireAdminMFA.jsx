@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from './LoadingSpinner';
+import { isAdminPasskeyVerifiedForUser } from '../utils/adminPasskey';
 
 const RequireAdminMFA = ({ children }) => {
   const { profile, loading } = useAuth();
@@ -16,8 +17,9 @@ const RequireAdminMFA = ({ children }) => {
 
   const mfaVerified = sessionStorage.getItem('admin_mfa_verified') === 'true';
   const mfaVerifiedUser = sessionStorage.getItem('admin_mfa_verified_user');
-  if (!mfaVerified || mfaVerifiedUser !== profile?.id) {
-    return <Navigate to="/admin-mfa-verify" replace />;
+  const passkeyVerified = isAdminPasskeyVerifiedForUser(profile?.id);
+  if ((!mfaVerified || mfaVerifiedUser !== profile?.id) && !passkeyVerified) {
+    return <Navigate to="/admin-auth-choice" replace />;
   }
 
   return children;

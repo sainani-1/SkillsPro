@@ -9,6 +9,7 @@ import AuthShell from '../components/AuthShell';
 import { claimSingleSession, takeSingleSessionNotice } from '../utils/singleSession';
 import { attachPendingReferral } from '../utils/referrals';
 import { useAuth } from '../context/AuthContext';
+import { clearAdminVerificationState } from '../utils/adminPasskey';
 
 const Login = () => {
   const { user, loading: authLoading } = useAuth();
@@ -65,9 +66,7 @@ const Login = () => {
 
   useEffect(() => {
     // Always require fresh MFA verification when admin starts a new login flow.
-    sessionStorage.removeItem('admin_mfa_verified');
-    sessionStorage.removeItem('admin_mfa_verified_user');
-    sessionStorage.removeItem('admin_face_verified');
+    clearAdminVerificationState();
 
     const notice = takeSingleSessionNotice();
     if (notice) {
@@ -431,34 +430,14 @@ const Login = () => {
       }
 
       if (userProfile.role === 'admin') {
-        sessionStorage.removeItem('admin_mfa_verified');
-        sessionStorage.removeItem('admin_mfa_verified_user');
-        sessionStorage.removeItem('admin_face_verified');
-        // Check if MFA is enabled for admin
-        const { data: factors, error: mfaError } = await supabase.auth.mfa.listFactors();
-        if (mfaError) {
-          setAlertModal({
-            show: true,
-            title: 'MFA Error',
-            message: 'Could not check MFA status. Please contact support.',
-            type: 'error'
-          });
-          setLoggingIn(false);
-          return;
-        }
-        const hasMFA = factors?.totp && factors.totp.length > 0;
-        if (!hasMFA) {
-          setLoggingIn(false);
-          navigate('/admin-mfa-setup');
-          return;
-        }
+        clearAdminVerificationState();
         setLoggingIn(false);
         setToast({
           show: true,
           message: sessionCheck.message || 'Logged in successfully!',
           type: 'success'
         });
-        navigate('/admin-mfa-verify');
+        navigate('/admin-auth-choice');
         return;
       }
 

@@ -13,6 +13,7 @@ import { clearDailyLoginState, writeDailyLoginState } from '../utils/dailySessio
 import { getPremiumPlanType, hasPremiumAccess } from '../utils/premium';
 import { fetchUserPremiumPlanType } from '../utils/premiumPlanTypes';
 import { clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
+import { clearAdminVerificationState } from '../utils/adminPasskey';
 
 const AuthContext = createContext();
 
@@ -394,12 +395,10 @@ export const AuthProvider = ({ children }) => {
     clearStoredSessionKey(currentUserId);
     clearDailyLoginState();
     try {
-      sessionStorage.removeItem('admin_mfa_verified');
-      sessionStorage.removeItem('admin_mfa_verified_user');
+      clearAdminVerificationState();
       sessionStorage.removeItem('admin_sensitive_mfa_verified_at');
       sessionStorage.removeItem('admin_sensitive_mfa_verified_user');
       sessionStorage.removeItem('admin_sensitive_mfa_verified_target');
-      sessionStorage.removeItem('admin_face_verified');
     } catch (error) {
       // Ignore storage cleanup failures.
     }

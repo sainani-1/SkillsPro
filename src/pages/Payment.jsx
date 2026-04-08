@@ -763,12 +763,6 @@ const Payment = () => {
         resetAttemptState();
         if (!isDesktopDevice) {
           setShowUpiAppPicker(true);
-          setAlertModal({
-            show: true,
-            title: 'Request Recorded',
-            message: `Your payment request was recorded successfully. Payment ID: ${data.payment_id}.`,
-            type: 'success',
-          });
         }
         if (isDesktopDevice) {
           setAlertModal({

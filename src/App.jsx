@@ -14,6 +14,7 @@ import RequireConfiguredSensitiveAdminMFA from './components/RequireConfiguredSe
 import { supabase } from './supabaseClient';
 import AdminMFASetup from "./pages/AdminMFASetup";
 import AdminMFAVerify from "./pages/AdminMFAVerify";
+import AdminAuthChoice from "./pages/AdminAuthChoice";
 // Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -303,6 +304,7 @@ function App() {
         <Route path="/reset-password-confirm" element={<ResetPassword />} />
         <Route path="/register-admin" element={<RegisterAdmin />} />
         <Route path="/register-teacher" element={<RegisterTeacher />} />
+        <Route path="/admin-auth-choice" element={<AdminAuthChoice />} />
         <Route path="/verify/:id" element={<VerifyCertificate />} />
         <Route path="/verify" element={<VerifyCertificate />} />
         <Route path="/certificate-preview/:id" element={<CertificatePreview />} />
