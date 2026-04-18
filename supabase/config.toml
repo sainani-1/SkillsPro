@@ -1,2 +1,5 @@
 [functions.username-registry]
 verify_jwt = false
+
+[functions.live-exam-feed]
+verify_jwt = false

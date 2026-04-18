@@ -208,6 +208,30 @@ async function loadOptionalQuery(promise, fallbackData = [], timeoutMs = 10000) 
   }
 }
 
+async function loadStaffLiveExamFeed() {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) {
+    throw new Error('Live exam staff feed needs a logged-in staff session. Please sign in again.');
+  }
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/live-exam-feed`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({}),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `Live exam staff feed failed with status ${response.status}.`);
+  }
+  return payload || null;
+}
+
 export default function LiveExamProctoring({ forcedPanel = '' }) {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -269,12 +293,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const popupResolverRef = useRef(null);
   const allInOneAutoOpenedRef = useRef(false);
 
-  const role = profile?.role || 'student';
+  const role = String(profile?.role || 'student').toLowerCase();
   const isAdmin = role === 'admin';
   const isTeacher = role === 'teacher';
   const isInstructor = role === 'instructor';
   const isStudent = role === 'student';
-  const requestedPanel = forcedPanel || searchParams.get('panel') || 'overview';
+  const rawRequestedPanel = forcedPanel || searchParams.get('panel') || 'overview';
+  const requestedPanel = rawRequestedPanel === 'overview' && (isTeacher || isInstructor) ? 'all-in-one' : rawRequestedPanel;
   const requestedCourseId = searchParams.get('courseId') || '';
   const requestedSlotId = searchParams.get('slotId') || '';
   const panelLabelMap = {
@@ -758,7 +783,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     return sortedSessions.filter((session) => {
       const status = String(session.status || '').toLowerCase();
       const slot = slots.find((row) => String(row.id) === String(session.slot_id));
-      if (!slot || slotHasEnded(slot)) return false;
+      if (!slot) {
+        return ['active', 'paused', 'scheduled'].includes(status);
+      }
+      if (slotHasEnded(slot) && status !== 'active') return false;
       if (!['active', 'paused', 'scheduled'].includes(status)) return false;
       const studentKey = String(session.student_id || '');
       if (seenStudentIds.has(studentKey)) return false;
@@ -767,11 +795,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     });
   }, [sessions, slots]);
   const allInOneSessions = useMemo(
-    () => globalMonitorableSessions.filter((session) => {
-      const status = String(session.status || '').toLowerCase();
-      return status === 'active' && sessionIsCurrentlyLiveForSlot(session, slots.find((row) => String(row.id) === String(session.slot_id)));
-    }),
-    [globalMonitorableSessions, slots]
+    () => globalMonitorableSessions,
+    [globalMonitorableSessions]
   );
   const activeMonitoringPool = isAllInOnePanel ? allInOneSessions : monitorableSessions;
   const selectedMonitoringIndex = useMemo(
@@ -975,6 +1000,57 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const shouldIncludeCancelledSlots = isAdmin && isCancellationsPanel;
       const shouldLoadAdminDirectory = isAdmin && (showFullOverview || isSlotsPanel);
 
+      if (isTeacher || isInstructor) {
+        let staffFeed = null;
+        try {
+          staffFeed = await loadStaffLiveExamFeed();
+        } catch (feedError) {
+          setError(feedError.message || 'Live exam staff feed failed. Deploy the live-exam-feed edge function and refresh.');
+        }
+        if (activeLoadIdRef.current !== loadId) return;
+
+        const feedSlots = staffFeed?.slots || [];
+        const feedBookings = staffFeed?.bookings || [];
+        const feedSessions = staffFeed?.sessions || [];
+        const feedViolations = staffFeed?.violations || [];
+        const feedMessages = staffFeed?.messages || [];
+        const feedInstructors = staffFeed?.instructors || [];
+        const feedOverrides = staffFeed?.overrides || [];
+        const feedFacultyAttendance = staffFeed?.facultyAttendance || [];
+        const feedExams = staffFeed?.exams || [];
+        const feedCourses = staffFeed?.courses || [];
+        const feedProfiles = staffFeed?.profiles || [];
+
+        const examMap = {};
+        feedExams.forEach((exam) => {
+          examMap[exam.id] = exam;
+        });
+        const courseMap = {};
+        feedCourses.forEach((course) => {
+          courseMap[course.id] = course;
+        });
+        const profileMap = {};
+        feedProfiles.forEach((row) => {
+          profileMap[row.id] = row;
+        });
+
+        setSlots(feedSlots);
+        setBookings(feedBookings);
+        setSessions(feedSessions);
+        setViolations(feedViolations);
+        setMessages(feedMessages);
+        setSlotInstructors(feedInstructors);
+        setSlotOverrides(feedOverrides);
+        setFacultyAttendance(feedFacultyAttendance);
+        setExamsById(examMap);
+        setCoursesById(courseMap);
+        setProfilesById(profileMap);
+        setRetakeOverrides([]);
+        setPassedSubmissions([]);
+        setLatestSubmissions([]);
+        return;
+      }
+
       if (isTeacher) {
         const { data: assignedStudents, error: assignedStudentsError } = await withClientTimeout(
           supabase
@@ -1034,25 +1110,16 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         .select('*')
         .order('starts_at', { ascending: true });
 
-      if (isTeacher || isInstructor) {
-        if (visibleSlotIds.length === 0) {
-          slotRows = [];
-        } else {
-          slotQuery = slotQuery.in('id', visibleSlotIds);
-        }
-      } else if (isStudent) {
+      if (isStudent) {
         const cutoff = new Date(Date.now() + BOOKING_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
         const historyDays = Math.max(1, Number(settingsMap.live_exam_rebooking_wait_days || 7) || 0) + 1;
         const recentPast = new Date(Date.now() - historyDays * 24 * 60 * 60 * 1000).toISOString();
         slotQuery = slotQuery.neq('status', 'cancelled').gte('ends_at', recentPast).lte('starts_at', cutoff);
       }
 
-      const shouldFetchSlots = !(isTeacher || isInstructor) || visibleSlotIds.length > 0;
-      if (shouldFetchSlots) {
-        const { data, error: slotError } = await withClientTimeout(slotQuery);
-        if (slotError) throw slotError;
-        slotRows = data || [];
-      }
+      const { data, error: slotError } = await withClientTimeout(slotQuery);
+      if (slotError) throw slotError;
+      slotRows = data || [];
       if (!shouldIncludeCancelledSlots) {
         slotRows = slotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
       }
@@ -1121,19 +1188,44 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           : Promise.resolve({ data: [], error: null }),
       ]);
 
-      const bookingRows = bookingResp.data || [];
-      const sessionRows = sessionResp.data || [];
-      const violationRows = violationResp.data || [];
-      const messageRows = messageResp.data || [];
-      const instructorRows = instructorResp.data || [];
-      const overrideRows = overrideResp.data || [];
-      const facultyAttendanceRows = facultyAttendanceResp.data || [];
-      const examRows = examResp.data || [];
-      const courseRows = courseResp.data || [];
+      let bookingRows = bookingResp.data || [];
+      let sessionRows = sessionResp.data || [];
+      let violationRows = violationResp.data || [];
+      let messageRows = messageResp.data || [];
+      let instructorRows = instructorResp.data || [];
+      let overrideRows = overrideResp.data || [];
+      let facultyAttendanceRows = facultyAttendanceResp.data || [];
+      let examRows = examResp.data || [];
+      let courseRows = courseResp.data || [];
       const staffRows = staffResp.data || [];
       const retakeOverrideRows = retakeOverrideResp.data || [];
       const passedSubmissionRows = passedSubmissionResp.data || [];
       const latestSubmissionRows = latestSubmissionResp.data || [];
+      let feedProfileRows = [];
+
+      if (isTeacher || isInstructor) {
+        const staffFeed = await loadStaffLiveExamFeed();
+        if (staffFeed?.sessions?.length) {
+          const mergeById = (currentRows, feedRows) => {
+            const map = new Map();
+            [...currentRows, ...(feedRows || [])].forEach((row) => {
+              if (row?.id) map.set(String(row.id), row);
+            });
+            return Array.from(map.values());
+          };
+          slotRows = mergeById(slotRows, staffFeed.slots || []);
+          bookingRows = mergeById(bookingRows, staffFeed.bookings || []);
+          sessionRows = mergeById(sessionRows, staffFeed.sessions || []);
+          violationRows = mergeById(violationRows, staffFeed.violations || []);
+          messageRows = mergeById(messageRows, staffFeed.messages || []);
+          instructorRows = mergeById(instructorRows, staffFeed.instructors || []);
+          overrideRows = mergeById(overrideRows, staffFeed.overrides || []);
+          facultyAttendanceRows = mergeById(facultyAttendanceRows, staffFeed.facultyAttendance || []);
+          examRows = mergeById(examRows, staffFeed.exams || []);
+          courseRows = mergeById(courseRows, staffFeed.courses || []);
+          feedProfileRows = staffFeed.profiles || [];
+        }
+      }
 
       const profileIds = new Set();
       slotRows.forEach((slot) => {
@@ -1188,6 +1280,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       (profileResp.data || []).forEach((row) => {
         profileMap[row.id] = row;
       });
+      feedProfileRows.forEach((row) => {
+        profileMap[row.id] = row;
+      });
 
       let finalSlotRows = slotRows;
       const teacherStudentIds = isTeacher
@@ -1195,6 +1290,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         : null;
       const teacherOwnedSlotIdSet = isTeacher
         ? new Set(teacherOwnedSlotIds.map((slotId) => String(slotId)))
+        : null;
+      const instructorSlotIdSet = isInstructor
+        ? new Set(visibleSlotIds.map((slotId) => String(slotId)))
         : null;
       if (isTeacher) {
         const teacherSlotIds = new Set(teacherOwnedSlotIds);
@@ -1210,27 +1308,55 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         });
         finalSlotRows = slotRows.filter((slot) => teacherSlotIds.has(slot.id));
       }
+      if (isInstructor) {
+        finalSlotRows = slotRows.filter((slot) => instructorSlotIdSet.has(String(slot.id)));
+      }
       if (!shouldIncludeCancelledSlots) {
         finalSlotRows = finalSlotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
       }
 
-      const finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
+      let finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
       const roleAllowsStudent = (studentId, slotId = '') => (
         !teacherStudentIds ||
         teacherStudentIds.has(String(studentId || '')) ||
         teacherOwnedSlotIdSet.has(String(slotId || ''))
       );
-      const finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
-      const finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
-      const finalViolations = violationRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
-      const finalMessages = messageRows.filter((row) => {
+      let finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
+      let finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
+      let finalViolations = violationRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id, row.slot_id));
+      let finalMessages = messageRows.filter((row) => {
         if (!finalSlotIds.has(row.slot_id)) return false;
         if (!teacherStudentIds) return true;
         return roleAllowsStudent(row.sender_id, row.slot_id) || roleAllowsStudent(row.recipient_id, row.slot_id);
       });
-      const finalInstructorRows = instructorRows.filter((row) => finalSlotIds.has(row.slot_id));
-      const finalOverrideRows = overrideRows.filter((row) => finalSlotIds.has(row.slot_id));
-      const finalFacultyAttendanceRows = facultyAttendanceRows.filter((row) => finalSlotIds.has(row.slot_id));
+      let finalInstructorRows = instructorRows.filter((row) => finalSlotIds.has(row.slot_id));
+      let finalOverrideRows = overrideRows.filter((row) => finalSlotIds.has(row.slot_id));
+      let finalFacultyAttendanceRows = facultyAttendanceRows.filter((row) => finalSlotIds.has(row.slot_id));
+
+      const hasScopedLiveSession = finalSessions.some((session) => {
+        const slot = finalSlotRows.find((row) => String(row.id) === String(session.slot_id));
+        const status = String(session.status || '').toLowerCase();
+        return ['active', 'paused', 'scheduled'].includes(status) && slot && (status === 'active' || !slotHasEnded(slot));
+      });
+      const hasAnyLiveSession = sessionRows.some((session) => {
+        const slot = slotRows.find((row) => String(row.id) === String(session.slot_id));
+        const status = String(session.status || '').toLowerCase();
+        return ['active', 'paused', 'scheduled'].includes(status) && slot && (status === 'active' || !slotHasEnded(slot));
+      });
+      if ((isTeacher || isInstructor) && !hasScopedLiveSession && hasAnyLiveSession) {
+        finalSlotRows = slotRows;
+        if (!shouldIncludeCancelledSlots) {
+          finalSlotRows = finalSlotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
+        }
+        finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
+        finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalViolations = violationRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalMessages = messageRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalInstructorRows = instructorRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalOverrideRows = overrideRows.filter((row) => finalSlotIds.has(row.slot_id));
+        finalFacultyAttendanceRows = facultyAttendanceRows.filter((row) => finalSlotIds.has(row.slot_id));
+      }
 
       setSlots(finalSlotRows);
       setBookings(finalBookings);
@@ -3063,8 +3189,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">{isMonitoringPanel ? 'All In One Launcher' : isInstructor ? 'Students Writing Now' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
-                <p className="mt-1 text-xs text-slate-500">{isMonitoringPanel ? 'Open one fullscreen live monitor and move across all active students with left and right navigation.' : isInstructor ? 'Search students or exam names. Click a student to open strict monitoring for that live session.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
+                <h2 className="text-lg font-semibold text-slate-900">{isAllInOnePanel || isMonitoringPanel ? 'All In One Launcher' : isInstructor ? 'Students Writing Now' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
+                <p className="mt-1 text-xs text-slate-500">{isAllInOnePanel || isMonitoringPanel ? 'Open one fullscreen live monitor and move across all active students with left and right navigation.' : isInstructor ? 'Search students or exam names. Click a student to open strict monitoring for that live session.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
               </div>
               {isAdmin && !isAllInOnePanel ? (
                 <button

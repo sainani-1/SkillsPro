@@ -64,7 +64,8 @@ Deno.serve(async (req: Request) => {
       .eq("id", requesterId)
       .maybeSingle();
 
-    if (!callerProfile?.role) {
+    const callerRole = String(callerProfile?.role || "").toLowerCase();
+    if (!callerRole) {
       return new Response("Profile not found.", { status: 403, headers: corsHeaders });
     }
 
@@ -111,9 +112,9 @@ Deno.serve(async (req: Request) => {
 
       const isParticipant = Boolean(participantRow?.session_id);
       const allowed =
-        callerProfile.role === "admin" ||
+        callerRole === "admin" ||
         isTeacherOwner ||
-        (callerProfile.role === "student" && isParticipant);
+        (callerRole === "student" && isParticipant);
 
       if (!allowed) {
         return Response.json(
@@ -126,14 +127,14 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (callerProfile.role === "student" && bannedUserIds.includes(requesterId)) {
+      if (callerRole === "student" && bannedUserIds.includes(requesterId)) {
         return Response.json(
           { error: "You are restricted from rejoining this class." },
           { status: 403, headers: corsHeaders },
         );
       }
 
-      if (callerProfile.role === "student" && roomLocked) {
+      if (callerRole === "student" && roomLocked) {
         return Response.json(
           { error: "This class is locked. New student joins are disabled right now." },
           { status: 403, headers: corsHeaders },
@@ -141,7 +142,7 @@ Deno.serve(async (req: Request) => {
       }
 
       if (breakoutActive) {
-        if (callerProfile.role === "student") {
+        if (callerRole === "student") {
           if (!assignedBreakout?.id) {
             return Response.json(
               { error: "Breakout rooms are active. You have not been assigned to a breakout room yet." },
@@ -156,8 +157,8 @@ Deno.serve(async (req: Request) => {
       } else {
         roomName = roomNameForClassSession(sessionId);
       }
-      identity = `${callerProfile.role}:${requesterId}:class:${sessionId}`;
-      canPublish = callerProfile.role === "admin" || isTeacherOwner || callerProfile.role === "student";
+      identity = `${callerRole}:${requesterId}:class:${sessionId}`;
+      canPublish = callerRole === "admin" || isTeacherOwner || callerRole === "student";
     } else {
       const { data: sessionRow, error: sessionError } = await adminClient
         .from("exam_live_sessions")
@@ -172,9 +173,11 @@ Deno.serve(async (req: Request) => {
       let allowed = false;
       if (mode === "student") {
         allowed = requesterId === sessionRow.student_id;
-      } else if (callerProfile.role === "admin") {
+      } else if (callerRole === "admin") {
         allowed = true;
-      } else if (callerProfile.role === "teacher") {
+      } else if (["teacher", "instructor"].includes(callerRole)) {
+        allowed = true;
+      } else if (callerRole === "teacher") {
         const { data: slotRow } = await adminClient
           .from("exam_live_slots")
           .select("teacher_id")
@@ -191,7 +194,7 @@ Deno.serve(async (req: Request) => {
             .maybeSingle();
           allowed = bookedStudent?.assigned_teacher_id === requesterId;
         }
-      } else if (callerProfile.role === "instructor") {
+      } else if (callerRole === "instructor") {
         const { data: instructorRow } = await adminClient
           .from("exam_slot_instructors")
           .select("id")
@@ -207,7 +210,7 @@ Deno.serve(async (req: Request) => {
             error: "Not allowed for this live exam session.",
             sessionId,
             mode,
-            callerRole: callerProfile.role,
+            callerRole,
             slotId: sessionRow.slot_id,
           },
           { status: 403, headers: corsHeaders },
@@ -218,14 +221,14 @@ Deno.serve(async (req: Request) => {
       identity =
         mode === "student"
           ? `student:${sessionRow.student_id}:session:${sessionId}`
-          : `${callerProfile.role}:${requesterId}:watch:${sessionId}${viewerInstanceId ? `:${viewerInstanceId}` : ""}`;
-      canPublish = mode === "student" || ["admin", "teacher", "instructor"].includes(String(callerProfile.role));
+          : `${callerRole}:${requesterId}:watch:${sessionId}${viewerInstanceId ? `:${viewerInstanceId}` : ""}`;
+      canPublish = mode === "student" || ["admin", "teacher", "instructor"].includes(callerRole);
     }
 
     const participantDisplayName =
       String(callerProfile.full_name || "").trim() ||
       String(callerProfile.email || "").trim() ||
-      `${callerProfile.role} user`;
+      `${callerRole} user`;
 
     const token = new AccessToken(livekitApiKey, livekitApiSecret, {
       identity,
@@ -233,19 +236,12 @@ Deno.serve(async (req: Request) => {
       name: participantDisplayName,
     });
 
-    const publishSources = canPublish
-      ? mode === "student"
-        ? ["camera", "microphone", "screen_share", "screen_share_audio"]
-        : ["microphone"]
-      : undefined;
-
     token.addGrant({
       room: roomName,
       roomJoin: true,
       canPublish,
       canSubscribe: true,
       canPublishData: canPublish,
-      canPublishSources: publishSources,
     });
 
     return Response.json(
