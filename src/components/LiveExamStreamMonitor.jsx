@@ -231,6 +231,7 @@ export default function LiveExamStreamMonitor({
   const [supportTalkActive, setSupportTalkActive] = useState(false);
   const [supportTalkBusy, setSupportTalkBusy] = useState(false);
   const [supportTalkError, setSupportTalkError] = useState('');
+  const [roomReconnectNonce, setRoomReconnectNonce] = useState(0);
   const [debugState, setDebugState] = useState(createDefaultDebugState());
   const sharedEntryRef = useRef(null);
   const supportMicTrackRef = useRef(null);
@@ -246,7 +247,7 @@ export default function LiveExamStreamMonitor({
   const sessionStatus = String(resolvedSession?.status || '').toLowerCase();
   const hasStartedSession =
     Boolean(resolvedSession?.started_at) || ['active', 'paused'].includes(sessionStatus);
-  const connectionKey = `${viewerId || ''}:${resolvedSession?.id || ''}`;
+  const connectionKey = `${viewerId || ''}:${resolvedSession?.id || ''}:${roomReconnectNonce}`;
   const canUseSupportTalk = ['admin', 'teacher', 'instructor'].includes(String(viewerRole || '').toLowerCase());
 
   const stopSupportTalk = async () => {
@@ -288,7 +289,14 @@ export default function LiveExamStreamMonitor({
       supportMicTrackRef.current = localTrack;
       setSupportTalkActive(true);
     } catch (talkError) {
-      setSupportTalkError(talkError.message || 'Unable to start support voice.');
+      const message = talkError.message || 'Unable to start support voice.';
+      if (String(message).toLowerCase().includes('insufficient permissions')) {
+        disconnectSharedRoomNow(connectionKey, 'Refreshing voice permission. Try Talk To Student again.');
+        setRoomReconnectNonce((value) => value + 1);
+        setSupportTalkError('Voice permission was refreshed. Click Talk To Student again.');
+      } else {
+        setSupportTalkError(message);
+      }
       await stopSupportTalk();
     } finally {
       setSupportTalkBusy(false);

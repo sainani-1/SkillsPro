@@ -233,12 +233,19 @@ Deno.serve(async (req: Request) => {
       name: participantDisplayName,
     });
 
+    const publishSources = canPublish
+      ? mode === "student"
+        ? ["camera", "microphone", "screen_share", "screen_share_audio"]
+        : ["microphone"]
+      : undefined;
+
     token.addGrant({
       room: roomName,
       roomJoin: true,
       canPublish,
       canSubscribe: true,
       canPublishData: canPublish,
+      canPublishSources: publishSources,
     });
 
     return Response.json(
