@@ -41,7 +41,7 @@ const formatFallbackCertificateId = (submission) => {
 
 const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
-const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
+const FOUNDER_SIGNATURE_URL = '/nani-signature-cropped.png';
 
 const isPermissionError = (error) => {
   const message = String(error?.message || '').toLowerCase();
@@ -143,14 +143,14 @@ const VerifyCertificate = () => {
       console.warn('Failed to load certificate logo:', err);
     }
 
-    const footerCenterX = 1025;
+    const footerCenterX = 960;
 
     try {
       const signatureImg = new Image();
       signatureImg.crossOrigin = 'anonymous';
       await new Promise((resolve) => {
         signatureImg.onload = () => {
-          ctx.drawImage(signatureImg, footerCenterX - 75, 692, 150, 72);
+          ctx.drawImage(signatureImg, footerCenterX - 58, 666, 116, 91);
           resolve();
         };
         signatureImg.onerror = () => resolve();
@@ -222,9 +222,15 @@ const VerifyCertificate = () => {
     ctx.fillText(`Certificate ID: ${formattedId}`, 70, 790);
 
     ctx.textAlign = 'center';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(footerCenterX - 78, 760);
+    ctx.lineTo(footerCenterX + 78, 760);
+    ctx.stroke();
     ctx.font = '14px Arial';
     ctx.fillStyle = '#1e293b';
-    ctx.fillText('Founder, SkillPro', footerCenterX, 792);
+    ctx.fillText('Founder, SkillPro', footerCenterX, 790);
     ctx.font = '13px Arial';
     ctx.fillText('Issued by SkillPro', footerCenterX, 818);
 

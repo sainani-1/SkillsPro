@@ -23,7 +23,7 @@ import { getCertificateDisplayName, hasApprovedIdentity } from '../utils/identit
  */
 
 let jsPdfLoader;
-const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
+const FOUNDER_SIGNATURE_URL = '/nani-signature-cropped.png';
 
 /**
  * Dynamically loads jsPDF library from local dependency
@@ -228,7 +228,7 @@ const MyCertificates = () => {
     // Loads founder signature from public folder
     // Uses Promise wrapper to ensure signature loads before canvas is complete
     // If signature fails to load, falls back to text signature
-    const footerCenterX = 1025;
+    const footerCenterX = 960;
 
     try {
       const signatureUrl = FOUNDER_SIGNATURE_URL;
@@ -236,7 +236,7 @@ const MyCertificates = () => {
       signatureImg.crossOrigin = 'anonymous';
       await new Promise((resolve) => {
         signatureImg.onload = () => {
-          ctx.drawImage(signatureImg, footerCenterX - 75, 692, 150, 72);
+          ctx.drawImage(signatureImg, footerCenterX - 58, 666, 116, 91);
           resolve();
         };
         signatureImg.onerror = () => resolve(); // Continue without signature if image fails
@@ -340,9 +340,15 @@ const MyCertificates = () => {
     // ===== SIGNATURE SECTION (BOTTOM RIGHT) =====
     // Founder footer block
     ctx.textAlign = 'center';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(footerCenterX - 78, 760);
+    ctx.lineTo(footerCenterX + 78, 760);
+    ctx.stroke();
     ctx.font = '14px Arial';
     ctx.fillStyle = '#1e293b';
-    ctx.fillText('Founder, SkillPro', footerCenterX, 792);
+    ctx.fillText('Founder, SkillPro', footerCenterX, 790);
     ctx.font = '13px Arial';
     ctx.fillText('Issued by SkillPro', footerCenterX, 818);
 

@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { getCertificateDisplayName } from '../utils/identityVerification';
 const LOGO_URL = import.meta.env.VITE_CERTIFICATE_LOGO || '/skillpro-logo.png';
-const FOUNDER_SIGNATURE_URL = '/nani-signature.png';
+const FOUNDER_SIGNATURE_URL = '/nani-signature-cropped.png';
 
 const generateDeterministicCode = (seed) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -33,7 +33,7 @@ const resolveCourseTitle = (cert) =>
   cert?.generated?.course_name || cert?.generated?.award_name || cert?.course?.title || 'General Achievement';
 
 const buildCertificateDataUrl = async (cert, formattedId) => {
-  const footerCenterX = 1025;
+  const footerCenterX = 960;
   const canvas = document.createElement('canvas');
   canvas.width = 2400;
   canvas.height = 1800;
@@ -142,7 +142,7 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
     signatureImg.crossOrigin = 'anonymous';
     await new Promise((resolve) => {
       signatureImg.onload = () => {
-        ctx.drawImage(signatureImg, footerCenterX - 75, 692, 150, 72);
+        ctx.drawImage(signatureImg, footerCenterX - 58, 666, 116, 91);
         resolve();
       };
       signatureImg.onerror = () => resolve();
@@ -153,9 +153,15 @@ const buildCertificateDataUrl = async (cert, formattedId) => {
   }
 
   ctx.textAlign = 'center';
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(footerCenterX - 78, 760);
+  ctx.lineTo(footerCenterX + 78, 760);
+  ctx.stroke();
   ctx.font = '14px Arial';
   ctx.fillStyle = '#1e293b';
-  ctx.fillText('Founder, SkillPro', footerCenterX, 792);
+  ctx.fillText('Founder, SkillPro', footerCenterX, 790);
   ctx.font = '13px Arial';
   ctx.fillText('Issued by SkillPro', footerCenterX, 818);
 
