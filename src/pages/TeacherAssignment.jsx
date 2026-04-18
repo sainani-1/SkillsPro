@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Users, Search, UserPlus } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { TEACHING_ROLES } from '../utils/teachingRoles';
 
 const TeacherAssignment = () => {
   const [students, setStudents] = useState([]);
@@ -52,8 +53,8 @@ const TeacherAssignment = () => {
 
       const { data: tchs, error: tchError } = await supabase
         .from('profiles')
-        .select('id, full_name, email')
-        .eq('role', 'teacher')
+        .select('id, full_name, email, role')
+        .in('role', TEACHING_ROLES)
         .order('full_name');
       
       if (tchError) {
@@ -108,7 +109,7 @@ const TeacherAssignment = () => {
       title: 'New Student Assigned',
       content: `${selectedStudent.full_name} has been assigned to you.`,
       type: 'info',
-      target_role: 'teacher',
+      target_role: 'all',
       target_user_id: selectedTeacher,
       admin_id: user?.id || null,
     });

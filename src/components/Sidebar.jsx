@@ -777,6 +777,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
                 </span>
               )}
             </NavLink>
+            <NavLink to="/app/admin/usernames" className={navItemClass} title="Usernames">
+              <User size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Usernames</span>}
+            </NavLink>
             <NavLink to="/app/admin/certificate-blocks" className={navItemClass} title="Certificate Blocks">
               <Award size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Certificate Blocks</span>}

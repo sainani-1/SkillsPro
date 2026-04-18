@@ -14,6 +14,7 @@ import { getPremiumPlanType, hasPremiumAccess } from '../utils/premium';
 import { fetchUserPremiumPlanType } from '../utils/premiumPlanTypes';
 import { clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
 import { clearAdminVerificationState } from '../utils/adminPasskey';
+import { ensureUsernameForUser } from '../utils/usernames';
 
 const AuthContext = createContext();
 
@@ -323,10 +324,11 @@ export const AuthProvider = ({ children }) => {
       if (error) throw error;
 
       const premiumPlanType = await fetchUserPremiumPlanType(userId);
-      const hydratedProfile = {
+      const baseProfile = {
         ...data,
         premium_plan_type: premiumPlanType,
       };
+      const hydratedProfile = await ensureUsernameForUser(baseProfile);
 
       if (
         hydratedProfile.role === 'student' &&

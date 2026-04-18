@@ -117,6 +117,7 @@ import StudentIdVerification from './pages/StudentIdVerification';
 import AdminIdVerifications from './pages/AdminIdVerifications';
 import AdminCertificateNameRequests from './pages/AdminCertificateNameRequests';
 import VerifierDashboard from './pages/VerifierDashboard';
+import AdminUsernames from './pages/AdminUsernames';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -381,6 +382,8 @@ function App() {
           <Route path="admin/users" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           <Route path="admin/leaves" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           <Route path="admin/user-management" element={<AdminRoute><UserManagementPage /></AdminRoute>} />
+          <Route path="admin/username" element={<AdminRoute><AdminUsernames /></AdminRoute>} />
+          <Route path="admin/usernames" element={<AdminRoute><AdminUsernames /></AdminRoute>} />
           <Route path="admin/user-ids" element={<AdminRoute><AdminUserIds /></AdminRoute>} />
           <Route path="admin/teacher-progress" element={<AdminRoute><TeacherProgress /></AdminRoute>} />
           <Route path="admin/courses" element={<AdminRoute><AdminCourses /></AdminRoute>} />

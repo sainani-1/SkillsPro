@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectionState, Room, RoomEvent, Track } from 'livekit-client';
+import { ConnectionState, LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client';
 import { getLiveKitTokenForSession } from '../lib/livekitSession';
 import { supabase } from '../supabaseClient';
 
@@ -220,6 +220,7 @@ export default function LiveExamStreamMonitor({
   session,
   viewerId,
   viewerInstanceId = '',
+  viewerRole = 'observer',
   compact = false,
   large = false,
 }) {
@@ -227,8 +228,12 @@ export default function LiveExamStreamMonitor({
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Connecting live preview...');
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [supportTalkActive, setSupportTalkActive] = useState(false);
+  const [supportTalkBusy, setSupportTalkBusy] = useState(false);
+  const [supportTalkError, setSupportTalkError] = useState('');
   const [debugState, setDebugState] = useState(createDefaultDebugState());
   const sharedEntryRef = useRef(null);
+  const supportMicTrackRef = useRef(null);
   const screenVideoRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const audioRef = useRef(null);
@@ -242,6 +247,53 @@ export default function LiveExamStreamMonitor({
   const hasStartedSession =
     Boolean(resolvedSession?.started_at) || ['active', 'paused'].includes(sessionStatus);
   const connectionKey = `${viewerId || ''}:${resolvedSession?.id || ''}`;
+  const canUseSupportTalk = ['admin', 'teacher', 'instructor'].includes(String(viewerRole || '').toLowerCase());
+
+  const stopSupportTalk = async () => {
+    const localTrack = supportMicTrackRef.current;
+    supportMicTrackRef.current = null;
+    if (localTrack && sharedEntryRef.current?.room) {
+      try {
+        await sharedEntryRef.current.room.localParticipant.unpublishTrack(localTrack);
+      } catch {
+        // ignore unpublish errors
+      }
+    }
+    try {
+      localTrack?.stop?.();
+    } catch {
+      // ignore stop errors
+    }
+    setSupportTalkActive(false);
+  };
+
+  const startSupportTalk = async () => {
+    if (!canUseSupportTalk || supportTalkBusy) return;
+    setSupportTalkBusy(true);
+    setSupportTalkError('');
+    try {
+      const entry = sharedEntryRef.current;
+      if (!entry) throw new Error('Live room is not ready yet.');
+      if (entry.connectPromise) await entry.connectPromise;
+      if (!entry.room) throw new Error('Live room is still connecting. Try again in a moment.');
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const [audioTrack] = stream.getAudioTracks?.() || [];
+      if (!audioTrack) throw new Error('Microphone was not available.');
+
+      const localTrack = new LocalAudioTrack(audioTrack, { name: 'support-teacher-mic' });
+      await entry.room.localParticipant.publishTrack(localTrack, {
+        source: Track.Source.Microphone,
+      });
+      supportMicTrackRef.current = localTrack;
+      setSupportTalkActive(true);
+    } catch (talkError) {
+      setSupportTalkError(talkError.message || 'Unable to start support voice.');
+      await stopSupportTalk();
+    } finally {
+      setSupportTalkBusy(false);
+    }
+  };
 
   useEffect(() => {
     setResolvedSession((currentSession) => resolvePreferredSession(currentSession, session));
@@ -584,8 +636,13 @@ export default function LiveExamStreamMonitor({
       if (sharedEntryRef.current === sharedEntry) {
         sharedEntryRef.current = null;
       }
+      void stopSupportTalk();
     };
   }, [resolvedSession?.id, viewerId, connectionKey, hasStartedSession, viewerInstanceId]);
+
+  useEffect(() => () => {
+    void stopSupportTalk();
+  }, []);
 
   useEffect(() => {
     if (!connectionKey) return;
@@ -694,13 +751,27 @@ export default function LiveExamStreamMonitor({
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Live Camera</p>
             {!compact ? (
-              <button
-                type="button"
-                onClick={() => setAudioEnabled((prev) => !prev)}
-                className="rounded-xl border border-slate-700 px-3 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-              >
-                {audioEnabled ? 'Mute Mic' : 'Listen Mic'}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAudioEnabled((prev) => !prev)}
+                  className="rounded-xl border border-slate-700 px-3 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                >
+                  {audioEnabled ? 'Mute Student Mic' : 'Listen Student Mic'}
+                </button>
+                {canUseSupportTalk ? (
+                  <button
+                    type="button"
+                    onClick={() => (supportTalkActive ? stopSupportTalk() : startSupportTalk())}
+                    disabled={supportTalkBusy || !hasStartedSession}
+                    className={`rounded-xl px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50 ${
+                      supportTalkActive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-600 hover:bg-teal-700'
+                    }`}
+                  >
+                    {supportTalkBusy ? 'Starting...' : supportTalkActive ? 'Stop Support Talk' : 'Talk To Student'}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <video
@@ -721,12 +792,14 @@ export default function LiveExamStreamMonitor({
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mic</p>
             <p className="mt-2 text-sm font-semibold text-slate-900">
               {displayMicState === 'connected'
-                ? (audioEnabled ? 'Live microphone monitoring enabled.' : 'Student microphone is connected. Click Listen Mic to hear it.')
-                : 'Enable mic listening for this student.'}
+                ? (audioEnabled ? 'Live microphone monitoring enabled.' : 'Student microphone is connected. Click Listen Student Mic to hear it.')
+                : 'Student mic is waiting, muted, silent, or unavailable.'}
             </p>
             <p className="mt-2 text-xs text-slate-500">
-              LiveKit is now used for room transport. Make sure the `livekit-token` function is deployed and LiveKit env vars are configured.
+              Use Talk To Student for support voice. Students do not get a mute button for this support audio.
             </p>
+            {supportTalkError ? <p className="mt-2 text-xs font-semibold text-rose-600">{supportTalkError}</p> : null}
+            {supportTalkActive ? <p className="mt-2 text-xs font-semibold text-teal-700">Your microphone is live to this student.</p> : null}
           </div>
         ) : null}
       </div>

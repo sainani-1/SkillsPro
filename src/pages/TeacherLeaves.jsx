@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { Calendar, Check, X, AlertCircle, CheckCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import usePopup from '../hooks/usePopup.jsx';
+import { sendAdminNotification } from '../utils/adminNotifications';
+import { TEACHING_ROLES, isTeachingRole } from '../utils/teachingRoles';
 
 const TeacherLeaves = () => {
   const { profile } = useAuth();
@@ -43,32 +45,10 @@ const TeacherLeaves = () => {
     }
   }, [profile?.id, profile?.role]);
 
-  const pushNotification = async (payload) => {
-    try {
-      const { error } = await supabase.from('admin_notifications').insert(payload);
-      if (
-        error &&
-        String(error.message || '').includes('target_user_id')
-      ) {
-        const { target_user_id, ...fallback } = payload;
-        const marker = target_user_id ? `[target_user_id:${target_user_id}] ` : '';
-        await supabase.from('admin_notifications').insert({
-          ...fallback,
-          content:
-            marker && !String(fallback.content || '').includes('[target_user_id:')
-              ? `${marker}${fallback.content || ''}`
-              : fallback.content,
-        });
-      }
-    } catch {
-      // Keep leave flows resilient even if notification insert fails.
-    }
-  };
-
   const loadLeaves = async () => {
     try {
       setError('');
-      if (profile.role === 'teacher') {
+      if (isTeachingRole(profile.role)) {
         const { data, error: fetchError } = await supabase
           .from('teacher_leaves')
           .select('*')
@@ -97,7 +77,7 @@ const TeacherLeaves = () => {
       const { data, error: fetchError } = await supabase
         .from('profiles')
         .select('id, full_name, email')
-        .eq('role', 'teacher')
+        .in('role', TEACHING_ROLES)
         .order('full_name');
 
       if (fetchError) throw fetchError;
@@ -134,9 +114,9 @@ const TeacherLeaves = () => {
 
       if (insertError) throw insertError;
 
-      await pushNotification({
+      await sendAdminNotification({
         title: 'New Leave Request',
-        content: `${profile?.full_name || 'Teacher'} submitted a leave request from ${new Date(startDate).toLocaleDateString('en-IN')} to ${new Date(endDate).toLocaleDateString('en-IN')}.`,
+        content: `${profile?.full_name || 'Teacher'} submitted a leave request from ${new Date(startDate).toLocaleDateString('en-IN')} to ${new Date(endDate).toLocaleDateString('en-IN')}. Reason: ${reason.trim()}`,
         type: 'info',
         target_role: 'admin',
         admin_id: profile?.id || null,
@@ -173,11 +153,11 @@ const TeacherLeaves = () => {
       if (updateError) throw updateError;
 
       if (leave?.teacher_id) {
-        await pushNotification({
+        await sendAdminNotification({
           title: 'Leave Request Updated',
           content: `Your leave request is now ${status}${comments ? `: ${comments}` : '.'}`,
           type: status === 'approved' ? 'success' : status === 'rejected' ? 'warning' : 'info',
-          target_role: 'teacher',
+          target_role: 'all',
           target_user_id: leave.teacher_id,
           admin_id: profile?.id || null,
         });
@@ -289,17 +269,27 @@ const TeacherLeaves = () => {
       }
 
       if (leave.teacher_id) {
-        await pushNotification({
+        await sendAdminNotification({
           title: 'Leave Request Updated',
           content: selectedReplacement
             ? `Your leave request is approved. Scheduled classes were reassigned to ${selectedReplacement.full_name}.`
             : 'Your leave request is approved.',
           type: 'success',
-          target_role: 'teacher',
+          target_role: 'all',
           target_user_id: leave.teacher_id,
           admin_id: profile?.id || null,
         });
       }
+
+      await sendAdminNotification({
+        title: 'Leave Approved',
+        content: selectedReplacement
+          ? `${leave.teacher?.full_name || 'Teacher'} leave was approved and ${approvalState.sessions.length} class session(s) were reassigned to ${selectedReplacement.full_name}.`
+          : `${leave.teacher?.full_name || 'Teacher'} leave was approved.`,
+        type: 'success',
+        target_role: 'admin',
+        admin_id: profile?.id || null,
+      });
 
       closeApprovalModal();
       openPopup('Approved', 'Leave approved successfully.', 'success');
@@ -357,15 +347,22 @@ const TeacherLeaves = () => {
 
       if (updateError) throw updateError;
       if (leave?.teacher_id) {
-        await pushNotification({
+        await sendAdminNotification({
           title: 'Leave Revoked',
           content: 'Your approved leave was revoked by admin.',
           type: 'warning',
-          target_role: 'teacher',
+          target_role: 'all',
           target_user_id: leave.teacher_id,
           admin_id: profile?.id || null,
         });
       }
+      await sendAdminNotification({
+        title: 'Leave Revoked',
+        content: `${leave?.teacher?.full_name || 'Teacher'} leave was revoked and related sessions were restored where applicable.`,
+        type: 'warning',
+        target_role: 'admin',
+        admin_id: profile?.id || null,
+      });
       openPopup('Updated', 'Leave revoked successfully.', 'success');
       await loadLeaves();
     } catch (err) {
@@ -468,7 +465,7 @@ const TeacherLeaves = () => {
         </div>
       )}
 
-      {profile?.role === 'teacher' && (
+      {isTeachingRole(profile?.role) && (
         <div className="bg-white rounded-xl border shadow-sm p-6">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-blue-600" />

@@ -9,9 +9,9 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import {
   clearAdminVerificationState,
   createAdminPasskey,
-  hasStoredAdminPasskey,
   isAdminPasskeyVerifiedForUser,
   isPasskeySupported,
+  isStoredAdminPasskeyActive,
   verifyAdminPasskey,
 } from '../utils/adminPasskey';
 
@@ -20,7 +20,9 @@ const AdminAuthChoice = () => {
   const navigate = useNavigate();
   const { user, profile, loading, signOut } = useAuth();
   const [checkingFactors, setCheckingFactors] = useState(true);
+  const [checkingPasskey, setCheckingPasskey] = useState(true);
   const [hasMfa, setHasMfa] = useState(false);
+  const [hasPasskey, setHasPasskey] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [passkeyStep, setPasskeyStep] = useState('idle');
   const [mfaCode, setMfaCode] = useState(['', '', '', '', '', '']);
@@ -30,7 +32,6 @@ const AdminAuthChoice = () => {
   const mfaInputRefs = useRef([]);
 
   const supportsPasskeys = isPasskeySupported();
-  const hasPasskey = hasStoredAdminPasskey(user?.id);
   const mfaCodeStr = mfaCode.join('');
   const waitSeconds = Math.ceil(waitRemaining / 1000);
 
@@ -70,6 +71,37 @@ const AdminAuthChoice = () => {
       active = false;
     };
   }, [user?.id, profile?.role]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPasskeyState = async () => {
+      if (!user?.id || profile?.role !== 'admin') {
+        if (active) {
+          setHasPasskey(false);
+          setCheckingPasskey(false);
+        }
+        return;
+      }
+
+      try {
+        const activePasskey = await isStoredAdminPasskeyActive(user.id);
+        if (!active) return;
+        setHasPasskey(activePasskey);
+      } catch {
+        if (!active) return;
+        setHasPasskey(false);
+      } finally {
+        if (active) setCheckingPasskey(false);
+      }
+    };
+
+    setCheckingPasskey(true);
+    void loadPasskeyState();
+    return () => {
+      active = false;
+    };
+  }, [profile?.role, user?.id]);
 
   useEffect(() => {
     if (user?.id && profile?.role === 'admin' && isAdminPasskeyVerifiedForUser(user.id)) {
@@ -182,6 +214,7 @@ const AdminAuthChoice = () => {
       setBusyAction('passkey');
       if (hasPasskey) {
         await verifyAdminPasskey({ userId: user.id });
+        setHasPasskey(true);
         setToast({ show: true, message: 'Passkey verified. Redirecting...', type: 'success' });
       } else {
         if (!hasMfa) {
@@ -232,6 +265,7 @@ const AdminAuthChoice = () => {
           email: user.email,
           displayName: profile?.full_name || 'Admin',
         });
+        setHasPasskey(true);
         resetPasskeyEnrollment();
         setToast({ show: true, message: 'Passkey created. Redirecting...', type: 'success' });
         setTimeout(() => navigate('/app', { replace: true }), 700);
@@ -249,7 +283,7 @@ const AdminAuthChoice = () => {
     }
   };
 
-  if (loading || checkingFactors) {
+  if (loading || checkingFactors || checkingPasskey) {
     return <LoadingSpinner message="Preparing admin verification..." />;
   }
 

@@ -10,6 +10,7 @@ import { claimSingleSession, takeSingleSessionNotice } from '../utils/singleSess
 import { attachPendingReferral } from '../utils/referrals';
 import { useAuth } from '../context/AuthContext';
 import { clearAdminVerificationState } from '../utils/adminPasskey';
+import { getPendingAvatarKey } from '../utils/avatarUpload';
 
 const Login = () => {
   const { user, loading: authLoading } = useAuth();
@@ -24,7 +25,6 @@ const Login = () => {
   const [inlineNotice, setInlineNotice] = useState('');
   const takeoverResolverRef = useRef(null);
   const navigate = useNavigate();
-  const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
   const currentDeviceLabel = 'Web Login';
 
   const applyPendingAvatarIfAny = async (userId, userEmail) => {
@@ -284,7 +284,7 @@ const Login = () => {
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, role, is_disabled, is_locked, locked_until, lock_reason, disabled_reason, deleted_at, deleted_reason, email, full_name, phone, education_level, study_stream, diploma_certificate, core_subject, session_violation_count')
+        .select('id, role, is_disabled, is_locked, locked_until, lock_reason, disabled_reason, deleted_at, deleted_reason, email, full_name, phone, avatar_url, education_level, study_stream, diploma_certificate, core_subject, session_violation_count')
         .eq('id', signInData.user.id)
         .single();
 
@@ -341,7 +341,7 @@ const Login = () => {
 
         const profileFetchRetry = await supabase
           .from('profiles')
-          .select('id, role, is_disabled, is_locked, locked_until')
+          .select('id, role, is_disabled, is_locked, locked_until, avatar_url')
           .eq('id', signInData.user.id)
           .single();
         userProfile = profileFetchRetry.data;
@@ -382,6 +382,16 @@ const Login = () => {
         }
         if (!userProfile.core_subject && meta.core_subject) {
           profilePatch.core_subject = meta.core_subject;
+        }
+        if (!userProfile.avatar_url && meta.avatar_url) {
+          profilePatch.avatar_url = meta.avatar_url;
+        }
+        if (
+          meta.role &&
+          ['student', 'teacher', 'admin', 'instructor', 'verifier'].includes(meta.role) &&
+          userProfile.role !== meta.role
+        ) {
+          profilePatch.role = meta.role;
         }
 
         if (Object.keys(profilePatch).length > 1) {

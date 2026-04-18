@@ -9,6 +9,7 @@ import { buildAvatarPublicUrl } from '../utils/avatarUtils';
 import AvatarImage from '../components/AvatarImage';
 import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
 import { getCertificateDisplayName } from '../utils/identityVerification';
+import { updateUsernameForUser } from '../utils/usernames';
 
 const Profile = () => {
   const { profile, user, fetchProfile } = useAuth();
@@ -21,6 +22,7 @@ const Profile = () => {
   const [uploading, setUploading] = useState(false);
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [username, setUsername] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
 
@@ -31,6 +33,7 @@ const Profile = () => {
     if (profile) {
       setFullName(profile.full_name || '');
       setPhone(profile.phone || '');
+      setUsername(profile.username || '');
       loadProgress();
     }
   }, [profile]);
@@ -191,8 +194,21 @@ const Profile = () => {
       });
       return;
     }
+    if (!username.trim()) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid Input',
+        message: 'Username cannot be empty',
+        type: 'warning'
+      });
+      return;
+    }
     setSavingProfile(true);
     try {
+      await updateUsernameForUser({
+        userId: profile.id,
+        username,
+      });
       const { error } = await supabase
         .from('profiles')
         .update({ full_name: fullName.trim(), phone: phone.trim() })
@@ -249,6 +265,7 @@ const Profile = () => {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{profile.full_name}</h1>
+          <p className="text-xs font-mono text-slate-500">{profile.username || username || '-'}</p>
           <p className="text-slate-500 text-sm">{profile.role === 'admin' ? 'Nani' : (profile.role?.charAt(0).toUpperCase() + profile.role?.slice(1)) || 'Student'}</p>
           <p className="text-slate-500 text-sm">Core Subject: {profile.core_subject || 'Not set'}</p>
           {uploading && <p className="text-xs text-slate-500 mt-1">Uploading photo...</p>}
@@ -256,6 +273,7 @@ const Profile = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <InfoCard label="Username" value={profile.username || username || '-'} />
         <InfoCard label="Email" value={profile.email || user?.email || '—'} />
         <InfoCard label="Phone" value={profile.phone || '—'} />
         <InfoCard label="Core Subject" value={profile.core_subject || 'Not set'} />
@@ -338,6 +356,19 @@ const Profile = () => {
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-bold mb-4">Edit Profile</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+          <div>
+            <label className="block text-sm font-medium mb-2">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              className="w-full border rounded-lg p-3"
+              placeholder="Your username"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Unique username. Example: SkillPro-Name-A1B2-260418
+            </p>
+          </div>
           <div>
             <label className="block text-sm font-medium mb-2">Full Name</label>
             <input

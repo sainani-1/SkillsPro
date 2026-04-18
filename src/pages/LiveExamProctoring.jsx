@@ -1171,10 +1171,22 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       }
 
       const finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
-      const finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id));
-      const finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id));
-      const finalViolations = violationRows.filter((row) => finalSlotIds.has(row.slot_id));
-      const finalMessages = messageRows.filter((row) => finalSlotIds.has(row.slot_id));
+      const teacherStudentIds = isTeacher
+        ? new Set(
+            bookingRows
+              .filter((booking) => String(profileMap[booking.student_id]?.assigned_teacher_id || '') === String(profile.id))
+              .map((booking) => String(booking.student_id))
+          )
+        : null;
+      const roleAllowsStudent = (studentId) => !teacherStudentIds || teacherStudentIds.has(String(studentId || ''));
+      const finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id));
+      const finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id));
+      const finalViolations = violationRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id));
+      const finalMessages = messageRows.filter((row) => {
+        if (!finalSlotIds.has(row.slot_id)) return false;
+        if (!teacherStudentIds) return true;
+        return roleAllowsStudent(row.sender_id) || roleAllowsStudent(row.recipient_id);
+      });
       const finalInstructorRows = instructorRows.filter((row) => finalSlotIds.has(row.slot_id));
       const finalOverrideRows = overrideRows.filter((row) => finalSlotIds.has(row.slot_id));
       const finalFacultyAttendanceRows = facultyAttendanceRows.filter((row) => finalSlotIds.has(row.slot_id));

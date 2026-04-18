@@ -1,0 +1,2 @@
+[functions.username-registry]
+verify_jwt = false

@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { prepareAvatarFile } from '../utils/imageUtils';
+import { uploadAvatarForUser } from '../utils/avatarUpload';
 import { validateRotatingAccessCode } from '../utils/rotatingAccessCode';
 
 const RegisterTeacher = () => {
@@ -80,26 +80,19 @@ const RegisterTeacher = () => {
       const user = signUpData?.user;
       if (!user) throw new Error('Unable to create user. Please try again.');
       
-      // Upload Photo
-      let avatarUrl = null;
-      if (file) {
-        try {
-          const safeFile = await prepareAvatarFile(file);
-          const fileExt = safeFile?.name?.split('.').pop() || file.name.split('.').pop();
-          const fileName = `${user.id}.${fileExt}`;
-          const filePath = fileName;
-          
-          const { error: uploadError } = await supabase.storage
-            .from('avatars')
-            .upload(filePath, safeFile, { upsert: true, contentType: safeFile?.type || file.type });
-          
-          if (!uploadError) {
-            const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-            avatarUrl = data?.publicUrl || avatarUrl;
+      const avatarUrl = await uploadAvatarForUser(supabase, user.id, file);
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            full_name: form.fullName.trim(),
+            phone: form.phone.trim(),
+            role: 'teacher',
+            core_subject: form.coreSubject || 'Computer Science',
+            avatar_url: avatarUrl
           }
-        } catch (photoErr) {
-          console.warn('Photo upload warning:', photoErr.message);
-        }
+        });
+      } catch (metadataError) {
+        console.warn('Teacher metadata sync warning:', metadataError.message || metadataError);
       }
       
       const { error: profileError } = await supabase.from('profiles').upsert({
@@ -109,7 +102,9 @@ const RegisterTeacher = () => {
         full_name: form.fullName.trim(),
         phone: form.phone.trim(),
         avatar_url: avatarUrl,
-        role: 'teacher'
+        role: 'teacher',
+        core_subject: form.coreSubject || 'Computer Science',
+        updated_at: new Date().toISOString()
       }, { onConflict: 'id' });
       if (profileError && !String(profileError.message || '').toLowerCase().includes('row-level security')) {
         throw profileError;

@@ -6,6 +6,7 @@ import AvatarImage from '../components/AvatarImage';
 import usePopup from '../hooks/usePopup.jsx';
 import { logAdminActivity } from '../utils/adminActivityLogger';
 import { deleteUserFromAdmin } from '../utils/adminUserDeletion';
+import { ensureUsernameForUser, ensureUsernamesForUsers, updateUsernameForUser } from '../utils/usernames';
 
 const UserManagementPage = () => {
     const { openPopup, popupNode } = usePopup();
@@ -16,6 +17,7 @@ const UserManagementPage = () => {
     const [showAddUserModal, setShowAddUserModal] = useState(false);
     const [changingRole, setChangingRole] = useState(null);
     const [deletingUserId, setDeletingUserId] = useState(null);
+    const [updatingUsernameId, setUpdatingUsernameId] = useState(null);
 
     useEffect(() => { loadUsers(); }, []);
 
@@ -26,13 +28,15 @@ const UserManagementPage = () => {
           .select('id, auth_user_id, full_name, email, role, phone, premium_until, is_locked, locked_until, avatar_url, core_subject, education_level, study_stream, diploma_certificate, created_at')
           .is('deleted_at', null)
           .order('created_at', { ascending: false });
-        setUsers(data || []);
+        const withUsernames = await ensureUsernamesForUsers(data || []);
+        setUsers(withUsernames);
         setLoading(false);
     };
 
     const filtered = users.filter(u => {
       const matchesSearch = u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-                           u.email?.toLowerCase().includes(search.toLowerCase());
+                           u.email?.toLowerCase().includes(search.toLowerCase()) ||
+                           u.username?.toLowerCase().includes(search.toLowerCase());
       const matchesRole = roleFilter === 'all' || u.role === roleFilter;
       return matchesSearch && matchesRole;
     });
@@ -162,6 +166,40 @@ const UserManagementPage = () => {
       }
     };
 
+    const editUsername = async (user) => {
+      if (!user?.id || updatingUsernameId) return;
+      const nextUsername = window.prompt('Edit username', user.username || '');
+      if (nextUsername === null) return;
+
+      setUpdatingUsernameId(user.id);
+      try {
+        const {
+          data: { user: adminUser },
+        } = await supabase.auth.getUser();
+        const savedUsername = await updateUsernameForUser({
+          userId: user.id,
+          username: nextUsername,
+        });
+        await logAdminActivity({
+          adminId: adminUser?.id,
+          eventType: 'action',
+          action: 'Updated username',
+          target: user.id,
+          details: {
+            module: 'user-management',
+            previous_username: user.username || null,
+            new_username: savedUsername,
+          },
+        });
+        openPopup('Updated', 'Username updated successfully.', 'success');
+        await loadUsers();
+      } catch (error) {
+        openPopup('Error', error.message || 'Failed to update username.', 'error');
+      } finally {
+        setUpdatingUsernameId(null);
+      }
+    };
+
     return (
       <div className="space-y-6">
         {popupNode}
@@ -249,7 +287,7 @@ const UserManagementPage = () => {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search by name or email"
+              placeholder="Search by name, email, or username"
               className="px-3 py-2 border rounded-lg w-full md:w-64"
             />
           </div>
@@ -272,6 +310,7 @@ const UserManagementPage = () => {
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Username</th>
                 <th className="px-4 py-3 text-left">Email</th>
                 <th className="px-4 py-3 text-left">Role</th>
                 <th className="px-4 py-3 text-left">Phone</th>
@@ -284,9 +323,9 @@ const UserManagementPage = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center"><LoadingSpinner fullPage={false} message="Loading users..." /></td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center"><LoadingSpinner fullPage={false} message="Loading users..." /></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-500">No users found</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-500">No users found</td></tr>
               ) : (
                 filtered.map(u => {
                   const premiumActive = u.premium_until && new Date(u.premium_until) > new Date();
@@ -307,6 +346,19 @@ const UserManagementPage = () => {
                               New
                             </span>
                           ) : null}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <div className="space-y-2">
+                          <p className="font-mono text-xs text-slate-700">{u.username || '-'}</p>
+                          <button
+                            type="button"
+                            onClick={() => editUsername(u)}
+                            disabled={updatingUsernameId === u.id}
+                            className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                          >
+                            {updatingUsernameId === u.id ? 'Updating...' : 'Edit Username'}
+                          </button>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{u.email}</td>
@@ -429,6 +481,13 @@ const AddUserModal = ({ onClose, onSuccess }) => {
                 body: payload
             });
             if (!fnError && fnData?.success) {
+                if (fnData?.user_id) {
+                    await ensureUsernameForUser({
+                        id: fnData.user_id,
+                        full_name: payload.full_name,
+                        created_at: new Date().toISOString(),
+                    });
+                }
                 const {
                     data: { user: adminUser },
                 } = await supabase.auth.getUser();

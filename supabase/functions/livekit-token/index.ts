@@ -219,7 +219,7 @@ Deno.serve(async (req: Request) => {
         mode === "student"
           ? `student:${sessionRow.student_id}:session:${sessionId}`
           : `${callerProfile.role}:${requesterId}:watch:${sessionId}${viewerInstanceId ? `:${viewerInstanceId}` : ""}`;
-      canPublish = mode === "student";
+      canPublish = mode === "student" || ["admin", "teacher", "instructor"].includes(String(callerProfile.role));
     }
 
     const participantDisplayName =

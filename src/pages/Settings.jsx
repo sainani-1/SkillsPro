@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { Settings as SettingsIcon, User, Bell, Lock, Eye, EyeOff, Mail, Phone, MapPin, Briefcase, Calendar, Shield } from 'lucide-react';
 import usePopup from '../hooks/usePopup.jsx';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { updateUsernameForUser } from '../utils/usernames';
 
 const Settings = () => {
   const { profile } = useAuth();
@@ -13,6 +14,7 @@ const Settings = () => {
 
   // Profile Settings
   const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bio, setBio] = useState('');
@@ -52,6 +54,7 @@ const Settings = () => {
   useEffect(() => {
     if (profile) {
       setFullName(profile.full_name || '');
+      setUsername(profile.username || '');
       setEmail(profile.email || '');
       setPhone(profile.phone || '');
       setBio(profile.bio || '');
@@ -69,6 +72,11 @@ const Settings = () => {
     setLoading(true);
 
     try {
+      await updateUsernameForUser({
+        userId: profile.id,
+        username,
+      });
+
       const basePayload = {
         full_name: fullName.trim(),
         phone: phone.trim()
@@ -222,6 +230,22 @@ const Settings = () => {
           {activeTab === 'profile' && (
             <form onSubmit={handleUpdateProfile} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-gold-400 focus:border-transparent"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Unique username. Example: SkillPro-Name-A1B2-260418
+                  </p>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     <User size={16} className="inline mr-2" />

@@ -1,3 +1,5 @@
+const TEACHING_ROLES = ["teacher", "mentor"];
+
 type SupabaseLikeClient = {
   from: (table: string) => any;
 };
@@ -21,7 +23,7 @@ export async function assignBalancedTeacherToStudent(adminClient: SupabaseLikeCl
   const { data: teachers, error: teachersError } = await adminClient
     .from("profiles")
     .select("id, full_name, email, role, is_disabled, deleted_at")
-    .eq("role", "teacher")
+    .in("role", TEACHING_ROLES)
     .is("deleted_at", null)
     .order("full_name", { ascending: true });
 

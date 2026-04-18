@@ -4,7 +4,7 @@ import { supabase } from "../supabaseClient";
 import { runCode } from "../logicBuilding/codeRunner";
 import MonacoCdnEditor from "../components/MonacoCdnEditor";
 import { useAuth } from "../context/AuthContext";
-import { LocalAudioTrack, LocalVideoTrack, Room, Track } from "livekit-client";
+import { LocalAudioTrack, LocalVideoTrack, Room, RoomEvent, Track } from "livekit-client";
 import {
   LIVE_EXAM_SIGNAL_TABLE,
   buildPeerKey,
@@ -30,6 +30,9 @@ const MAX_FULLSCREEN_WARNINGS = 2;
 const RETAKE_LOCK_DAYS = 60;
 const BLANK_SCREEN_WARNING_SEC = 8;
 const BLANK_SCREEN_LOCK_SEC = 15;
+const MIC_SILENCE_WARNING_SEC = 20;
+const MIC_SILENCE_LOCK_SEC = 45;
+const MIC_SILENCE_RMS_THRESHOLD = 0.006;
 const CAMERA_DARK_BRIGHTNESS_THRESHOLD = 35;
 const CAMERA_FLAT_VARIANCE_THRESHOLD = 120;
 const EXAM_SESSION_PREFIX = "strict_exam_session";
@@ -200,6 +203,7 @@ export default function Exam({ examMode = "certification" }) {
   const [screenShareStream, setScreenShareStream] = useState(null);
   const [liveExamContext, setLiveExamContext] = useState(null);
   const videoRef = useRef(null);
+  const supportAudioRef = useRef(null);
 
   const [fullscreenWarnings, setFullscreenWarnings] = useState(0);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
@@ -250,6 +254,10 @@ export default function Exam({ examMode = "certification" }) {
   const blankScreenStartedAtRef = useRef(0);
   const lastCameraSignatureRef = useRef(null);
   const cameraTrackIssueStartedAtRef = useRef(0);
+  const micIssueStartedAtRef = useRef(0);
+  const micSilenceStartedAtRef = useRef(0);
+  const micSilenceWarnedRef = useRef(false);
+  const micAudioContextRef = useRef(null);
   const examAutoSubmitTriggeredRef = useRef(false);
   const webRtcPublisherPeersRef = useRef(new Map());
   const webRtcPublisherStreamsRef = useRef(new Map());
@@ -810,7 +818,47 @@ export default function Exam({ examMode = "certification" }) {
           dynacast: false,
         });
         liveKitRoomRef.current = room;
+
+        const attachSupportAudio = async (track, publication) => {
+          if (!track || track.kind !== Track.Kind.Audio) return;
+          const participantIdentity = String(publication?.participant?.identity || "");
+          if (participantIdentity.startsWith("student:")) return;
+          const element = supportAudioRef.current;
+          if (!element) return;
+          element.srcObject = null;
+          element.autoplay = true;
+          element.muted = false;
+          try {
+            track.attach(element);
+          } catch {
+            if (track.mediaStreamTrack) {
+              element.srcObject = new MediaStream([track.mediaStreamTrack]);
+            }
+          }
+          const playPromise = element.play?.();
+          if (playPromise?.catch) {
+            playPromise.catch(() => {
+              setInfoMsg("Support voice is connected. Click anywhere on the exam page if your browser blocks playback.");
+            });
+          }
+        };
+
+        room.on(RoomEvent.TrackSubscribed, (track, publication) => {
+          void attachSupportAudio(track, publication);
+        });
+        room.on(RoomEvent.TrackPublished, (_track, publication, participant) => {
+          publication?.setSubscribed?.(true);
+          participant?.trackPublications?.forEach?.((item) => item.setSubscribed?.(true));
+        });
         await room.connect(tokenData.url, tokenData.token);
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications?.forEach?.((publication) => {
+            publication.setSubscribed?.(true);
+            if (publication.track) {
+              void attachSupportAudio(publication.track, { ...publication, participant });
+            }
+          });
+        });
 
         const publishedTracks = [];
         const [cameraVideoTrack] = cameraStream.getVideoTracks?.() || [];
@@ -1570,6 +1618,123 @@ export default function Exam({ examMode = "certification" }) {
       videoTrack?.removeEventListener?.("unmute", handleTrackUnmute);
     };
   }, [cameraStream, phase, showBlankScreenWarning, terminateExamForViolation, isInvigilatorPaused]);
+
+  useEffect(() => {
+    if (phase !== EXAM_PHASES.RUNNING || isInvigilatorPaused || !cameraStream) {
+      micIssueStartedAtRef.current = 0;
+      micSilenceStartedAtRef.current = 0;
+      micSilenceWarnedRef.current = false;
+      if (micAudioContextRef.current) {
+        micAudioContextRef.current.close?.().catch?.(() => {});
+        micAudioContextRef.current = null;
+      }
+      return undefined;
+    }
+
+    const [audioTrack] = cameraStream.getAudioTracks?.() || [];
+    let analyser = null;
+    let source = null;
+    let audioContext = null;
+    let samples = null;
+
+    const markMicIssue = (reason) => {
+      const now = Date.now();
+      if (!micIssueStartedAtRef.current) micIssueStartedAtRef.current = now;
+      const issueForSec = (now - micIssueStartedAtRef.current) / 1000;
+      void syncLiveExamSession({ mic_connected: false });
+      if (issueForSec >= BLANK_SCREEN_WARNING_SEC && !micSilenceWarnedRef.current) {
+        micSilenceWarnedRef.current = true;
+        setInfoMsg("Microphone is required. Check device mute, headset mute, or system input level.");
+        void recordLiveExamViolation("microphone_unavailable", 1, reason);
+      }
+      if (issueForSec >= BLANK_SCREEN_LOCK_SEC) {
+        void terminateExamForViolation(reason);
+      }
+    };
+
+    const clearMicIssue = () => {
+      micIssueStartedAtRef.current = 0;
+      if (!micSilenceStartedAtRef.current) {
+        micSilenceWarnedRef.current = false;
+      }
+    };
+
+    try {
+      if (audioTrack) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        micAudioContextRef.current = audioContext;
+        source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        samples = new Uint8Array(analyser.fftSize);
+      }
+    } catch {
+      analyser = null;
+    }
+
+    const interval = window.setInterval(() => {
+      if (!audioTrack || audioTrack.readyState !== "live" || audioTrack.enabled === false || audioTrack.muted === true) {
+        markMicIssue("Microphone track was muted, disabled, or ended during live exam.");
+        return;
+      }
+
+      clearMicIssue();
+      if (!analyser || !samples) {
+        void syncLiveExamSession({ mic_connected: true });
+        return;
+      }
+
+      analyser.getByteTimeDomainData(samples);
+      let sumSquares = 0;
+      for (let index = 0; index < samples.length; index += 1) {
+        const centered = (samples[index] - 128) / 128;
+        sumSquares += centered * centered;
+      }
+      const rms = Math.sqrt(sumSquares / Math.max(1, samples.length));
+
+      if (rms >= MIC_SILENCE_RMS_THRESHOLD) {
+        micSilenceStartedAtRef.current = 0;
+        micSilenceWarnedRef.current = false;
+        void syncLiveExamSession({ mic_connected: true });
+        return;
+      }
+
+      const now = Date.now();
+      if (!micSilenceStartedAtRef.current) micSilenceStartedAtRef.current = now;
+      const silentForSec = (now - micSilenceStartedAtRef.current) / 1000;
+      void syncLiveExamSession({ mic_connected: false });
+      if (silentForSec >= MIC_SILENCE_WARNING_SEC && !micSilenceWarnedRef.current) {
+        micSilenceWarnedRef.current = true;
+        setInfoMsg("Microphone permission is allowed, but no voice/input is detected. Unmute your device or headset.");
+        void recordLiveExamViolation("microphone_silent", 1, "Microphone permission is allowed, but no audio level is detected.");
+      }
+      if (silentForSec >= MIC_SILENCE_LOCK_SEC) {
+        void terminateExamForViolation("Microphone stayed silent or hardware-muted during live exam.");
+      }
+    }, 1500);
+
+    const handleMicEnded = () => markMicIssue("Microphone feed ended during live exam.");
+    const handleMicMute = () => markMicIssue("Microphone feed was muted or blocked during live exam.");
+    const handleMicUnmute = () => {
+      micIssueStartedAtRef.current = 0;
+    };
+
+    audioTrack?.addEventListener?.("ended", handleMicEnded);
+    audioTrack?.addEventListener?.("mute", handleMicMute);
+    audioTrack?.addEventListener?.("unmute", handleMicUnmute);
+
+    return () => {
+      window.clearInterval(interval);
+      audioTrack?.removeEventListener?.("ended", handleMicEnded);
+      audioTrack?.removeEventListener?.("mute", handleMicMute);
+      audioTrack?.removeEventListener?.("unmute", handleMicUnmute);
+      source?.disconnect?.();
+      analyser?.disconnect?.();
+      audioContext?.close?.().catch?.(() => {});
+      if (micAudioContextRef.current === audioContext) micAudioContextRef.current = null;
+    };
+  }, [cameraStream, phase, isInvigilatorPaused, terminateExamForViolation]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
@@ -3192,6 +3357,7 @@ export default function Exam({ examMode = "certification" }) {
                   muted
                   className="w-full h-full object-cover"
                 />
+                <audio ref={supportAudioRef} autoPlay className="hidden" />
               </div>
             </div>
           </aside>

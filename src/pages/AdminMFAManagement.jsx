@@ -3,13 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup.jsx';
 import useDialog from '../hooks/useDialog.jsx';
+import { useAuth } from '../context/AuthContext';
+import { logAdminActivity } from '../utils/adminActivityLogger';
+import {
+  deleteAdminPasskey,
+  getStoredAdminPasskey,
+  listAdminPasskeys,
+} from '../utils/adminPasskey';
 
 const AdminMFAManagement = () => {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
   const { openPopup, popupNode } = usePopup();
   const { confirm, dialogNode } = useDialog();
   const [loading, setLoading] = useState(true);
   const [factors, setFactors] = useState([]);
+  const [passkeys, setPasskeys] = useState([]);
+  const [loadingPasskeys, setLoadingPasskeys] = useState(true);
+  const [removingPasskeyId, setRemovingPasskeyId] = useState('');
   const [processingId, setProcessingId] = useState('');
   const [verifyingFactorId, setVerifyingFactorId] = useState('');
   const [verifyIntent, setVerifyIntent] = useState('unregister');
@@ -28,6 +39,7 @@ const AdminMFAManagement = () => {
     });
   };
   const oldCodeValue = oldCode.join('');
+  const currentDevicePasskey = getStoredAdminPasskey(user?.id);
 
   const handleOldCodeChange = (value, index) => {
     const digit = value.replace(/\D/g, '').slice(0, 1);
@@ -119,9 +131,31 @@ const AdminMFAManagement = () => {
     }
   };
 
+  const loadPasskeys = async () => {
+    if (!user?.id) {
+      setPasskeys([]);
+      setLoadingPasskeys(false);
+      return;
+    }
+
+    try {
+      setLoadingPasskeys(true);
+      const records = await listAdminPasskeys(user.id);
+      setPasskeys(records);
+    } catch (error) {
+      openPopup('Load failed', error.message || 'Unable to load passkey devices.', 'error');
+    } finally {
+      setLoadingPasskeys(false);
+    }
+  };
+
   useEffect(() => {
-    loadFactors();
+    void loadFactors();
   }, []);
+
+  useEffect(() => {
+    void loadPasskeys();
+  }, [user?.id]);
 
   useEffect(() => {
     if (verifyingFactorId && !processingId && oldCodeValue.length === 6 && oldCode.every((d) => d)) {
@@ -156,6 +190,39 @@ const AdminMFAManagement = () => {
     setVerifyStep('first');
     resetOldCode();
     setVerifyingFactorId(primaryFactor.id);
+  };
+
+  const handleDeletePasskey = async (passkey) => {
+    if (!user?.id || !passkey?.deviceId) return;
+    const ok = await confirm(
+      `Delete the passkey for ${passkey.deviceLabel || 'this device'}? This browser will need MFA again before it can add a new passkey.`,
+      'Delete Passkey'
+    );
+    if (!ok) return;
+
+    try {
+      setRemovingPasskeyId(passkey.deviceId);
+      await deleteAdminPasskey({ userId: user.id, deviceId: passkey.deviceId });
+      await logAdminActivity({
+        adminId: user.id,
+        eventType: 'action',
+        action: 'Deleted admin passkey',
+        target: passkey.deviceId,
+        details: {
+          module: 'admin-mfa-management',
+          device_label: passkey.deviceLabel || null,
+          browser: passkey.browser || null,
+          os: passkey.os || null,
+          host: passkey.host || null,
+        },
+      });
+      openPopup('Deleted', 'Passkey removed successfully. You can add it again from passkey setup.', 'success');
+      await loadPasskeys();
+    } catch (error) {
+      openPopup('Delete failed', error.message || 'Unable to delete this passkey.', 'error');
+    } finally {
+      setRemovingPasskeyId('');
+    }
   };
 
   return (
@@ -219,6 +286,81 @@ const AdminMFAManagement = () => {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="bg-white border rounded-xl p-6 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Admin Passkey Devices</h2>
+            <p className="text-sm text-slate-500">
+              See which browser and device created a passkey, remove it, and set it up again when needed.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/admin-auth-choice')}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            Add or Recreate Passkey
+          </button>
+        </div>
+
+        {loadingPasskeys ? (
+          <p className="text-slate-500">Loading passkey devices...</p>
+        ) : passkeys.length === 0 ? (
+          <div className="border rounded-lg p-4 bg-slate-50 text-slate-600">
+            No passkey has been registered for this admin yet.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {passkeys.map((passkey) => {
+              const isCurrentDevice = currentDevicePasskey?.deviceId === passkey.deviceId;
+              return (
+                <div key={passkey.deviceId} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-slate-900">{passkey.deviceLabel || 'Registered device'}</p>
+                        {isCurrentDevice ? (
+                          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
+                            This device
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-sm text-slate-600">
+                        {passkey.browser || 'Browser'} {passkey.os ? `on ${passkey.os}` : ''}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Created: {passkey.createdAt ? new Date(passkey.createdAt).toLocaleString('en-IN') : '-'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Last used: {passkey.lastUsedAt ? new Date(passkey.lastUsedAt).toLocaleString('en-IN') : 'Not used yet'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Site: {passkey.host || '-'}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePasskey(passkey)}
+                      disabled={removingPasskeyId === passkey.deviceId}
+                      className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {removingPasskeyId === passkey.deviceId ? 'Deleting...' : 'Delete Passkey'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {profile?.full_name ? (
+          <p className="text-xs text-slate-500">
+            Signed in as {profile.full_name}. Delete a passkey here, then use Add or Recreate Passkey to register it again.
+          </p>
+        ) : null}
       </div>
 
       {verifyingFactorId ? (

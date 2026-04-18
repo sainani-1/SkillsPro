@@ -97,14 +97,14 @@ const RequestTeacher = () => {
 
       await sendAdminNotification({
         title: 'New Teacher Assignment Request',
-        content: `${profile?.full_name || 'Student'} requested a teacher assignment.`,
+        content: `${profile?.full_name || 'Student'} requested a teacher or mentor assignment.`,
         admin_id: profile?.id || null,
       });
 
       setAlertModal({
         show: true,
         title: 'Success',
-        message: 'Request sent to the SkillPro team successfully. You will be assigned a teacher soon.',
+        message: 'Request sent to the SkillPro team successfully. You will be assigned a teacher or mentor soon.',
         type: 'success'
       });
 

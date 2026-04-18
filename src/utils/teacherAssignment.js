@@ -1,3 +1,5 @@
+import { TEACHING_ROLES } from './teachingRoles';
+
 export async function assignBalancedTeacherToStudent(supabase, studentId) {
   if (!supabase || !studentId) {
     throw new Error('Student id is required for teacher assignment.');
@@ -21,7 +23,7 @@ export async function assignBalancedTeacherToStudent(supabase, studentId) {
   const { data: teachers, error: teachersError } = await supabase
     .from('profiles')
     .select('id, full_name, email, role, is_disabled, deleted_at')
-    .eq('role', 'teacher')
+    .in('role', TEACHING_ROLES)
     .is('deleted_at', null)
     .order('full_name', { ascending: true });
 

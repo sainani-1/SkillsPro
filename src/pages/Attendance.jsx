@@ -50,6 +50,10 @@ const Attendance = () => {
   const [currentStudentIndex, setCurrentStudentIndex] = useState(0);
   const [sequentialSaving, setSequentialSaving] = useState(false);
   const [sessionMarkedCount, setSessionMarkedCount] = useState(0);
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [peopleModalSession, setPeopleModalSession] = useState(null);
+  const [sessionDetailsByKey, setSessionDetailsByKey] = useState({});
+  const [loadingDetailsKey, setLoadingDetailsKey] = useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   useEffect(() => {
@@ -368,6 +372,81 @@ const Attendance = () => {
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+  };
+
+  const getSessionKey = (session) => `${session.type}-${session.id}`;
+
+  const filteredSessions = useMemo(() => {
+    const term = sessionSearch.trim().toLowerCase();
+    if (!term) return sessions;
+
+    return sessions.filter((session) => {
+      const dateText = session.scheduled_for ? new Date(session.scheduled_for).toLocaleDateString().toLowerCase() : '';
+      const timeText = session.scheduled_for ? new Date(session.scheduled_for).toLocaleTimeString().toLowerCase() : '';
+      return [
+        session.title,
+        session.type === 'class' ? 'class' : 'guidance',
+        dateText,
+        timeText
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term));
+    });
+  }, [sessionSearch, sessions]);
+
+  const loadSessionPeopleDetails = async (session) => {
+    const sessionKey = getSessionKey(session);
+    if (sessionDetailsByKey[sessionKey]) {
+      setPeopleModalSession(session);
+      return;
+    }
+
+    setLoadingDetailsKey(sessionKey);
+    try {
+      const teacherIds = [
+        session.teacher_id,
+        session.reassignment?.original_teacher_id,
+        session.reassignment?.reassigned_to_teacher_id
+      ].filter(Boolean);
+      const uniqueTeacherIds = [...new Set(teacherIds)];
+      let teacherProfiles = [];
+
+      if (uniqueTeacherIds.length > 0) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', uniqueTeacherIds);
+
+        if (error) throw error;
+        teacherProfiles = data || [];
+      }
+
+      const studentsForSession = await loadStudentsForSession(session);
+      const byId = teacherProfiles.reduce((acc, teacher) => {
+        acc[teacher.id] = teacher;
+        return acc;
+      }, {});
+
+      setSessionDetailsByKey((prev) => ({
+        ...prev,
+        [sessionKey]: {
+          teacher: byId[session.teacher_id] || null,
+          originalTeacher: byId[session.reassignment?.original_teacher_id] || session.reassignment?.original_teacher || null,
+          reassignedTeacher: byId[session.reassignment?.reassigned_to_teacher_id] || session.reassignment?.reassigned_teacher || null,
+          students: studentsForSession || []
+        }
+      }));
+      setPeopleModalSession(session);
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'Unable To Load Names',
+        message: error.message || 'Could not load teacher and student names.',
+        type: 'error'
+      });
+    } finally {
+      setLoadingDetailsKey('');
+    }
   };
 
   const loadStudentsForSession = async (session) => {
@@ -862,6 +941,8 @@ const Attendance = () => {
     attendanceRecords.length === 0 &&
     students.length === 0 &&
     !selectedSession;
+  const peopleModalKey = peopleModalSession ? getSessionKey(peopleModalSession) : '';
+  const peopleModalDetails = peopleModalKey ? sessionDetailsByKey[peopleModalKey] : null;
 
   if (shouldShowInitialLoader) {
     return <LoadingSpinner message="Loading attendance management..." />;
@@ -948,14 +1029,30 @@ const Attendance = () => {
 
       {activeTab === 'sessions' && (
         <div className="grid gap-4">
+          <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <label className="block text-xs font-semibold uppercase text-slate-500">Search Sessions</label>
+            <input
+              value={sessionSearch}
+              onChange={(event) => setSessionSearch(event.target.value)}
+              placeholder="Search by topic, date, time, or type"
+              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
           {sessions.length === 0 ? (
             <div className="bg-white p-8 rounded-xl border text-center text-slate-500">
               No sessions found. Sessions will appear here once scheduled.
             </div>
+          ) : filteredSessions.length === 0 ? (
+            <div className="bg-white p-8 rounded-xl border text-center text-slate-500">
+              No sessions match your search.
+            </div>
           ) : (
-            sessions.map(session => (
-              <div key={`${session.type}-${session.id}`} className="bg-white p-6 rounded-xl border shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start">
+            filteredSessions.map(session => {
+              const sessionKey = getSessionKey(session);
+              return (
+              <div key={sessionKey} className="bg-white p-6 rounded-xl border shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-bold text-lg">{session.title}</h3>
@@ -965,13 +1062,6 @@ const Attendance = () => {
                         {session.type === 'class' ? 'Class' : 'Guidance'}
                       </span>
                     </div>
-                    {session.reassignment ? (
-                      <p className="mb-2 text-sm text-amber-700">
-                        {session.reassignment.reassigned_to_teacher_id === profile?.id
-                          ? `Assigned to you from ${session.reassignment.original_teacher?.full_name || 'another teacher'}`
-                          : `Reassigned from ${session.reassignment.original_teacher?.full_name || 'another teacher'} to ${session.reassignment.reassigned_teacher?.full_name || 'replacement teacher'}`}
-                      </p>
-                    ) : null}
                     <div className="flex items-center gap-4 text-sm text-slate-600">
                       <span className="flex items-center gap-1">
                         <Calendar size={14} />
@@ -983,8 +1073,18 @@ const Attendance = () => {
                       </span>
                     </div>
                   </div>
-                  {(() => {
-                    const sessionKey = `${session.type}-${session.id}`;
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => loadSessionPeopleDetails(session)}
+                      disabled={loadingDetailsKey === sessionKey}
+                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {loadingDetailsKey === sessionKey
+                        ? 'Loading...'
+                        : 'View People'}
+                    </button>
+                    {(() => {
                     const alreadyPosted = !!postedSessionKeys[sessionKey];
                     const statusMeta = getTeacherAttendanceStatus(session, alreadyPosted);
                     const canMarkCurrentSession = canMarkAttendanceNow(session) || isAdmin;
@@ -1010,12 +1110,133 @@ const Attendance = () => {
                   </button>
                     );
                   })()}
+                  </div>
                 </div>
               </div>
-            ))
+            );
+            })
           )}
         </div>
       )}
+
+      {peopleModalSession && peopleModalDetails ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="Close people popup"
+            onClick={() => setPeopleModalSession(null)}
+          />
+          <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="bg-slate-900 px-5 py-4 text-white sm:px-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase text-slate-300">Session People</p>
+                  <h3 className="mt-1 truncate text-xl font-bold">{peopleModalSession.title}</h3>
+                  <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-200">
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar size={14} />
+                      {new Date(peopleModalSession.scheduled_for).toLocaleDateString()}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Clock size={14} />
+                      {new Date(peopleModalSession.scheduled_for).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPeopleModalSession(null)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:bg-white/20"
+                  aria-label="Close people popup"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[75vh] overflow-y-auto p-5 sm:p-6">
+              <div className="grid gap-4 md:grid-cols-[0.8fr_1.2fr]">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Teacher</p>
+                  {peopleModalSession.reassignment ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+                        <p className="text-xs font-semibold uppercase text-slate-500">Current Teacher</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {peopleModalDetails.reassignedTeacher?.full_name || peopleModalDetails.teacher?.full_name || 'Teacher not found'}
+                        </p>
+                        {(peopleModalDetails.reassignedTeacher?.email || peopleModalDetails.teacher?.email) ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {peopleModalDetails.reassignedTeacher?.email || peopleModalDetails.teacher?.email}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+                        <p className="text-xs font-semibold uppercase text-slate-500">Original Teacher</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {peopleModalDetails.originalTeacher?.full_name || 'Teacher not found'}
+                        </p>
+                        {peopleModalDetails.originalTeacher?.email ? (
+                          <p className="mt-1 text-xs text-slate-500">{peopleModalDetails.originalTeacher.email}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex items-center gap-3 rounded-lg bg-white p-3 ring-1 ring-slate-200">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                        <User size={18} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-900">
+                          {peopleModalDetails.teacher?.full_name || 'Teacher not found'}
+                        </p>
+                        {peopleModalDetails.teacher?.email ? (
+                          <p className="truncate text-xs text-slate-500">{peopleModalDetails.teacher.email}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-slate-500">Students</p>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {peopleModalDetails.students.length} student{peopleModalDetails.students.length === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-3">
+                    {peopleModalDetails.students.length === 0 ? (
+                      <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                        No students found for this session.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {peopleModalDetails.students.map((student, index) => (
+                          <div key={student.id} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+                              {index + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-semibold text-slate-900">
+                                {student.full_name || 'Student'}
+                              </p>
+                              <p className="truncate text-xs text-slate-500">{student.email || 'No email'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {activeTab === 'mark' && selectedSession && (
         <div className="space-y-4">

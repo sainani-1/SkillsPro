@@ -6,6 +6,7 @@ import AvatarImage from '../components/AvatarImage';
 import { MessageCircle, Shield, Users, BookOpen, Calendar, UserCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isLifetimePremium, formatPremiumLabel } from '../utils/premium';
+import { ensureUsernameForUser, ensureUsernamesForUsers } from '../utils/usernames';
 
 const ROLE_OPTIONS = [
   { value: 'student', label: 'Students' },
@@ -44,7 +45,8 @@ const AdminUserAccess = () => {
       const matchesSearch =
         !query ||
         String(user.full_name || '').toLowerCase().includes(query) ||
-        String(user.email || '').toLowerCase().includes(query);
+        String(user.email || '').toLowerCase().includes(query) ||
+        String(user.username || '').toLowerCase().includes(query);
       return matchesRole && matchesSearch;
     });
   }, [users, roleFilter, search]);
@@ -89,7 +91,8 @@ const AdminUserAccess = () => {
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
-      setUsers(data || []);
+      const withUsernames = await ensureUsernamesForUsers(data || []);
+      setUsers(withUsernames);
     } catch (err) {
       setError(err.message || 'Failed to load users.');
     } finally {
@@ -113,7 +116,8 @@ const AdminUserAccess = () => {
         .single();
 
       if (profileError) throw profileError;
-      setSelectedUser(profile);
+      const profileWithUsername = await ensureUsernameForUser(profile);
+      setSelectedUser(profileWithUsername);
 
       const [
         enrollmentResp,
@@ -335,7 +339,7 @@ const AdminUserAccess = () => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email"
+            placeholder="Search by name, email, or username"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
 
@@ -359,6 +363,7 @@ const AdminUserAccess = () => {
                   />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-800">{user.full_name || 'User'}</p>
+                    <p className="truncate text-[11px] font-mono text-slate-500">{user.username || '-'}</p>
                     <p className="truncate text-xs text-slate-500">{user.email}</p>
                     <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-400">{user.role}</p>
                   </div>
@@ -393,6 +398,7 @@ const AdminUserAccess = () => {
                   />
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">{selectedUser.full_name}</h2>
+                    <p className="text-xs font-mono text-slate-500">{selectedUser.username || '-'}</p>
                     <p className="text-sm text-slate-500">{selectedUser.email}</p>
                     <p className="mt-1 text-xs uppercase tracking-wide text-slate-400">{selectedUser.role}</p>
                   </div>
@@ -409,7 +415,11 @@ const AdminUserAccess = () => {
                     This switches the app into that user's role and identity view so admin can use their flows from the normal app.
                   </p>
                 </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-slate-500">Username</p>
+                    <p className="font-semibold text-slate-800 break-all">{selectedUser.username || '-'}</p>
+                  </div>
                   <div className="rounded-lg bg-slate-50 p-3">
                     <p className="text-slate-500">Phone</p>
                     <p className="font-semibold text-slate-800">{selectedUser.phone || '-'}</p>

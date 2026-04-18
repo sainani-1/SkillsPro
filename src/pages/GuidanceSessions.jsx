@@ -9,6 +9,7 @@ import useDialog from '../hooks/useDialog.jsx';
 import { trackPremiumEvent } from '../utils/growth';
 import { sendAdminNotification } from '../utils/adminNotifications';
 import { buildPlanCheckoutPath } from '../utils/planCheckout';
+import { TEACHING_ROLES, isTeachingRole } from '../utils/teachingRoles';
 
 const GuidanceSessions = () => {
   const { confirm, dialogNode } = useDialog();
@@ -118,12 +119,12 @@ const GuidanceSessions = () => {
         } else {
           setTeachers([]);
         }
-      } else if (profile.role === 'admin' || profile.role === 'teacher') {
+      } else if (profile.role === 'admin' || isTeachingRole(profile.role)) {
         // For teachers: fetch only requests assigned to them
         // For admins: fetch all requests
         let query = supabase.from('guidance_requests').select('*');
         
-        if (profile.role === 'teacher') {
+        if (isTeachingRole(profile.role)) {
           query = query.eq('assigned_to_teacher_id', profile.id);
         }
         
@@ -154,8 +155,8 @@ const GuidanceSessions = () => {
         if (profile.role === 'admin') {
           const { data: tchs, error: tchError } = await supabase
             .from('profiles')
-            .select('id, full_name, email')
-            .eq('role', 'teacher');
+            .select('id, full_name, email, role')
+            .in('role', TEACHING_ROLES);
           
           if (tchError) console.error('Error fetching teachers:', tchError);
           setTeachers(tchs || []);
@@ -264,7 +265,7 @@ const GuidanceSessions = () => {
 
       await sendAdminNotification({
         title: 'New Mentorship Request',
-        content: `${profile?.full_name || 'Student'} requested mentorship on "${topic.trim()}".`,
+        content: `${profile?.full_name || 'Student'} requested mentorship on "${topic.trim()}".${notes.trim() ? ` Notes: ${notes.trim()}` : ''}`,
         admin_id: profile?.id || null,
       });
       
@@ -315,6 +316,14 @@ const GuidanceSessions = () => {
         });
         return;
       }
+
+      const teacher = teachers.find((item) => item.id === selectedTeacher);
+      const student = getStudentProfile(selectedRequest.student_id);
+      await sendAdminNotification({
+        title: 'Mentorship Request Assigned',
+        content: `${student?.full_name || 'Student'} was assigned to ${teacher?.full_name || 'a mentor'} for "${selectedRequest.topic || 'guidance'}".`,
+        admin_id: profile?.id || null,
+      });
       
       setShowAssignModal(false);
       setSelectedTeacher(null);
@@ -440,6 +449,14 @@ const GuidanceSessions = () => {
         });
         return;
       }
+
+      const mentor = teachers.find((item) => item.id === selectedMentor);
+      const student = getStudentProfile(selectedStudent);
+      await sendAdminNotification({
+        title: 'Mentor Assigned',
+        content: `${mentor?.full_name || 'Mentor'} was assigned to ${student?.full_name || 'a student'}.`,
+        admin_id: profile?.id || null,
+      });
       
       setShowMentorModal(false);
       setSelectedStudent(null);
@@ -657,7 +674,7 @@ const GuidanceSessions = () => {
       )}
 
       {/* TEACHER VIEW - Only assigned requests */}
-      {profile.role === 'teacher' && (
+      {isTeachingRole(profile.role) && (
         <>
           {/* Teacher's Assigned Requests */}
           <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
@@ -957,14 +974,21 @@ const GuidanceSessions = () => {
                               Completed
                             </span>
                           ) : (
-                            <a 
-                              href={sess.join_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="rounded-xl bg-nani-dark px-4 py-2 text-center text-sm text-white transition-colors hover:bg-nani-accent"
-                            >
-                              Open Meeting Link
-                            </a>
+                              <a
+                                href={sess.join_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => {
+                                  void sendAdminNotification({
+                                    title: 'Guidance Session Opened',
+                                    content: `${profile?.full_name || 'User'} opened the guidance session link for "${sess.title || req.topic || 'mentorship session'}".`,
+                                    admin_id: profile?.id || null,
+                                  });
+                                }}
+                                className="rounded-xl bg-nani-dark px-4 py-2 text-center text-sm text-white transition-colors hover:bg-nani-accent"
+                              >
+                                Open Meeting Link
+                              </a>
                           )}
                           {renderDeleteSessionButton(sess.id)}
                         </div>
@@ -1322,6 +1346,14 @@ const GuidanceSessions = () => {
                     setScheduling(false);
                     return;
                   }
+                  const teacher = teachers.find((item) => item.id === teacherId);
+                  const student = getStudentProfile(selectedRequest.student_id);
+                  await sendAdminNotification({
+                    title: 'Guidance Session Scheduled',
+                    content: `${teacher?.full_name || 'Teacher'} scheduled a guidance session for ${student?.full_name || 'student'} on ${scheduledAt.toLocaleString('en-IN')}.`,
+                    admin_id: profile?.id || null,
+                  });
+
                   setShowSessionModal(false);
                   setSelectedRequest(null);
                   setSessionLinkActiveUntil('');

@@ -5,7 +5,7 @@ import { BookOpenCheck, FileCheck, GraduationCap } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AuthShell from '../components/AuthShell';
-import { prepareAvatarFile } from '../utils/imageUtils';
+import { cachePendingRegistrationAvatar, uploadAvatarForUser } from '../utils/avatarUpload';
 import { attachPendingReferral, savePendingReferralCode } from '../utils/referrals';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,28 +42,10 @@ const Register = () => {
   };
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const navigate = useNavigate();
-  const getPendingAvatarKey = (email) => `pending_registration_avatar_${String(email || '').trim().toLowerCase()}`;
-
   const cachePendingAvatar = async (email, sourceFile) => {
     if (!email || !sourceFile) return;
     try {
-      const safeFile = await prepareAvatarFile(sourceFile);
-      const key = getPendingAvatarKey(email);
-      const fileForCache = safeFile || sourceFile;
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('Failed to read avatar file'));
-        reader.readAsDataURL(fileForCache);
-      });
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          dataUrl,
-          mime: fileForCache.type || 'image/jpeg',
-          savedAt: new Date().toISOString()
-        })
-      );
+      await cachePendingRegistrationAvatar(email, sourceFile);
     } catch (err) {
       // Ignore cache failures; registration should continue.
     }
@@ -271,18 +253,23 @@ const Register = () => {
       let avatarUrl = null;
       if (file) {
         try {
-          const safeFile = await prepareAvatarFile(file);
-          const fileExt = safeFile?.name?.split('.').pop() || file.name.split('.').pop();
-          const fileName = `${user.id}.${fileExt}`;
-          const filePath = fileName;
-
-          const { error: uploadError } = await supabase.storage
-            .from('avatars')
-            .upload(filePath, safeFile, { upsert: true, contentType: safeFile?.type || file.type });
-
-          if (uploadError) throw uploadError;
-          const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-          avatarUrl = data?.publicUrl || avatarUrl;
+          avatarUrl = await uploadAvatarForUser(supabase, user.id, file);
+          try {
+            await supabase.auth.updateUser({
+              data: {
+                full_name: formData.fullName.trim(),
+                phone: formattedPhone,
+                avatar_url: avatarUrl,
+                education_level: formData.educationLevel,
+                study_stream: resolvedStudyStream,
+                diploma_certificate: formData.diploma || null,
+                core_subject: resolvedStudyStream || formData.coreSubject || null,
+                role: 'student'
+              }
+            });
+          } catch (metadataError) {
+            console.warn('Student metadata sync warning:', metadataError.message || metadataError);
+          }
         } catch (photoErr) {
           console.warn('Photo upload warning:', photoErr.message);
           // Cache avatar locally and apply on first successful login after email verification.
@@ -293,6 +280,7 @@ const Register = () => {
       // 3. Create/Update profile from registration details so user does not need to enter again.
       const { error: profileError } = await supabase.from('profiles').upsert([{
         id: user.id,
+        auth_user_id: user.id,
         full_name: formData.fullName.trim(),
         email: formData.email.trim(),
         phone: formattedPhone,
