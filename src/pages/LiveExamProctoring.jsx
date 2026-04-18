@@ -976,11 +976,44 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setLiveExamRebookingWaitDays(Math.max(0, Number(settingsMap.live_exam_rebooking_wait_days || 7) || 0));
 
       let visibleSlotIds = [];
+      let teacherVisibleStudentIds = [];
       let slotRows = [];
       const shouldIncludeCancelledSlots = isAdmin && isCancellationsPanel;
       const shouldLoadAdminDirectory = isAdmin && (showFullOverview || isSlotsPanel);
 
-      if (isInstructor) {
+      if (isTeacher) {
+        const { data: assignedStudents, error: assignedStudentsError } = await withClientTimeout(
+          supabase
+            .from('profiles')
+            .select('id')
+            .eq('assigned_teacher_id', profile.id)
+            .eq('role', 'student')
+        );
+        if (assignedStudentsError) throw assignedStudentsError;
+        teacherVisibleStudentIds = (assignedStudents || []).map((row) => row.id).filter(Boolean);
+        if (teacherVisibleStudentIds.length) {
+          const [teacherBookingSlotsResp, teacherSessionSlotsResp] = await Promise.all([
+            loadOptionalQuery(
+              supabase
+                .from('exam_slot_bookings')
+                .select('slot_id')
+                .in('student_id', teacherVisibleStudentIds),
+              []
+            ),
+            loadOptionalQuery(
+              supabase
+                .from('exam_live_sessions')
+                .select('slot_id')
+                .in('student_id', teacherVisibleStudentIds),
+              []
+            ),
+          ]);
+          visibleSlotIds = Array.from(new Set([
+            ...(teacherBookingSlotsResp.data || []).map((row) => row.slot_id),
+            ...(teacherSessionSlotsResp.data || []).map((row) => row.slot_id),
+          ].filter(Boolean)));
+        }
+      } else if (isInstructor) {
         const { data: assignedRows, error: assignedError } = await withClientTimeout(
           supabase
             .from('exam_slot_instructors')
@@ -996,9 +1029,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         .select('*')
         .order('starts_at', { ascending: true });
 
-      if (isTeacher) {
-        slotQuery = slotQuery.eq('teacher_id', profile.id);
-      } else if (isInstructor) {
+      if (isTeacher || isInstructor) {
         if (visibleSlotIds.length === 0) {
           slotRows = [];
         } else {
@@ -1011,7 +1042,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         slotQuery = slotQuery.neq('status', 'cancelled').gte('ends_at', recentPast).lte('starts_at', cutoff);
       }
 
-      if (!slotRows.length || !isInstructor) {
+      const shouldFetchSlots = !(isTeacher || isInstructor) || visibleSlotIds.length > 0;
+      if (shouldFetchSlots) {
         const { data, error: slotError } = await withClientTimeout(slotQuery);
         if (slotError) throw slotError;
         slotRows = data || [];
@@ -1153,15 +1185,19 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       });
 
       let finalSlotRows = slotRows;
+      const teacherStudentIds = isTeacher
+        ? new Set(teacherVisibleStudentIds.map((studentId) => String(studentId)))
+        : null;
       if (isTeacher) {
-        const teacherSlotIds = new Set(
-          bookingRows
-            .filter((booking) => String(profileMap[booking.student_id]?.assigned_teacher_id || '') === String(profile.id))
-            .map((booking) => booking.slot_id)
-        );
-        slotRows.forEach((slot) => {
-          if (String(slot.teacher_id || '') === String(profile.id)) {
-            teacherSlotIds.add(slot.id);
+        const teacherSlotIds = new Set();
+        bookingRows.forEach((booking) => {
+          if (teacherStudentIds.has(String(booking.student_id || ''))) {
+            teacherSlotIds.add(booking.slot_id);
+          }
+        });
+        sessionRows.forEach((session) => {
+          if (teacherStudentIds.has(String(session.student_id || ''))) {
+            teacherSlotIds.add(session.slot_id);
           }
         });
         finalSlotRows = slotRows.filter((slot) => teacherSlotIds.has(slot.id));
@@ -1171,13 +1207,6 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       }
 
       const finalSlotIds = new Set(finalSlotRows.map((slot) => slot.id));
-      const teacherStudentIds = isTeacher
-        ? new Set(
-            bookingRows
-              .filter((booking) => String(profileMap[booking.student_id]?.assigned_teacher_id || '') === String(profile.id))
-              .map((booking) => String(booking.student_id))
-          )
-        : null;
       const roleAllowsStudent = (studentId) => !teacherStudentIds || teacherStudentIds.has(String(studentId || ''));
       const finalBookings = bookingRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id));
       const finalSessions = sessionRows.filter((row) => finalSlotIds.has(row.slot_id) && roleAllowsStudent(row.student_id));
@@ -1638,9 +1667,20 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         }, { onConflict: 'slot_id,student_id' });
       if (bookingError) throw bookingError;
 
-      const premiumTeacherId = isPremiumStudentProfile(profile) ? profile.assigned_teacher_id : null;
-      const teacherRecipientId = premiumTeacherId || slot.teacher_id || null;
-      const teacher = teacherRecipientId ? profilesById[teacherRecipientId] || null : null;
+      const teacherRecipientId = profile.assigned_teacher_id || null;
+      let instructorRecipientIds = slotInstructors
+        .filter((row) => String(row.slot_id || '') === String(slot.id))
+        .map((row) => row.instructor_id)
+        .filter(Boolean);
+      if (!instructorRecipientIds.length) {
+        const { data: assignedInstructors, error: assignedInstructorError } = await supabase
+          .from('exam_slot_instructors')
+          .select('instructor_id')
+          .eq('slot_id', slot.id);
+        if (assignedInstructorError) throw assignedInstructorError;
+        instructorRecipientIds = (assignedInstructors || []).map((row) => row.instructor_id).filter(Boolean);
+      }
+      instructorRecipientIds = Array.from(new Set(instructorRecipientIds.map((id) => String(id))));
       const teacherNotificationText = `${profile.full_name || profile.email || 'A student'} scheduled ${getExamDisplayName(exam, coursesById[exam?.course_id])} for ${formatDateTime(slot.starts_at)}.`;
       const notificationRows = [
         {
@@ -1653,26 +1693,58 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       ];
       if (teacherRecipientId) {
         notificationRows.push({
-          title: isPremiumStudentProfile(profile) ? 'Premium Student Session Scheduled' : 'Student Exam Booking',
+          title: 'Assigned Student Exam Booking',
           content: teacherNotificationText,
           type: 'info',
           target_role: 'teacher',
           target_user_id: teacherRecipientId,
         });
       }
+      instructorRecipientIds.forEach((instructorId) => {
+        notificationRows.push({
+          title: 'Assigned Slot Exam Booking',
+          content: teacherNotificationText,
+          type: 'info',
+          target_role: 'instructor',
+          target_user_id: instructorId,
+        });
+      });
       const notificationsSent = await insertNotifications(notificationRows);
       if (!notificationsSent) {
-        await insertLiveSystemMessages([
+        const fallbackMessages = [
           {
             slot_id: slot.id,
             session_id: null,
             sender_id: profile.id,
             sender_role: 'student',
-            recipient_id: teacherRecipientId,
-            is_broadcast: !teacherRecipientId,
+            recipient_id: null,
+            is_broadcast: true,
             content: teacherNotificationText,
           },
-        ]);
+        ];
+        if (teacherRecipientId) {
+          fallbackMessages.push({
+            slot_id: slot.id,
+            session_id: null,
+            sender_id: profile.id,
+            sender_role: 'student',
+            recipient_id: teacherRecipientId,
+            is_broadcast: false,
+            content: teacherNotificationText,
+          });
+        }
+        instructorRecipientIds.forEach((instructorId) => {
+          fallbackMessages.push({
+            slot_id: slot.id,
+            session_id: null,
+            sender_id: profile.id,
+            sender_role: 'student',
+            recipient_id: instructorId,
+            is_broadcast: false,
+            content: teacherNotificationText,
+          });
+        });
+        await insertLiveSystemMessages(fallbackMessages);
       }
       setStudentSelectedDate(toLocalDateInputValue(slot.starts_at));
       setStudentCalendarMonth(getMonthStart(slot.starts_at));
