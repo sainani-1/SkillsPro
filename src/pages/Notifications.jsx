@@ -34,6 +34,10 @@ export default function Notifications() {
   };
   const stripLegacyTargetMarker = (text) =>
     String(text || '').replace(/^\s*\[target_user_id:[^\]]+\]\s*/i, '');
+  const isTargetUserIdColumnError = (err) => {
+    const text = [err?.message, err?.details, err?.hint].filter(Boolean).join(' ').toLowerCase();
+    return text.includes('target_user_id');
+  };
   const isUuid = (value) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(value || '')
@@ -100,11 +104,19 @@ export default function Notifications() {
       }
 
       // Fetch notifications using role scope only (schema-safe across deployments).
-      const roleScopedRes = await supabase
+      let roleScopedRes = await supabase
         .from('admin_notifications')
         .select('id, title, content, type, target_role, target_user_id, created_at')
         .or(`target_role.eq.all,target_role.eq.${user.role}`)
         .order('created_at', { ascending: false });
+
+      if (roleScopedRes.error && isTargetUserIdColumnError(roleScopedRes.error)) {
+        roleScopedRes = await supabase
+          .from('admin_notifications')
+          .select('id, title, content, type, target_role, created_at')
+          .or(`target_role.eq.all,target_role.eq.${user.role}`)
+          .order('created_at', { ascending: false });
+      }
 
       const data = roleScopedRes.data || [];
       if (roleScopedRes.error) throw roleScopedRes.error;

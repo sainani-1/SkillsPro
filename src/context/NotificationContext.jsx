@@ -31,6 +31,11 @@ const extractLegacyTargetUserId = (text) => {
   return match?.[1] || null;
 };
 
+const isTargetUserIdColumnError = (err) => {
+  const text = [err?.message, err?.details, err?.hint].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('target_user_id');
+};
+
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value || '')
@@ -48,11 +53,19 @@ export const NotificationProvider = ({ children }) => {
     }
 
     try {
-      const roleScopedRes = await supabase
+      let roleScopedRes = await supabase
         .from('admin_notifications')
         .select('id, content, created_at, target_user_id')
         .or(`target_role.eq.all,target_role.eq.${profile.role}`)
         .order('created_at', { ascending: false });
+
+      if (roleScopedRes.error && isTargetUserIdColumnError(roleScopedRes.error)) {
+        roleScopedRes = await supabase
+          .from('admin_notifications')
+          .select('id, content, created_at')
+          .or(`target_role.eq.all,target_role.eq.${profile.role}`)
+          .order('created_at', { ascending: false });
+      }
 
       const notifications = roleScopedRes.data || [];
       if (roleScopedRes.error) throw roleScopedRes.error;
