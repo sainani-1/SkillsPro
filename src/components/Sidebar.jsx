@@ -118,9 +118,9 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
     `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
   const shouldShowText = isMobile || !isCollapsed || isHovered;
-  const requestNavigation = (path, label = 'the selected page') => {
+  const requestNavigation = (path) => {
     if (onRequestNavigation) {
-      onRequestNavigation(path, label);
+      onRequestNavigation(path);
       return;
     }
     navigate(path);
@@ -139,7 +139,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
     if (url.pathname === location.pathname) return;
 
     event.preventDefault();
-    requestNavigation(`${url.pathname}${url.search}${url.hash}`, link.getAttribute('title') || link.textContent?.trim() || 'the selected page');
+    requestNavigation(`${url.pathname}${url.search}${url.hash}`);
   };
 
   useEffect(() => {
@@ -443,7 +443,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
         ) : null}
         <div
           className={`flex items-center ${isMobile ? 'gap-3' : isCollapsed && !isHovered ? 'justify-center' : 'space-x-2'} cursor-pointer hover:opacity-80 transition-opacity`}
-          onClick={() => requestNavigation('/app', 'Dashboard')}
+          onClick={() => requestNavigation('/app')}
         >
           <img src="/skillpro-logo.png" alt="SkillPro logo" className={`${isMobile ? 'w-11 h-11' : 'w-10 h-10'} rounded-full object-contain`} />
           {shouldShowText && (

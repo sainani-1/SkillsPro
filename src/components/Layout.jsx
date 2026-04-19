@@ -9,7 +9,7 @@ import Toast from './Toast';
 import { logAdminNavigation } from '../utils/adminActivityLogger';
 import { useNotifications } from '../context/NotificationContext';
 import { readBrowserState, writeBrowserState } from '../utils/browserState';
-import NavigationPermissionPopup from './NavigationPermissionPopup';
+import NotificationPermissionPopup from './NotificationPermissionPopup';
 
 const SIDEBAR_COLLAPSED_KEY = 'layout_sidebar_collapsed';
 const LAST_OPENED_PAGE_KEY = 'layout_last_opened_page';
@@ -25,7 +25,10 @@ const Layout = () => {
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState(null);
+  const [notificationPrompt, setNotificationPrompt] = useState({ open: false, nextPath: null });
+  const [notificationPermissionStatus, setNotificationPermissionStatus] = useState(() =>
+    typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported'
+  );
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
@@ -233,21 +236,49 @@ const Layout = () => {
         .filter((item) => item.label.toLowerCase().includes(panelSearch.trim().toLowerCase()))
         .slice(0, 8);
 
-  const requestPageSwitch = useCallback((path, label = 'the selected page') => {
-    if (!path || path === location.pathname) return;
-    setPendingNavigation({ path, label });
-  }, [location.pathname]);
-
-  const allowPendingNavigation = useCallback(() => {
-    if (!pendingNavigation?.path) return;
-    const nextPath = pendingNavigation.path;
-    setPendingNavigation(null);
-    navigate(nextPath);
-  }, [navigate, pendingNavigation]);
-
-  const denyPendingNavigation = useCallback(() => {
-    setPendingNavigation(null);
+  const refreshNotificationPermissionStatus = useCallback(() => {
+    const nextStatus = typeof window !== 'undefined' && 'Notification' in window
+      ? window.Notification.permission
+      : 'unsupported';
+    setNotificationPermissionStatus(nextStatus);
+    return nextStatus;
   }, []);
+
+  const shouldAskForNotifications = useCallback(() => {
+    const nextStatus = refreshNotificationPermissionStatus();
+    return nextStatus !== 'granted' && nextStatus !== 'unsupported';
+  }, [refreshNotificationPermissionStatus]);
+
+  const requestPageSwitch = useCallback((path) => {
+    if (!path || path === location.pathname) return;
+    if (shouldAskForNotifications()) {
+      setNotificationPrompt({ open: true, nextPath: path });
+      return;
+    }
+    navigate(path);
+  }, [location.pathname, navigate, shouldAskForNotifications]);
+
+  const finishNotificationPrompt = useCallback((nextPath) => {
+    setNotificationPrompt({ open: false, nextPath: null });
+    if (nextPath) navigate(nextPath);
+  }, [navigate]);
+
+  const allowNotifications = useCallback(async () => {
+    const nextPath = notificationPrompt.nextPath;
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        await window.Notification.requestPermission();
+      } catch {
+        // Some browsers only allow this from a direct click; the user can try again.
+      }
+    }
+    refreshNotificationPermissionStatus();
+    finishNotificationPrompt(nextPath);
+  }, [finishNotificationPrompt, notificationPrompt.nextPath, refreshNotificationPermissionStatus]);
+
+  const skipNotifications = useCallback(() => {
+    finishNotificationPrompt(notificationPrompt.nextPath);
+  }, [finishNotificationPrompt, notificationPrompt.nextPath]);
 
   const handlePanelTargetSelect = async (item) => {
     if (!item) return;
@@ -255,7 +286,7 @@ const Layout = () => {
       await signOut();
       return;
     }
-    requestPageSwitch(item.path, item.label);
+    requestPageSwitch(item.path);
   };
 
   useEffect(() => {
@@ -520,11 +551,11 @@ const Layout = () => {
         type={toast.type}
         onClose={() => setToast((prev) => ({ ...prev, show: false }))}
       />
-      <NavigationPermissionPopup
-        open={Boolean(pendingNavigation)}
-        targetLabel={pendingNavigation?.label}
-        onAllow={allowPendingNavigation}
-        onDeny={denyPendingNavigation}
+      <NotificationPermissionPopup
+        open={notificationPrompt.open}
+        permissionStatus={notificationPermissionStatus}
+        onAllow={allowNotifications}
+        onSkip={skipNotifications}
       />
       <Sidebar
         isMobile={isMobileViewport}
@@ -587,7 +618,7 @@ const Layout = () => {
             </div>
           </div>
           <div className="flex items-center space-x-3 md:space-x-6">
-            <div className="relative cursor-pointer" onClick={() => requestPageSwitch('/app/notifications', 'Notifications')}>
+            <div className="relative cursor-pointer" onClick={() => requestPageSwitch('/app/notifications')}>
               <Bell size={20} className="text-slate-600 hover:text-blue-600 transition" />
               {unreadNotifications > 0 && (
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold animate-pulse">
