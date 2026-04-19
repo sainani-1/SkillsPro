@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { Bell, Menu, Search } from 'lucide-react';
@@ -9,6 +9,7 @@ import Toast from './Toast';
 import { logAdminNavigation } from '../utils/adminActivityLogger';
 import { useNotifications } from '../context/NotificationContext';
 import { readBrowserState, writeBrowserState } from '../utils/browserState';
+import NavigationPermissionPopup from './NavigationPermissionPopup';
 
 const SIDEBAR_COLLAPSED_KEY = 'layout_sidebar_collapsed';
 const LAST_OPENED_PAGE_KEY = 'layout_last_opened_page';
@@ -24,6 +25,7 @@ const Layout = () => {
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
@@ -231,13 +233,29 @@ const Layout = () => {
         .filter((item) => item.label.toLowerCase().includes(panelSearch.trim().toLowerCase()))
         .slice(0, 8);
 
+  const requestPageSwitch = useCallback((path, label = 'the selected page') => {
+    if (!path || path === location.pathname) return;
+    setPendingNavigation({ path, label });
+  }, [location.pathname]);
+
+  const allowPendingNavigation = useCallback(() => {
+    if (!pendingNavigation?.path) return;
+    const nextPath = pendingNavigation.path;
+    setPendingNavigation(null);
+    navigate(nextPath);
+  }, [navigate, pendingNavigation]);
+
+  const denyPendingNavigation = useCallback(() => {
+    setPendingNavigation(null);
+  }, []);
+
   const handlePanelTargetSelect = async (item) => {
     if (!item) return;
     if (item.path === '__signout__') {
       await signOut();
       return;
     }
-    navigate(item.path);
+    requestPageSwitch(item.path, item.label);
   };
 
   useEffect(() => {
@@ -502,10 +520,17 @@ const Layout = () => {
         type={toast.type}
         onClose={() => setToast((prev) => ({ ...prev, show: false }))}
       />
+      <NavigationPermissionPopup
+        open={Boolean(pendingNavigation)}
+        targetLabel={pendingNavigation?.label}
+        onAllow={allowPendingNavigation}
+        onDeny={denyPendingNavigation}
+      />
       <Sidebar
         isMobile={isMobileViewport}
         mobileOpen={mobileSidebarOpen}
         onClose={() => setMobileSidebarOpen(false)}
+        onRequestNavigation={requestPageSwitch}
       />
       <div
         className="flex flex-col transition-all duration-300"
@@ -562,7 +587,7 @@ const Layout = () => {
             </div>
           </div>
           <div className="flex items-center space-x-3 md:space-x-6">
-            <div className="relative cursor-pointer" onClick={() => navigate('/app/notifications')}>
+            <div className="relative cursor-pointer" onClick={() => requestPageSwitch('/app/notifications', 'Notifications')}>
               <Bell size={20} className="text-slate-600 hover:text-blue-600 transition" />
               {unreadNotifications > 0 && (
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold animate-pulse">

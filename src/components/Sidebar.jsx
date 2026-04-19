@@ -7,7 +7,7 @@ import { useNotifications } from '../context/NotificationContext';
 import { getChatReadTimes, markChatsAsRead } from '../utils/chatReadState';
 import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
-const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) => {
+const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onRequestNavigation = null }) => {
   const { profile, realProfile, isImpersonating, stopImpersonation, signOut, isPremium, isPremiumPlus } = useAuth();
   const { unreadNotifications } = useNotifications();
   const navigate = useNavigate();
@@ -118,6 +118,29 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
     `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
 
   const shouldShowText = isMobile || !isCollapsed || isHovered;
+  const requestNavigation = (path, label = 'the selected page') => {
+    if (onRequestNavigation) {
+      onRequestNavigation(path, label);
+      return;
+    }
+    navigate(path);
+  };
+
+  const handleSidebarNavigationClick = (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    const link = event.target.closest?.('a[href]');
+    if (!link || link.target === '_blank') return;
+
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/app')) return;
+    if (url.pathname === location.pathname) return;
+
+    event.preventDefault();
+    requestNavigation(`${url.pathname}${url.search}${url.hash}`, link.getAttribute('title') || link.textContent?.trim() || 'the selected page');
+  };
 
   useEffect(() => {
     if (location.pathname !== lastPathname) {
@@ -420,7 +443,7 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
         ) : null}
         <div
           className={`flex items-center ${isMobile ? 'gap-3' : isCollapsed && !isHovered ? 'justify-center' : 'space-x-2'} cursor-pointer hover:opacity-80 transition-opacity`}
-          onClick={() => navigate('/app')}
+          onClick={() => requestNavigation('/app', 'Dashboard')}
         >
           <img src="/skillpro-logo.png" alt="SkillPro logo" className={`${isMobile ? 'w-11 h-11' : 'w-10 h-10'} rounded-full object-contain`} />
           {shouldShowText && (
@@ -461,7 +484,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {} }) =
         </button>
       ) : null}
 
-      <nav className={`flex-1 ${isMobile ? 'p-3 space-y-2' : 'p-4 space-y-3'} overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col`}>
+      <nav
+        className={`flex-1 ${isMobile ? 'p-3 space-y-2' : 'p-4 space-y-3'} overflow-y-auto scrollbar-thin scrollbar-thumb-gold-400 scrollbar-track-nani-dark/50 flex flex-col`}
+        onClickCapture={handleSidebarNavigationClick}
+      >
         {role === 'instructor' ? (
           <>
             <NavLink to="/app" end className={navItemClass} title="Dashboard">
