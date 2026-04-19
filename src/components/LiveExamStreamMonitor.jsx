@@ -167,11 +167,15 @@ function bindSharedRoomStateListeners(entry) {
     if (publication?.source === Track.Source.ScreenShare && track?.kind === Track.Kind.Video) {
       emitSharedRoomState(entry, {
         debugState: { screen: 'connected' },
+        status: 'Live stream connected.',
+        error: '',
       });
     }
     if (publication?.source === Track.Source.Camera && track?.kind === Track.Kind.Video) {
       emitSharedRoomState(entry, {
         debugState: { camera: 'connected' },
+        status: 'Live stream connected.',
+        error: '',
       });
     }
     if (publication?.source === Track.Source.Microphone && track?.kind === Track.Kind.Audio) {
@@ -594,7 +598,7 @@ export default function LiveExamStreamMonitor({
     const participantConnectedHandler = (participant) => {
       subscribeParticipantTracks(participant);
     };
-    const trackPublishedHandler = (_, publication, participant) => {
+    const trackPublishedHandler = (publication, participant) => {
       publication?.setSubscribed?.(true);
       subscribeParticipantTracks(participant);
     };

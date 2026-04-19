@@ -165,6 +165,56 @@ async function insertLiveSystemMessages(rows) {
   }
 }
 
+const uniqueIds = (ids) => Array.from(new Set((ids || []).filter(Boolean).map((id) => String(id))));
+
+const countActiveBookingsBySlot = (bookingRows) => {
+  const counts = {};
+  (bookingRows || []).forEach((booking) => {
+    if (String(booking.status || '').toLowerCase() === 'cancelled') return;
+    const slotId = String(booking.slot_id || '');
+    if (!slotId) return;
+    counts[slotId] = (counts[slotId] || 0) + 1;
+  });
+  return counts;
+};
+
+async function loadNotificationRecipientRoles(recipientIds, fallbackRole) {
+  const ids = uniqueIds(recipientIds);
+  const fallbackMap = ids.map((id) => ({ id, role: fallbackRole }));
+  if (!ids.length) return fallbackMap;
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .in('id', ids);
+    if (error) throw error;
+
+    const roleById = new Map((data || []).map((row) => [String(row.id), row.role || fallbackRole]));
+    return ids.map((id) => ({ id, role: roleById.get(id) || fallbackRole }));
+  } catch (error) {
+    console.warn('Live exam recipient role lookup failed.', error.message || error);
+    return fallbackMap;
+  }
+}
+
+async function loadAssignedTeacherIdsForStudent(studentId) {
+  if (!studentId) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('teacher_assignments')
+      .select('teacher_id')
+      .eq('student_id', studentId)
+      .eq('active', true);
+    if (error) throw error;
+    return uniqueIds((data || []).map((row) => row.teacher_id));
+  } catch (error) {
+    console.warn('Live exam teacher assignment lookup failed.', error.message || error);
+    return [];
+  }
+}
+
 async function withClientTimeout(promise, timeoutMs = 12000) {
   let timeoutHandle;
   const timeoutPromise = new Promise((_, reject) => {
@@ -232,6 +282,58 @@ async function loadStaffLiveExamFeed() {
   return payload || null;
 }
 
+async function loadAssignedLiveExamSlotsFeed() {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) {
+    throw new Error('Assigned live exam slots need a logged-in staff session. Please sign in again.');
+  }
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/live-exam-feed`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ action: 'assigned-slots' }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `Assigned live exam slots failed with status ${response.status}.`);
+  }
+  return payload || null;
+}
+
+async function loadLiveExamBookingCounts(slotIds) {
+  const requestedSlotIds = uniqueIds(slotIds);
+  if (!requestedSlotIds.length) return {};
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) return {};
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/live-exam-feed`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      action: 'booking-counts',
+      slotIds: requestedSlotIds,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `Live exam booking count failed with status ${response.status}.`);
+  }
+  return payload?.counts || {};
+}
+
 export default function LiveExamProctoring({ forcedPanel = '' }) {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -248,6 +350,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const [slotInstructors, setSlotInstructors] = useState([]);
   const [slotOverrides, setSlotOverrides] = useState([]);
   const [facultyAttendance, setFacultyAttendance] = useState([]);
+  const [slotBookingCounts, setSlotBookingCounts] = useState({});
   const [examsById, setExamsById] = useState({});
   const [coursesById, setCoursesById] = useState({});
   const [profilesById, setProfilesById] = useState({});
@@ -872,6 +975,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         const filtered = prev.filter((row) => String(row.slot_id) !== String(selectedSlot.id));
         return [...filtered, ...nextBookings];
       });
+      setSlotBookingCounts((prev) => ({
+        ...prev,
+        [selectedSlot.id]: countActiveBookingsBySlot(nextBookings)[String(selectedSlot.id)] || 0,
+      }));
 
       const missingStudentIds = Array.from(new Set(nextBookings.map((row) => row.student_id).filter(Boolean)))
         .filter((id) => !profilesById[id]);
@@ -1000,26 +1107,26 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const shouldIncludeCancelledSlots = isAdmin && isCancellationsPanel;
       const shouldLoadAdminDirectory = isAdmin && (showFullOverview || isSlotsPanel);
 
-      if (isTeacher || isInstructor) {
-        let staffFeed = null;
+      if (isInstructor) {
+        let assignedFeed = null;
         try {
-          staffFeed = await loadStaffLiveExamFeed();
+          assignedFeed = await loadAssignedLiveExamSlotsFeed();
         } catch (feedError) {
-          setError(feedError.message || 'Live exam staff feed failed. Deploy the live-exam-feed edge function and refresh.');
+          setError(feedError.message || 'Assigned instructor slot feed failed. Deploy the live-exam-feed edge function and refresh.');
         }
         if (activeLoadIdRef.current !== loadId) return;
 
-        const feedSlots = staffFeed?.slots || [];
-        const feedBookings = staffFeed?.bookings || [];
-        const feedSessions = staffFeed?.sessions || [];
-        const feedViolations = staffFeed?.violations || [];
-        const feedMessages = staffFeed?.messages || [];
-        const feedInstructors = staffFeed?.instructors || [];
-        const feedOverrides = staffFeed?.overrides || [];
-        const feedFacultyAttendance = staffFeed?.facultyAttendance || [];
-        const feedExams = staffFeed?.exams || [];
-        const feedCourses = staffFeed?.courses || [];
-        const feedProfiles = staffFeed?.profiles || [];
+        const feedSlots = assignedFeed?.slots || [];
+        const feedBookings = assignedFeed?.bookings || [];
+        const feedSessions = assignedFeed?.sessions || [];
+        const feedViolations = assignedFeed?.violations || [];
+        const feedMessages = assignedFeed?.messages || [];
+        const feedInstructors = assignedFeed?.instructors || [];
+        const feedOverrides = assignedFeed?.overrides || [];
+        const feedFacultyAttendance = assignedFeed?.facultyAttendance || [];
+        const feedExams = assignedFeed?.exams || [];
+        const feedCourses = assignedFeed?.courses || [];
+        const feedProfiles = assignedFeed?.profiles || [];
 
         const examMap = {};
         feedExams.forEach((exam) => {
@@ -1036,6 +1143,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
 
         setSlots(feedSlots);
         setBookings(feedBookings);
+        setSlotBookingCounts(countActiveBookingsBySlot(feedBookings));
         setSessions(feedSessions);
         setViolations(feedViolations);
         setMessages(feedMessages);
@@ -1358,8 +1466,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         finalFacultyAttendanceRows = facultyAttendanceRows.filter((row) => finalSlotIds.has(row.slot_id));
       }
 
+      let nextSlotBookingCounts = countActiveBookingsBySlot(finalBookings);
+      if (isStudent && finalSlotRows.length > 0) {
+        try {
+          nextSlotBookingCounts = await loadLiveExamBookingCounts(finalSlotRows.map((slot) => slot.id));
+        } catch (countError) {
+          console.warn('Live exam booking counts unavailable.', countError.message || countError);
+        }
+      }
+
       setSlots(finalSlotRows);
       setBookings(finalBookings);
+      setSlotBookingCounts(nextSlotBookingCounts);
       setSessions(finalSessions);
       setViolations(finalViolations);
       setMessages(finalMessages);
@@ -1780,9 +1898,19 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       if (rebookingBlock && String(rebookingBlock.lastSlotId) !== String(slot.id)) {
         throw new Error(`Wait for ${liveExamRebookingWaitDays} day(s) before booking a new slot for this exam. Next booking opens on ${formatDateTime(rebookingBlock.blockedUntil)}.`);
       }
-      const bookingCount = bookings.filter(
-        (row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled'
-      ).length;
+      let bookingCount = Number(slotBookingCounts[String(slot.id)] || 0);
+      try {
+        const freshCounts = await loadLiveExamBookingCounts([slot.id]);
+        bookingCount = Number(freshCounts[String(slot.id)] ?? bookingCount);
+        setSlotBookingCounts((prev) => ({
+          ...prev,
+          [slot.id]: bookingCount,
+        }));
+      } catch (countError) {
+        bookingCount = bookings.filter(
+          (row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled'
+        ).length;
+      }
       const hasOverride = slotOverrides.some(
         (row) => String(row.slot_id) === String(slot.id) && String(row.student_id) === String(profile.id)
       );
@@ -1804,11 +1932,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           override_applied: hasOverride,
         }, { onConflict: 'slot_id,student_id' });
       if (bookingError) throw bookingError;
+      setSlotBookingCounts((prev) => ({
+        ...prev,
+        [slot.id]: Math.max(Number(prev[String(slot.id)] || 0), bookingCount + 1),
+      }));
 
-      const teacherRecipientIds = Array.from(new Set([
+      const assignedTeacherIds = await loadAssignedTeacherIdsForStudent(profile.id);
+      const teacherRecipientIds = uniqueIds([
         profile.assigned_teacher_id,
         slot.teacher_id,
-      ].filter(Boolean).map((id) => String(id))));
+        ...assignedTeacherIds,
+      ]);
       let instructorRecipientIds = slotInstructors
         .filter((row) => String(row.slot_id || '') === String(slot.id))
         .map((row) => row.instructor_id)
@@ -1821,7 +1955,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         if (assignedInstructorError) throw assignedInstructorError;
         instructorRecipientIds = (assignedInstructors || []).map((row) => row.instructor_id).filter(Boolean);
       }
-      instructorRecipientIds = Array.from(new Set(instructorRecipientIds.map((id) => String(id))));
+      instructorRecipientIds = uniqueIds(instructorRecipientIds);
+      const teacherRecipients = await loadNotificationRecipientRoles(teacherRecipientIds, 'teacher');
+      const instructorRecipients = await loadNotificationRecipientRoles(instructorRecipientIds, 'instructor');
       const teacherNotificationText = `${profile.full_name || profile.email || 'A student'} scheduled ${getExamDisplayName(exam, coursesById[exam?.course_id])} for ${formatDateTime(slot.starts_at)}.`;
       const notificationRows = [
         {
@@ -1832,22 +1968,22 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           target_user_id: null,
         },
       ];
-      teacherRecipientIds.forEach((teacherRecipientId) => {
+      teacherRecipients.forEach((recipient) => {
         notificationRows.push({
           title: 'Assigned Student Exam Booking',
           content: teacherNotificationText,
           type: 'info',
-          target_role: 'teacher',
-          target_user_id: teacherRecipientId,
+          target_role: recipient.role || 'teacher',
+          target_user_id: recipient.id,
         });
       });
-      instructorRecipientIds.forEach((instructorId) => {
+      instructorRecipients.forEach((recipient) => {
         notificationRows.push({
           title: 'Assigned Slot Exam Booking',
           content: teacherNotificationText,
           type: 'info',
-          target_role: 'instructor',
-          target_user_id: instructorId,
+          target_role: recipient.role || 'instructor',
+          target_user_id: recipient.id,
         });
       });
       const notificationsSent = await insertNotifications(notificationRows);
@@ -3120,7 +3256,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
               const rebookingBlock = liveExamRebookingBlocksByExamId[slot.exam_id];
               const isRebookingBlocked = !myBooking && Boolean(rebookingBlock) && String(rebookingBlock.lastSlotId) !== String(slot.id);
               const effectiveBookingStatus = myBooking ? getEffectiveBookingStatus(myBooking, slot) : '';
-              const bookingCount = bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled').length;
+              const bookingCount = Number(
+                slotBookingCounts[String(slot.id)] ??
+                bookings.filter((row) => String(row.slot_id) === String(slot.id) && row.status !== 'cancelled').length
+              );
               const slotFull = bookingCount >= Number(slot.max_capacity || 0) && !myBooking;
               const hasOverride = slotOverrides.some((row) => String(row.slot_id) === String(slot.id) && String(row.student_id) === String(profile?.id));
               const resultLabel = hasPassedExamAlready
@@ -3162,7 +3301,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                   <div className="mt-5 flex flex-wrap gap-2">
                     {!myBooking ? (
                       <button type="button" onClick={() => handleBookSlot(slot)} disabled={saving || slotFull || hasPassedExamAlready || hasAnotherBookingForSameExam || isRebookingBlocked || !slotIsBookable(slot) || (registrationsPaused && !hasOverride)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${hasPassedExamAlready ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-900 text-white hover:bg-slate-800'} disabled:opacity-50`}>
-                        {hasPassedExamAlready ? 'Passed' : hasAnotherBookingForSameExam ? 'Already Booked Another Slot' : isRebookingBlocked ? `Wait ${liveExamRebookingWaitDays} Day(s) To Book New Slot` : slotFull ? 'Slot Full – Try Another Slot' : 'Book Slot'}
+                        {hasPassedExamAlready ? 'Passed' : hasAnotherBookingForSameExam ? 'Already Booked Another Slot' : isRebookingBlocked ? `Wait ${liveExamRebookingWaitDays} Day(s) To Book New Slot` : slotFull ? 'Unavailable' : 'Book Slot'}
                       </button>
                     ) : effectiveBookingStatus === 'completed' ? (
                       <button type="button" disabled className="rounded-xl bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-700 disabled:opacity-90">Completed</button>
@@ -3189,8 +3328,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">{isAllInOnePanel || isMonitoringPanel ? 'All In One Launcher' : isInstructor ? 'Students Writing Now' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
-                <p className="mt-1 text-xs text-slate-500">{isAllInOnePanel || isMonitoringPanel ? 'Open one fullscreen live monitor and move across all active students with left and right navigation.' : isInstructor ? 'Search students or exam names. Click a student to open strict monitoring for that live session.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
+                <h2 className="text-lg font-semibold text-slate-900">{isAllInOnePanel || isMonitoringPanel ? 'All In One Launcher' : isInstructor ? 'Allotted Exam Slots' : isCancellationsPanel ? 'Exam Cancellations' : 'Visible Exam Slots'}</h2>
+                <p className="mt-1 text-xs text-slate-500">{isAllInOnePanel || isMonitoringPanel ? 'Open one fullscreen live monitor and move across all active students with left and right navigation.' : isInstructor ? 'Select a slot to see registered students and open live monitoring when students start.' : 'Search exam names or slot times to find the correct slot quickly.'}</p>
               </div>
               {isAdmin && !isAllInOnePanel ? (
                 <button
@@ -3208,7 +3347,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
               <input
                 value={slotSearch}
                 onChange={(event) => setSlotSearch(event.target.value)}
-                placeholder={isInstructor ? 'Search student or exam name' : 'Search exam name or slot time'}
+                placeholder={isInstructor ? 'Search slot, student, or exam name' : 'Search exam name or slot time'}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
@@ -3240,7 +3379,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                   </button>
                 </div>
               ) : isInstructor ? (
-                instructorPanelCards.length === 0 ? <p className="text-sm text-slate-500">No instructor slots are available right now.</p> : instructorPanelCards.map((card) => {
+                instructorPanelCards.length === 0 ? <p className="text-sm text-slate-500">No allotted exam slots found for this instructor.</p> : instructorPanelCards.map((card) => {
                   const {
                     slot,
                     exam,

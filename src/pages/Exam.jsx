@@ -846,7 +846,7 @@ export default function Exam({ examMode = "certification" }) {
         room.on(RoomEvent.TrackSubscribed, (track, publication) => {
           void attachSupportAudio(track, publication);
         });
-        room.on(RoomEvent.TrackPublished, (_track, publication, participant) => {
+        room.on(RoomEvent.TrackPublished, (publication, participant) => {
           publication?.setSubscribed?.(true);
           participant?.trackPublications?.forEach?.((item) => item.setSubscribed?.(true));
         });

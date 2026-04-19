@@ -84,6 +84,8 @@ Deno.serve(async (req: Request) => {
       return new Response("Invalid session token.", { status: 401, headers: corsHeaders });
     }
 
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+
     const { data: callerProfile } = await adminClient
       .from("profiles")
       .select("id, role")
@@ -91,8 +93,161 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     const callerRole = String(callerProfile?.role || "").toLowerCase();
+    if (body.action === "booking-counts") {
+      const requestedSlotIds = Array.isArray(body.slotIds)
+        ? Array.from(new Set(body.slotIds.map((value) => String(value)).filter(Boolean))).slice(0, 250)
+        : [];
+      if (!callerRole || !requestedSlotIds.length) {
+        return Response.json({ counts: {} }, { headers: corsHeaders });
+      }
+
+      const { data: bookingRows, error: bookingError } = await adminClient
+        .from("exam_slot_bookings")
+        .select("slot_id, status")
+        .in("slot_id", requestedSlotIds);
+      if (bookingError) throw bookingError;
+
+      const counts: Record<string, number> = {};
+      requestedSlotIds.forEach((slotId) => {
+        counts[slotId] = 0;
+      });
+      (bookingRows || []).forEach((row) => {
+        const status = String(row.status || "").toLowerCase();
+        if (status === "cancelled") return;
+        const slotId = String(row.slot_id || "");
+        counts[slotId] = (counts[slotId] || 0) + 1;
+      });
+
+      return Response.json({ counts }, { headers: corsHeaders });
+    }
+
     if (!["admin", "teacher", "instructor"].includes(callerRole)) {
       return new Response("Only staff can load live exam feed.", { status: 403, headers: corsHeaders });
+    }
+
+    if (body.action === "assigned-slots") {
+      let slotIds: string[] = [];
+      if (callerRole === "instructor") {
+        const { data: assignedRows, error: assignedError } = await adminClient
+          .from("exam_slot_instructors")
+          .select("slot_id")
+          .eq("instructor_id", callerId);
+        if (assignedError) throw assignedError;
+        slotIds = Array.from(new Set((assignedRows || []).map((row) => String(row.slot_id || "")).filter(Boolean)));
+      } else if (callerRole === "teacher") {
+        const { data: ownedSlots, error: ownedSlotsError } = await adminClient
+          .from("exam_live_slots")
+          .select("id")
+          .eq("teacher_id", callerId);
+        if (ownedSlotsError) throw ownedSlotsError;
+        slotIds = Array.from(new Set((ownedSlots || []).map((row) => String(row.id || "")).filter(Boolean)));
+      } else if (callerRole === "admin") {
+        const { data: allSlots, error: allSlotsError } = await adminClient
+          .from("exam_live_slots")
+          .select("id")
+          .neq("status", "cancelled")
+          .order("starts_at", { ascending: true })
+          .limit(500);
+        if (allSlotsError) throw allSlotsError;
+        slotIds = Array.from(new Set((allSlots || []).map((row) => String(row.id || "")).filter(Boolean)));
+      }
+
+      if (!slotIds.length) {
+        return Response.json({
+          slots: [],
+          bookings: [],
+          sessions: [],
+          violations: [],
+          messages: [],
+          instructors: [],
+          overrides: [],
+          facultyAttendance: [],
+          profiles: [],
+          exams: [],
+          courses: [],
+        }, { headers: corsHeaders });
+      }
+
+      const [
+        slotResp,
+        bookingResp,
+        sessionResp,
+        violationResp,
+        messageResp,
+        instructorResp,
+        overrideResp,
+        facultyAttendanceResp,
+      ] = await Promise.all([
+        adminClient.from("exam_live_slots").select("*").in("id", slotIds).neq("status", "cancelled").order("starts_at", { ascending: true }),
+        adminClient.from("exam_slot_bookings").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_live_sessions").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_live_violations").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_live_messages").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_slot_instructors").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_slot_booking_overrides").select("*").in("slot_id", slotIds),
+        adminClient.from("exam_slot_faculty_attendance").select("*").in("slot_id", slotIds),
+      ]);
+
+      const firstAssignedError = [
+        slotResp.error,
+        bookingResp.error,
+        sessionResp.error,
+        violationResp.error,
+        messageResp.error,
+        instructorResp.error,
+        overrideResp.error,
+        facultyAttendanceResp.error,
+      ].find(Boolean);
+      if (firstAssignedError) throw firstAssignedError;
+
+      const slots = slotResp.data || [];
+      const examIds = Array.from(new Set(slots.map((slot) => slot.exam_id).filter(Boolean)));
+      const profileIds = new Set<string>();
+      slots.forEach((slot) => {
+        if (slot.teacher_id) profileIds.add(String(slot.teacher_id));
+        if (slot.created_by) profileIds.add(String(slot.created_by));
+      });
+      (bookingResp.data || []).forEach((row) => row.student_id && profileIds.add(String(row.student_id)));
+      (sessionResp.data || []).forEach((row) => row.student_id && profileIds.add(String(row.student_id)));
+      (messageResp.data || []).forEach((row) => {
+        if (row.sender_id) profileIds.add(String(row.sender_id));
+        if (row.recipient_id) profileIds.add(String(row.recipient_id));
+      });
+      (instructorResp.data || []).forEach((row) => row.instructor_id && profileIds.add(String(row.instructor_id)));
+
+      const [profileResp, examResp] = await Promise.all([
+        profileIds.size
+          ? adminClient
+              .from("profiles")
+              .select("id, full_name, email, role, assigned_teacher_id, premium_until")
+              .in("id", Array.from(profileIds))
+          : Promise.resolve({ data: [], error: null }),
+        examIds.length
+          ? adminClient.from("exams").select("id, course_id, test_name").in("id", examIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (profileResp.error) throw profileResp.error;
+      if (examResp.error) throw examResp.error;
+
+      const courseIds = Array.from(new Set((examResp.data || []).map((exam) => exam.course_id).filter(Boolean)));
+      const courseResp = courseIds.length
+        ? await adminClient.from("courses").select("id, title").in("id", courseIds)
+        : { data: [], error: null };
+      if (courseResp.error) throw courseResp.error;
+
+      return Response.json({
+        slots,
+        bookings: bookingResp.data || [],
+        sessions: sessionResp.data || [],
+        violations: violationResp.data || [],
+        messages: messageResp.data || [],
+        instructors: instructorResp.data || [],
+        overrides: overrideResp.data || [],
+        facultyAttendance: facultyAttendanceResp.data || [],
+        profiles: profileResp.data || [],
+        exams: examResp.data || [],
+        courses: courseResp.data || [],
+      }, { headers: corsHeaders });
     }
 
     const { data: sessions, error: sessionError } = await adminClient
