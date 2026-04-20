@@ -35,6 +35,7 @@ import RegisterAdmin from './pages/RegisterAdmin';
 import RegisterTeacher from './pages/RegisterTeacher';
 import CareerGuidance from './pages/CareerGuidance';
 import MyCertificates from './pages/MyCertificates';
+import MyRegisteredExams from './pages/MyRegisteredExams';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminSettings from './pages/AdminSettings';
 import AdminCourses from './pages/AdminCourses';
@@ -389,6 +390,7 @@ function App() {
           <Route path="class-feedback" element={<ClassFeedback />} />
           <Route path="assistant" element={<UniversalAssistant />} />
           <Route path="live-exams" element={<LiveExamProctoring />} />
+          <Route path="my-exams" element={<MyRegisteredExams />} />
           <Route path="live-exam-slots" element={<LiveExamProctoring forcedPanel="slots" />} />
           <Route path="live-monitoring" element={<LiveExamProctoring forcedPanel="monitoring" />} />
           <Route path="live-attendance" element={<LiveExamProctoring forcedPanel="attendance" />} />

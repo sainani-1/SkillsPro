@@ -159,6 +159,9 @@ const NotesLibrary = () => {
                   src={activePreview.src}
                   className="h-[72vh] w-full bg-white"
                   sandbox="allow-same-origin allow-scripts"
+                  allow="fullscreen"
+                  allowFullScreen
+                  onContextMenu={(event) => event.preventDefault()}
                 />
               </div>
             ) : (

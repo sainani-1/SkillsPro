@@ -599,6 +599,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
                 )}
               </NavLink>
             )}
+            <NavLink to="/app/my-exams" className={navItemClass} title="My Exams">
+              <Calendar size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">My Exams</span>}
+            </NavLink>
             <NavLink to="/app/write-test" className={navItemClass} title="Write Test">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Write Test</span>}

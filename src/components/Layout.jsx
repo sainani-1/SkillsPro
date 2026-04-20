@@ -13,6 +13,25 @@ import NotificationPermissionPopup from './NotificationPermissionPopup';
 
 const SIDEBAR_COLLAPSED_KEY = 'layout_sidebar_collapsed';
 const LAST_OPENED_PAGE_KEY = 'layout_last_opened_page';
+const EXAM_REMINDER_SENT_KEY = 'exam_reminders_sent';
+
+const getSentExamReminderKeys = (userId) => {
+  if (!userId) return new Set();
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`${EXAM_REMINDER_SENT_KEY}_${userId}`) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const saveSentExamReminderKeys = (userId, keys) => {
+  if (!userId) return;
+  localStorage.setItem(`${EXAM_REMINDER_SENT_KEY}_${userId}`, JSON.stringify(Array.from(keys)));
+};
+
+const formatExamReminderTime = (value) =>
+  value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'your scheduled time';
 
 const Layout = () => {
   const { profile, signOut } = useAuth();
@@ -32,6 +51,7 @@ const Layout = () => {
   // Sidebar width: 16rem (w-64) when open, 5rem (w-20) when collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readBrowserState(SIDEBAR_COLLAPSED_KEY, false));
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+  const [examReminderPopup, setExamReminderPopup] = useState({ open: false, title: '', message: '' });
   const seenRealtimeNotificationIdsRef = useRef(new Set());
   const seenActivityEventKeysRef = useRef(new Set());
   const isMissingTargetUserColumn = (err) => {
@@ -105,6 +125,7 @@ const Layout = () => {
     const studentTargets = [
       ...common,
       { label: 'Live Exams', path: '/app/live-exams' },
+      { label: 'My Exams', path: '/app/my-exams' },
       { label: 'Write Test', path: '/app/write-test' },
       { label: 'My Certificates', path: '/app/my-certificates' },
       { label: 'Verify My ID', path: '/app/verify-my-id' },
@@ -521,6 +542,110 @@ const Layout = () => {
     };
   }, [profile?.id, profile?.role, incrementUnreadNotifications]);
 
+  useEffect(() => {
+    if (!profile?.id || profile?.role !== 'student') return undefined;
+
+    let active = true;
+
+    const insertReminderNotification = async (row) => {
+      const payload = {
+        title: row.title,
+        content: row.content,
+        type: 'warning',
+        target_role: 'student',
+        target_user_id: profile.id,
+      };
+
+      const { error } = await supabase.from('admin_notifications').insert(payload);
+      if (error && isMissingTargetUserColumn(error)) {
+        const { target_user_id, content, ...fallback } = payload;
+        await supabase.from('admin_notifications').insert({
+          ...fallback,
+          content: `[target_user_id:${target_user_id}] ${content}`,
+        });
+      } else if (error) {
+        throw error;
+      }
+    };
+
+    const checkExamReminders = async () => {
+      try {
+        const now = Date.now();
+        const futureCutoff = new Date(now + 61 * 60 * 1000).toISOString();
+        const { data: bookings, error: bookingError } = await supabase
+          .from('exam_slot_bookings')
+          .select('id, slot_id, status')
+          .eq('student_id', profile.id)
+          .neq('status', 'cancelled');
+        if (bookingError) throw bookingError;
+
+        const slotIds = Array.from(new Set((bookings || []).map((booking) => booking.slot_id).filter(Boolean)));
+        if (!slotIds.length) return;
+
+        const { data: slots, error: slotError } = await supabase
+          .from('exam_live_slots')
+          .select('id, title, starts_at, ends_at, exam_id')
+          .in('id', slotIds)
+          .gte('starts_at', new Date(now).toISOString())
+          .lte('starts_at', futureCutoff)
+          .neq('status', 'cancelled');
+        if (slotError) throw slotError;
+
+        if (!active || !slots?.length) return;
+
+        const bookingBySlotId = new Map((bookings || []).map((booking) => [String(booking.slot_id), booking]));
+        const sentKeys = getSentExamReminderKeys(profile.id);
+        let changed = false;
+
+        for (const slot of slots) {
+          const booking = bookingBySlotId.get(String(slot.id));
+          if (!booking) continue;
+
+          const startsAtMs = new Date(slot.starts_at).getTime();
+          const minutesUntil = Math.floor((startsAtMs - now) / 60000);
+          const reminderType = minutesUntil <= 10 ? '10min' : minutesUntil <= 60 ? '1hr' : null;
+          if (!reminderType) continue;
+
+          const key = `${booking.id}:${reminderType}`;
+          if (sentKeys.has(key)) continue;
+
+          await insertReminderNotification({
+            title: reminderType === '10min' ? 'Exam Starts In 10 Minutes' : 'Exam Starts In 1 Hour',
+            content:
+              reminderType === '10min'
+                ? `You have an exam in 10 minutes. Please be ready before ${formatExamReminderTime(slot.starts_at)}.`
+                : `You have an exam in 1 hour. Please prepare and join at ${formatExamReminderTime(slot.starts_at)}.`,
+          });
+
+          sentKeys.add(key);
+          changed = true;
+          incrementUnreadNotifications();
+          setExamReminderPopup({
+            open: true,
+            title: reminderType === '10min' ? 'Exam Starts In 10 Minutes' : 'Exam Starts In 1 Hour',
+            message:
+              reminderType === '10min'
+                ? `You have an exam in 10 minutes. Please be ready before ${formatExamReminderTime(slot.starts_at)}.`
+                : `You have an exam in 1 hour. Please prepare and join at ${formatExamReminderTime(slot.starts_at)}.`,
+          });
+        }
+
+        if (changed) {
+          saveSentExamReminderKeys(profile.id, sentKeys);
+        }
+      } catch (reminderError) {
+        console.warn('Exam reminder check failed:', reminderError?.message || reminderError);
+      }
+    };
+
+    checkExamReminders();
+    const interval = window.setInterval(checkExamReminders, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [profile?.id, profile?.role, incrementUnreadNotifications]);
+
   // Sidebar width: 16rem (256px) when open, 5rem (80px) when collapsed
   // We'll use a state to track the sidebar width for margin
   const [sidebarWidth, setSidebarWidth] = useState(256); // default w-64
@@ -557,6 +682,36 @@ const Layout = () => {
         onAllow={allowNotifications}
         onSkip={skipNotifications}
       />
+      {examReminderPopup.open ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <Bell size={26} />
+            </div>
+            <h2 className="mt-4 text-2xl font-bold text-slate-900">{examReminderPopup.title}</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">{examReminderPopup.message}</p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setExamReminderPopup({ open: false, title: '', message: '' })}
+                className="flex-1 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExamReminderPopup({ open: false, title: '', message: '' });
+                  requestPageSwitch('/app/my-exams');
+                }}
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700"
+              >
+                View My Exams
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <Sidebar
         isMobile={isMobileViewport}
         mobileOpen={mobileSidebarOpen}

@@ -1962,6 +1962,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const notificationRows = [
         {
           title: 'Exam Slot Booked',
+          content: `Your exam slot for ${getExamDisplayName(exam, coursesById[exam?.course_id])} is confirmed for ${formatDateTime(slot.starts_at)}.`,
+          type: 'success',
+          target_role: 'student',
+          target_user_id: profile.id,
+        },
+        {
+          title: 'Exam Slot Booked',
           content: teacherNotificationText,
           type: 'info',
           target_role: 'admin',
