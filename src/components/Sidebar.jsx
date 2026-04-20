@@ -631,6 +631,18 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
               <FileText size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Resume Builder</span>}
             </NavLink>
+            <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
+              <FileText size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Resume Reviews</span>}
+            </NavLink>
+            <NavLink to="/app/mock-interviews" className={navItemClass} title="Mock Interviews">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Mock Interviews</span>}
+            </NavLink>
+            <NavLink to="/app/personal-roadmap" className={navItemClass} title="Personal Roadmap">
+              <Sparkles size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Personal Roadmap</span>}
+            </NavLink>
             {premiumPlusActive && (
               <>
                 <NavLink to="/app/coding-playground" className={navItemClass} title="Coding Playground">
@@ -689,6 +701,18 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/teacher/tests" className={navItemClass} title="Conduct Tests">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Conduct Tests</span>}
+            </NavLink>
+            <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
+              <FileText size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Resume Reviews</span>}
+            </NavLink>
+            <NavLink to="/app/mock-interviews" className={navItemClass} title="Mock Interviews">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Mock Interviews</span>}
+            </NavLink>
+            <NavLink to="/app/personal-roadmap" className={navItemClass} title="Personal Roadmap">
+              <Sparkles size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Personal Roadmap</span>}
             </NavLink>
             <NavLink to="/app/clear-doubts" className={navItemClass} title="Clear Doubts">
               <MessageCircle size={28} />
@@ -830,6 +854,18 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/admin/student-progress" className={navItemClass} title="Student Progress">
               <GraduationCap size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Student Progress</span>}
+            </NavLink>
+            <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
+              <FileText size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Resume Reviews</span>}
+            </NavLink>
+            <NavLink to="/app/mock-interviews" className={navItemClass} title="Mock Interviews">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Mock Interviews</span>}
+            </NavLink>
+            <NavLink to="/app/personal-roadmap" className={navItemClass} title="Personal Roadmap">
+              <Sparkles size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Personal Roadmap</span>}
             </NavLink>
             <NavLink to="/app/class-schedule" className={navItemClass} title="Schedule Live Classes">
               <Video size={28} />

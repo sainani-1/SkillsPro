@@ -14,6 +14,7 @@ const CATEGORY_OPTIONS = [
   { value: 'chat', label: 'Chat' },
   { value: 'account', label: 'Account' },
   { value: 'certificate', label: 'Certificate' },
+  { value: 'teacher_complaint', label: 'Teacher Complaint' },
   { value: 'other', label: 'Other' }
 ];
 
@@ -32,11 +33,13 @@ const ReportIssue = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [reports, setReports] = useState([]);
+  const [teacherOptions, setTeacherOptions] = useState([]);
   const [activeTab, setActiveTab] = useState('pending');
   const [form, setForm] = useState({
     category: 'technical',
     subject: '',
-    description: ''
+    description: '',
+    teacherId: ''
   });
 
   const loadReports = async () => {
@@ -61,6 +64,26 @@ const ReportIssue = () => {
     loadReports();
   }, [profile?.id]);
 
+  useEffect(() => {
+    const loadTeachers = async () => {
+      if (!profile?.id) return;
+      const ids = Array.from(new Set([profile.assigned_teacher_id].filter(Boolean)));
+      if (!ids.length) {
+        setTeacherOptions([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', ids);
+      setTeacherOptions(data || []);
+      if (data?.[0]?.id) {
+        setForm((prev) => ({ ...prev, teacherId: prev.teacherId || data[0].id }));
+      }
+    };
+    loadTeachers();
+  }, [profile?.id, profile?.assigned_teacher_id]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     const subject = form.subject.trim();
@@ -73,12 +96,16 @@ const ReportIssue = () => {
 
     try {
       setSubmitting(true);
+      const selectedTeacher = teacherOptions.find((teacher) => teacher.id === form.teacherId);
+      const teacherPrefix = form.category === 'teacher_complaint'
+        ? `Teacher: ${selectedTeacher?.full_name || selectedTeacher?.email || form.teacherId || 'Not selected'}\n\n`
+        : '';
       const payload = {
         reporter_id: profile.id,
         reporter_role: profile.role,
         category: form.category,
         subject,
-        description
+        description: `${teacherPrefix}${description}`
       };
       const { error } = await supabase.from('issue_reports').insert(payload);
       if (error) throw error;
@@ -87,7 +114,7 @@ const ReportIssue = () => {
         content: `${profile?.full_name || 'User'} submitted an issue report: ${subject}`,
         admin_id: profile?.id || null,
       });
-      setForm({ category: 'technical', subject: '', description: '' });
+      setForm({ category: 'technical', subject: '', description: '', teacherId: '' });
       setActiveTab('pending');
       openPopup('Submitted', 'Your issue report has been submitted.', 'success');
       await loadReports();
@@ -131,6 +158,21 @@ const ReportIssue = () => {
               ))}
             </select>
           </div>
+          {form.category === 'teacher_complaint' ? (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Teacher</label>
+              <select
+                value={form.teacherId}
+                onChange={(e) => setForm((prev) => ({ ...prev, teacherId: e.target.value }))}
+                className="w-full border border-slate-300 rounded-lg px-3 py-3"
+              >
+                <option value="">Select teacher</option>
+                {teacherOptions.map((teacher) => (
+                  <option key={teacher.id} value={teacher.id}>{teacher.full_name || teacher.email}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">Subject</label>
             <input

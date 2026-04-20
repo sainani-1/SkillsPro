@@ -119,6 +119,9 @@ import AdminIdVerifications from './pages/AdminIdVerifications';
 import AdminCertificateNameRequests from './pages/AdminCertificateNameRequests';
 import VerifierDashboard from './pages/VerifierDashboard';
 import AdminUsernames from './pages/AdminUsernames';
+import PremiumPlusResumeReviews from './pages/PremiumPlusResumeReviews';
+import PremiumPlusMockInterviews from './pages/PremiumPlusMockInterviews';
+import PremiumPlusRoadmap from './pages/PremiumPlusRoadmap';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -371,6 +374,9 @@ function App() {
           <Route path="discussion-forum" element={<DiscussionForum />} />
           <Route path="skill-badges" element={<SkillBadges />} />
           <Route path="resume-builder" element={<ResumeBuilder />} />
+          <Route path="resume-reviews" element={<PremiumPlusResumeReviews />} />
+          <Route path="mock-interviews" element={<PremiumPlusMockInterviews />} />
+          <Route path="personal-roadmap" element={<PremiumPlusRoadmap />} />
           <Route path="request-teacher" element={<RequestTeacher />} />
           <Route path="startup-ideas" element={<StartupIdeas />} />
           <Route path="startup-collaborations" element={<StartupCollaborations />} />

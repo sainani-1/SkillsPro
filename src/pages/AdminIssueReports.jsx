@@ -3,6 +3,7 @@ import { CheckCircle2, Pencil, ShieldAlert } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import usePopup from '../hooks/usePopup';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { sendAdminNotification } from '../utils/adminNotifications';
 
 const isCompletedStatus = (status) => status === 'resolved' || status === 'closed';
 const STATUS_OPTIONS = [
@@ -32,6 +33,7 @@ const AdminIssueReports = () => {
           description,
           status,
           admin_note,
+          reporter_id,
           reporter_role,
           created_at,
           updated_at,
@@ -65,6 +67,15 @@ const AdminIssueReports = () => {
       };
       const { error } = await supabase.from('issue_reports').update(payload).eq('id', report.id);
       if (error) throw error;
+      if (isCompletedStatus(nextStatus) && report.reporter_id) {
+        await sendAdminNotification({
+          target_user_id: report.reporter_id,
+          target_role: report.reporter_role || 'student',
+          title: 'Your report has been resolved',
+          content: `Admin resolved your report: ${report.subject}${trimmedNote ? `\n\nAdmin response: ${trimmedNote}` : ''}`,
+          type: 'issue_report_resolved',
+        });
+      }
       setEditingId(null);
       setActiveTab(isCompletedStatus(nextStatus) ? 'completed' : 'pending');
       openPopup('Saved', 'Issue report updated.', 'success');
