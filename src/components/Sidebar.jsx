@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard, X } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard, X, Download, ListChecks } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -116,6 +116,16 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
 
   const navItemClass = ({ isActive }) =>
     `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
+  const exactNavItemClass = (target) => {
+    const current = `${location.pathname}${location.hash || ''}`;
+    const isActive = current === target;
+    return `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
+  };
+  const careerSubNavItemClass = (target) => {
+    const current = `${location.pathname}${location.hash || ''}`;
+    const isActive = current === target;
+    return `flex min-h-[56px] items-center ${isMobile ? 'justify-start gap-3 px-4 py-3' : isCollapsed && !isHovered ? 'justify-center px-2' : 'gap-3 px-4'} rounded-xl transition-all duration-300 whitespace-nowrap [&>svg]:h-6 [&>svg]:w-6 [&>svg]:shrink-0 ${isActive ? 'bg-gold-400 text-nani-dark font-bold shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`;
+  };
 
   const shouldShowText = isMobile || !isCollapsed || isHovered;
   const requestNavigation = (path) => {
@@ -631,6 +641,26 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
               <FileText size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Resume Builder</span>}
             </NavLink>
+            <NavLink to="/app/career-support" className={() => exactNavItemClass('/app/career-support')} title="Career Support">
+              <BarChart3 size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Support</span>}
+            </NavLink>
+            <NavLink to="/app/career-support#career-report" className={() => careerSubNavItemClass('/app/career-support#career-report')} title="Career Report PDF">
+              <Download size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Report PDF</span>}
+            </NavLink>
+            <NavLink to="/app/career-support#career-tasks" className={() => careerSubNavItemClass('/app/career-support#career-tasks')} title="Career Tasks">
+              <ListChecks size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Tasks</span>}
+            </NavLink>
+            <NavLink to="/app/career-support#interview-practice" className={() => careerSubNavItemClass('/app/career-support#interview-practice')} title="Interview Practice">
+              <MessageSquare size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Interview Practice</span>}
+            </NavLink>
+            <NavLink to="/app/career-support#career-history" className={() => careerSubNavItemClass('/app/career-support#career-history')} title="Career History">
+              <Clock size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career History</span>}
+            </NavLink>
             <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
               <FileText size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Resume Reviews</span>}
@@ -701,6 +731,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/teacher/tests" className={navItemClass} title="Conduct Tests">
               <CheckSquare size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Conduct Tests</span>}
+            </NavLink>
+            <NavLink to="/app/teacher/career-queue" className={navItemClass} title="Career Queue">
+              <BarChart3 size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Queue</span>}
             </NavLink>
             <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
               <FileText size={28} />
@@ -854,6 +888,14 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/admin/student-progress" className={navItemClass} title="Student Progress">
               <GraduationCap size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Student Progress</span>}
+            </NavLink>
+            <NavLink to="/app/admin/career-analytics" className={navItemClass} title="Career Analytics">
+              <BarChart3 size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Analytics</span>}
+            </NavLink>
+            <NavLink to="/app/admin/career-queue" className={navItemClass} title="Career Queue">
+              <ListChecks size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Career Queue</span>}
             </NavLink>
             <NavLink to="/app/resume-reviews" className={navItemClass} title="Resume Reviews">
               <FileText size={28} />

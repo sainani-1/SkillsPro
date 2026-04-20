@@ -1361,15 +1361,34 @@ const CourseDetail = () => {
   const persistVideoProgress = (currentTime, duration) => {
     const safeCurrentTime = Number.isFinite(currentTime) ? currentTime : 0;
     const safeDuration = Number.isFinite(duration) ? duration : 0;
+    const percent = safeDuration > 0 ? getVideoCompletionPercent({ currentTime: safeCurrentTime, duration: safeDuration }) : 0;
     const progress = {
       currentTime: safeCurrentTime,
       duration: safeDuration,
       completed: safeDuration > 0 && safeCurrentTime >= Math.max(safeDuration - 1, 0),
-      percent: safeDuration > 0 ? getVideoCompletionPercent({ currentTime: safeCurrentTime, duration: safeDuration }) : 0,
+      percent,
       updatedAt: new Date().toISOString(),
     };
     writeVideoProgress(profile?.id || user?.id, courseId, progress);
     setSavedVideoProgress(progress);
+    if (
+      ['cloudinary-video', 'direct-video'].includes(videoSource?.type) &&
+      profile?.id &&
+      courseId &&
+      percent > Number(enrollment?.progress || 0)
+    ) {
+      supabase
+        .from('enrollments')
+        .update({
+          progress: percent,
+          completed: percent >= 100 || Boolean(enrollment?.completed),
+        })
+        .eq('student_id', profile.id)
+        .eq('course_id', courseId)
+        .then(({ error: progressError }) => {
+          if (progressError) console.warn('Course video progress sync failed.', progressError.message || progressError);
+        });
+    }
   };
 
   const persistCurrentVideoProgress = () => {

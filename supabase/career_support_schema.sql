@@ -83,6 +83,21 @@ create table if not exists public.career_profile_reviews (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.career_tasks (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  teacher_id uuid references public.profiles(id) on delete set null,
+  source_type text not null default 'manual',
+  source_id uuid,
+  title text not null,
+  description text,
+  due_date date,
+  status text not null default 'pending',
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.career_roadmaps (
   id uuid primary key default gen_random_uuid(),
   student_id uuid not null references public.profiles(id) on delete cascade,
@@ -106,6 +121,8 @@ create index if not exists career_roadmaps_teacher_idx on public.career_roadmaps
 create index if not exists career_goals_teacher_idx on public.career_goals(teacher_id, updated_at desc);
 create index if not exists career_profile_reviews_student_month_idx on public.career_profile_reviews(student_id, cycle_month, review_type);
 create index if not exists career_profile_reviews_teacher_idx on public.career_profile_reviews(teacher_id, created_at desc);
+create index if not exists career_tasks_student_idx on public.career_tasks(student_id, status, created_at desc);
+create index if not exists career_tasks_teacher_idx on public.career_tasks(teacher_id, created_at desc);
 
 insert into storage.buckets (id, name, public)
 values ('career-support', 'career-support', true)
@@ -147,6 +164,7 @@ alter table public.career_mock_interviews enable row level security;
 alter table public.career_roadmaps enable row level security;
 alter table public.career_goals enable row level security;
 alter table public.career_profile_reviews enable row level security;
+alter table public.career_tasks enable row level security;
 
 drop policy if exists "Students can read own resume reviews" on public.career_resume_reviews;
 create policy "Students can read own resume reviews"
@@ -310,6 +328,38 @@ with check (
     select 1 from public.profiles p
     where p.id = auth.uid()
       and (p.role = 'admin' or (p.role = 'teacher' and career_profile_reviews.teacher_id = auth.uid()))
+  )
+);
+
+drop policy if exists "Students can read own career tasks" on public.career_tasks;
+create policy "Students can read own career tasks"
+on public.career_tasks for select
+to authenticated
+using (auth.uid() = student_id);
+
+drop policy if exists "Students can complete own career tasks" on public.career_tasks;
+create policy "Students can complete own career tasks"
+on public.career_tasks for update
+to authenticated
+using (auth.uid() = student_id)
+with check (auth.uid() = student_id);
+
+drop policy if exists "Teachers and admins manage career tasks" on public.career_tasks;
+create policy "Teachers and admins manage career tasks"
+on public.career_tasks for all
+to authenticated
+using (
+  exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and (p.role = 'admin' or (p.role = 'teacher' and career_tasks.teacher_id = auth.uid()))
+  )
+)
+with check (
+  exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and (p.role = 'admin' or (p.role = 'teacher' and career_tasks.teacher_id = auth.uid()))
   )
 );
 

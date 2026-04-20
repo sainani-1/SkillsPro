@@ -122,6 +122,9 @@ import AdminUsernames from './pages/AdminUsernames';
 import PremiumPlusResumeReviews from './pages/PremiumPlusResumeReviews';
 import PremiumPlusMockInterviews from './pages/PremiumPlusMockInterviews';
 import PremiumPlusRoadmap from './pages/PremiumPlusRoadmap';
+import CareerSupportDashboard from './pages/CareerSupportDashboard';
+import TeacherCareerQueue from './pages/TeacherCareerQueue';
+import AdminCareerAnalytics from './pages/AdminCareerAnalytics';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -374,6 +377,10 @@ function App() {
           <Route path="discussion-forum" element={<DiscussionForum />} />
           <Route path="skill-badges" element={<SkillBadges />} />
           <Route path="resume-builder" element={<ResumeBuilder />} />
+          <Route path="career-support" element={<CareerSupportDashboard />} />
+          <Route path="teacher/career-queue" element={<TeacherRoute><TeacherCareerQueue /></TeacherRoute>} />
+          <Route path="admin/career-queue" element={<AdminRoute><TeacherCareerQueue /></AdminRoute>} />
+          <Route path="admin/career-analytics" element={<AdminRoute><AdminCareerAnalytics /></AdminRoute>} />
           <Route path="resume-reviews" element={<PremiumPlusResumeReviews />} />
           <Route path="mock-interviews" element={<PremiumPlusMockInterviews />} />
           <Route path="personal-roadmap" element={<PremiumPlusRoadmap />} />

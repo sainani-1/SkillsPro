@@ -87,6 +87,59 @@ export const scoreResume = (resume = {}) => {
   };
 };
 
+export const getInterviewQuestionsForRole = (role = '') => {
+  const normalized = String(role || '').toLowerCase();
+  if (normalized.includes('front')) {
+    return [
+      'Explain how React state updates work and when to use useMemo.',
+      'How do you improve performance in a large frontend application?',
+      'Describe one project where you handled API errors and loading states.',
+      'What is accessibility and how do you test it?',
+      'Explain event bubbling with a practical example.',
+    ];
+  }
+  if (normalized.includes('back') || normalized.includes('node') || normalized.includes('java')) {
+    return [
+      'Explain authentication and authorization in an API.',
+      'How would you design pagination for a large dataset?',
+      'What causes slow database queries and how do you debug them?',
+      'Explain transactions and when you need them.',
+      'Describe a backend project and the main design decisions.',
+    ];
+  }
+  if (normalized.includes('cyber') || normalized.includes('security')) {
+    return [
+      'Explain SQL injection and how to prevent it.',
+      'What is XSS and what defenses do browsers provide?',
+      'How do you secure file uploads?',
+      'Describe the difference between hashing and encryption.',
+      'What would you check first in a suspicious login incident?',
+    ];
+  }
+  if (normalized.includes('data') || normalized.includes('analyst')) {
+    return [
+      'Explain how you clean a messy dataset.',
+      'What is the difference between correlation and causation?',
+      'How would you present insights to a non-technical audience?',
+      'Describe one dashboard or analysis project you built.',
+      'Which metrics would you track for a learning platform?',
+    ];
+  }
+  return [
+    'Tell me about yourself and your target role.',
+    'Explain your strongest project in two minutes.',
+    'What is one technical topic you recently learned?',
+    'Describe a challenge you faced and how you solved it.',
+    'Why should a company hire you for this role?',
+  ];
+};
+
+export const getOverdueHours = (createdAt, hours = 48) => {
+  if (!createdAt) return 0;
+  const ageHours = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60);
+  return ageHours >= hours ? Math.floor(ageHours) : 0;
+};
+
 export async function notifyCareerTeacher({ teacherId, title, message, source = 'career_support' }) {
   if (!teacherId) return;
   await sendAdminNotification({
