@@ -54,6 +54,7 @@ const Layout = () => {
   const [examReminderPopup, setExamReminderPopup] = useState({ open: false, title: '', message: '' });
   const seenRealtimeNotificationIdsRef = useRef(new Set());
   const seenActivityEventKeysRef = useRef(new Set());
+  const notificationPromptHandledRef = useRef(false);
   const isMissingTargetUserColumn = (err) => {
     const msg = String(err?.message || '').toLowerCase();
     const details = String(err?.details || '').toLowerCase();
@@ -266,6 +267,7 @@ const Layout = () => {
   }, []);
 
   const shouldAskForNotifications = useCallback(() => {
+    if (notificationPromptHandledRef.current) return false;
     const nextStatus = refreshNotificationPermissionStatus();
     return nextStatus !== 'granted' && nextStatus !== 'unsupported';
   }, [refreshNotificationPermissionStatus]);
@@ -286,6 +288,7 @@ const Layout = () => {
 
   const allowNotifications = useCallback(async () => {
     const nextPath = notificationPrompt.nextPath;
+    notificationPromptHandledRef.current = true;
     if (typeof window !== 'undefined' && 'Notification' in window) {
       try {
         await window.Notification.requestPermission();
@@ -298,8 +301,18 @@ const Layout = () => {
   }, [finishNotificationPrompt, notificationPrompt.nextPath, refreshNotificationPermissionStatus]);
 
   const skipNotifications = useCallback(() => {
+    notificationPromptHandledRef.current = true;
     finishNotificationPrompt(notificationPrompt.nextPath);
   }, [finishNotificationPrompt, notificationPrompt.nextPath]);
+
+  useEffect(() => {
+    if (!profile?.id || notificationPromptHandledRef.current) return;
+    if (shouldAskForNotifications()) {
+      setNotificationPrompt({ open: true, nextPath: null });
+    } else {
+      notificationPromptHandledRef.current = true;
+    }
+  }, [profile?.id, shouldAskForNotifications]);
 
   const handlePanelTargetSelect = async (item) => {
     if (!item) return;

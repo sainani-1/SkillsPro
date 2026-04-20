@@ -7,7 +7,6 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
-import NotificationPermissionPopup from './components/NotificationPermissionPopup';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAdminMFA from './components/RequireAdminMFA';
 import RequireSensitiveAdminMFA from './components/RequireSensitiveAdminMFA';
@@ -292,46 +291,8 @@ const StaffAllInOneRoute = ({ children }) => {
 };
 
 function App() {
-  const [notificationPromptOpen, setNotificationPromptOpen] = useState(false);
-  const [notificationPermissionStatus, setNotificationPermissionStatus] = useState(() =>
-    typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported'
-  );
-
-  const refreshNotificationPermissionStatus = () => {
-    const nextStatus = typeof window !== 'undefined' && 'Notification' in window
-      ? window.Notification.permission
-      : 'unsupported';
-    setNotificationPermissionStatus(nextStatus);
-    return nextStatus;
-  };
-
-  useEffect(() => {
-    const nextStatus = refreshNotificationPermissionStatus();
-    if (nextStatus !== 'granted' && nextStatus !== 'unsupported') {
-      setNotificationPromptOpen(true);
-    }
-  }, []);
-
-  const allowInitialNotifications = async () => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      try {
-        await window.Notification.requestPermission();
-      } catch {
-        // Ignore browser-specific permission failures.
-      }
-    }
-    refreshNotificationPermissionStatus();
-    setNotificationPromptOpen(false);
-  };
-
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <NotificationPermissionPopup
-        open={notificationPromptOpen}
-        permissionStatus={notificationPermissionStatus}
-        onAllow={allowInitialNotifications}
-        onSkip={() => setNotificationPromptOpen(false)}
-      />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Home />} />

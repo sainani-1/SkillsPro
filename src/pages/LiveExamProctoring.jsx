@@ -60,6 +60,16 @@ const sessionIsCurrentlyLiveForSlot = (session, slot) => {
   return String(session.status || '').toLowerCase() === 'active' && slotIsOngoingWindow(slot);
 };
 
+const sessionIsWriting = (session) => ['active', 'paused'].includes(String(session?.status || '').toLowerCase());
+
+const getMonitoringSessionForBooking = (booking, sessionByBookingId, latestUsableSessionByStudentId) => {
+  const rawSession = sessionByBookingId[booking.id];
+  const sessionStatus = String(rawSession?.status || '').toLowerCase();
+  return rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
+    ? rawSession
+    : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
+};
+
 const roomNameForSlot = (slot, exam) =>
   slot?.monitor_room_name || `SkillPro_Exam_${exam?.id || slot?.exam_id || 'slot'}_${slot?.id || Date.now()}`;
 
@@ -848,6 +858,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     });
     return map;
   }, [currentSlotSessions]);
+  const slotMonitorBookings = useMemo(() => {
+    if (!isInstructor) return slotBookings;
+    return slotBookings.filter((booking) =>
+      sessionIsWriting(getMonitoringSessionForBooking(booking, sessionByBookingId, latestUsableSessionByStudentId))
+    );
+  }, [isInstructor, slotBookings, sessionByBookingId, latestUsableSessionByStudentId]);
   const selectedMonitoringSession = useMemo(() => {
     const directSession =
       sessions.find((session) => String(session.id) === String(selectedMonitoringSessionId)) ||
@@ -874,29 +890,39 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       .filter((session) => {
         const status = String(session.status || '').toLowerCase();
         if (status === 'active') return sessionIsCurrentlyLiveForSlot(session, selectedSlot);
+        if (isInstructor) return status === 'paused' && !slotHasEnded(selectedSlot);
         return ['paused', 'scheduled'].includes(status) && !slotHasEnded(selectedSlot);
       })
       .sort((a, b) => new Date(a.started_at || a.created_at || 0) - new Date(b.started_at || b.created_at || 0))
-  ), [currentSlotSessions, selectedSlot]);
+  ), [currentSlotSessions, selectedSlot, isInstructor]);
   const globalMonitorableSessions = useMemo(() => {
     const sortedSessions = [...sessions].sort(
-      (a, b) => new Date(a.started_at || a.created_at || 0) - new Date(b.started_at || b.created_at || 0)
+      (a, b) =>
+        new Date(b.updated_at || b.started_at || b.created_at || 0) -
+        new Date(a.updated_at || a.started_at || a.created_at || 0)
     );
-    const seenStudentIds = new Set();
+    const bookingById = new Map(bookings.map((booking) => [String(booking.id), booking]));
+    const bookingByStudentSlot = new Map(
+      bookings.map((booking) => [`${String(booking.student_id || '')}:${String(booking.slot_id || '')}`, booking])
+    );
+    const seenMonitorKeys = new Set();
     return sortedSessions.filter((session) => {
       const status = String(session.status || '').toLowerCase();
+      if (status !== 'active') return false;
       const slot = slots.find((row) => String(row.id) === String(session.slot_id));
-      if (!slot) {
-        return ['active', 'paused', 'scheduled'].includes(status);
-      }
-      if (slotHasEnded(slot) && status !== 'active') return false;
-      if (!['active', 'paused', 'scheduled'].includes(status)) return false;
-      const studentKey = String(session.student_id || '');
-      if (seenStudentIds.has(studentKey)) return false;
-      seenStudentIds.add(studentKey);
+      if (slot && !sessionIsCurrentlyLiveForSlot(session, slot)) return false;
+      const booking =
+        bookingById.get(String(session.booking_id || '')) ||
+        bookingByStudentSlot.get(`${String(session.student_id || '')}:${String(session.slot_id || '')}`);
+      if (!booking || String(booking.status || '').toLowerCase() === 'cancelled') return false;
+      if (String(booking.student_id || '') !== String(session.student_id || '')) return false;
+      if (String(booking.slot_id || '') !== String(session.slot_id || '')) return false;
+      const monitorKey = String(session.student_id || session.booking_id || session.id || '');
+      if (seenMonitorKeys.has(monitorKey)) return false;
+      seenMonitorKeys.add(monitorKey);
       return true;
     });
-  }, [sessions, slots]);
+  }, [sessions, slots, bookings]);
   const allInOneSessions = useMemo(
     () => globalMonitorableSessions,
     [globalMonitorableSessions]
@@ -1451,7 +1477,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         const status = String(session.status || '').toLowerCase();
         return ['active', 'paused', 'scheduled'].includes(status) && slot && (status === 'active' || !slotHasEnded(slot));
       });
-      if ((isTeacher || isInstructor) && !hasScopedLiveSession && hasAnyLiveSession) {
+      if (isTeacher && !hasScopedLiveSession && hasAnyLiveSession) {
         finalSlotRows = slotRows;
         if (!shouldIncludeCancelledSlots) {
           finalSlotRows = finalSlotRows.filter((slot) => String(slot.status || '').toLowerCase() !== 'cancelled');
@@ -3687,16 +3713,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             <h3 className="text-lg font-semibold text-slate-900">{isInstructor ? 'Live Preview Boxes' : 'Students Writing Exam'}</h3>
                           <p className="mt-1 text-sm text-slate-500">Each active student appears with direct live screen-share and camera preview boxes. Click a student to open the larger strict-monitoring view.</p>
                         </div>
-                        <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">{slotBookings.length} students</div>
+                        <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">{slotMonitorBookings.length} students</div>
                       </div>
                       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {slotBookings.length === 0 ? <p className="text-sm text-slate-500">No students booked for this slot yet.</p> : slotBookings.map((booking) => {
-                          const rawSession = sessionByBookingId[booking.id];
-                          const sessionStatus = String(rawSession?.status || '').toLowerCase();
-                          const session =
-                            rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
-                              ? rawSession
-                              : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
+                        {slotMonitorBookings.length === 0 ? <p className="text-sm text-slate-500">{isInstructor ? 'No assigned-slot students are writing right now.' : 'No students booked for this slot yet.'}</p> : slotMonitorBookings.map((booking) => {
+                          const session = getMonitoringSessionForBooking(booking, sessionByBookingId, latestUsableSessionByStudentId);
                           const student = profilesById[booking.student_id];
                           return (
                             <div
@@ -3796,13 +3817,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                         </div>
                       </div>
                       <div className="mt-4 space-y-3">
-                        {slotBookings.length === 0 ? <p className="text-sm text-slate-500">No students booked yet.</p> : slotBookings.map((booking) => {
-                          const rawSession = sessionByBookingId[booking.id];
-                          const sessionStatus = String(rawSession?.status || '').toLowerCase();
-                          const session =
-                            rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
-                              ? rawSession
-                              : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
+                        {slotMonitorBookings.length === 0 ? <p className="text-sm text-slate-500">{isInstructor ? 'No assigned-slot students are writing right now.' : 'No students booked yet.'}</p> : slotMonitorBookings.map((booking) => {
+                          const session = getMonitoringSessionForBooking(booking, sessionByBookingId, latestUsableSessionByStudentId);
                           const student = profilesById[booking.student_id];
                           const violationCount = violations.filter((row) => String(row.slot_id) === String(selectedSlot.id) && String(row.student_id) === String(booking.student_id)).length;
                           return (
