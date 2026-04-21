@@ -9,6 +9,8 @@ import AvatarImage from '../components/AvatarImage';
 const LIVE_EXAM_CONTEXT_KEY = 'live_exam_context';
 const BOOKING_WINDOW_DAYS = 60;
 const DEFAULT_LOCK_DAYS = 60;
+const LIVE_EXAM_PROFILE_FIELDS = 'id, full_name, email, role, assigned_teacher_id, premium_until, avatar_url, is_exam_banned, exam_ban_reason, exam_banned_at';
+const LIVE_EXAM_PROFILE_FIELDS_FALLBACK = 'id, full_name, email, role, assigned_teacher_id, premium_until, avatar_url';
 
 const formatDateTime = (value) =>
   value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
@@ -62,12 +64,55 @@ const sessionIsCurrentlyLiveForSlot = (session, slot) => {
 
 const sessionIsWriting = (session) => ['active', 'paused'].includes(String(session?.status || '').toLowerCase());
 
+const getSessionMediaScore = (session) => (
+  Number(Boolean(session?.camera_connected)) +
+  Number(Boolean(session?.mic_connected)) +
+  Number(Boolean(session?.screen_share_connected))
+);
+
+const getSessionStatusPriority = (session) => {
+  const status = String(session?.status || '').toLowerCase();
+  if (status === 'active') return 4;
+  if (status === 'paused') return 3;
+  if (status === 'scheduled') return 2;
+  if (status === 'disconnected') return 1;
+  return 0;
+};
+
+const getSessionRecency = (session) => new Date(session?.updated_at || session?.started_at || session?.created_at || 0).getTime();
+
+const choosePreferredLiveSession = (currentSession, nextSession) => {
+  if (!currentSession) return nextSession || null;
+  if (!nextSession) return currentSession;
+
+  const currentMediaScore = getSessionMediaScore(currentSession);
+  const nextMediaScore = getSessionMediaScore(nextSession);
+  if (nextMediaScore !== currentMediaScore) {
+    return nextMediaScore > currentMediaScore ? nextSession : currentSession;
+  }
+
+  const currentPriority = getSessionStatusPriority(currentSession);
+  const nextPriority = getSessionStatusPriority(nextSession);
+  if (nextPriority !== currentPriority) {
+    return nextPriority > currentPriority ? nextSession : currentSession;
+  }
+
+  const currentRecency = getSessionRecency(currentSession);
+  const nextRecency = getSessionRecency(nextSession);
+  return nextRecency >= currentRecency ? nextSession : currentSession;
+};
+
 const getMonitoringSessionForBooking = (booking, sessionByBookingId, latestUsableSessionByStudentId) => {
   const rawSession = sessionByBookingId[booking.id];
+  const latestStudentSession = latestUsableSessionByStudentId[String(booking.student_id || '')] || null;
   const sessionStatus = String(rawSession?.status || '').toLowerCase();
-  return rawSession && !['terminated', 'disconnected'].includes(sessionStatus)
-    ? rawSession
-    : latestUsableSessionByStudentId[String(booking.student_id || '')] || rawSession;
+  if (!rawSession || ['terminated', 'disconnected'].includes(sessionStatus)) {
+    return latestStudentSession || rawSession;
+  }
+  if (!latestStudentSession) {
+    return rawSession;
+  }
+  return choosePreferredLiveSession(rawSession, latestStudentSession);
 };
 
 const roomNameForSlot = (slot, exam) =>
@@ -176,6 +221,10 @@ async function insertLiveSystemMessages(rows) {
 }
 
 const uniqueIds = (ids) => Array.from(new Set((ids || []).filter(Boolean).map((id) => String(id))));
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '')
+  );
 
 const countActiveBookingsBySlot = (bookingRows) => {
   const counts = {};
@@ -189,7 +238,7 @@ const countActiveBookingsBySlot = (bookingRows) => {
 };
 
 async function loadNotificationRecipientRoles(recipientIds, fallbackRole) {
-  const ids = uniqueIds(recipientIds);
+  const ids = uniqueIds(recipientIds).filter(isUuid);
   const fallbackMap = ids.map((id) => ({ id, role: fallbackRole }));
   if (!ids.length) return fallbackMap;
 
@@ -253,6 +302,13 @@ const isPremiumStudentProfile = (candidateProfile) => {
   return new Date(candidateProfile.premium_until) > new Date();
 };
 
+const getExamBanMessage = (candidateProfile) => {
+  if (!candidateProfile?.is_exam_banned) return '';
+  return candidateProfile?.exam_ban_reason
+    ? `You are banned from writing exams. Reason: ${candidateProfile.exam_ban_reason}`
+    : 'You are banned from writing exams. Please contact admin.';
+};
+
 async function loadOptionalQuery(promise, fallbackData = [], timeoutMs = 10000) {
   try {
     const result = await withClientTimeout(promise, timeoutMs);
@@ -266,6 +322,22 @@ async function loadOptionalQuery(promise, fallbackData = [], timeoutMs = 10000) 
       error,
     };
   }
+}
+
+const isMissingProfileColumnError = (error) => {
+  const message = String([error?.message, error?.details, error?.hint].filter(Boolean).join(' ').toLowerCase());
+  return (
+    message.includes('column') &&
+    (message.includes('is_exam_banned') || message.includes('exam_ban_reason') || message.includes('exam_banned_at'))
+  );
+};
+
+async function loadLiveExamProfiles(queryBuilderFactory, fallbackData = [], timeoutMs = 10000) {
+  const primary = await loadOptionalQuery(queryBuilderFactory(LIVE_EXAM_PROFILE_FIELDS), fallbackData, timeoutMs);
+  if (!primary.error || !isMissingProfileColumnError(primary.error)) {
+    return primary;
+  }
+  return loadOptionalQuery(queryBuilderFactory(LIVE_EXAM_PROFILE_FIELDS_FALLBACK), fallbackData, timeoutMs);
 }
 
 async function loadStaffLiveExamFeed() {
@@ -394,6 +466,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const [assignInstructorId, setAssignInstructorId] = useState('');
   const [examSearch, setExamSearch] = useState('');
   const [slotSearch, setSlotSearch] = useState('');
+  const [slotStudentSearch, setSlotStudentSearch] = useState('');
   const [studentSelectedDate, setStudentSelectedDate] = useState('');
   const [studentCalendarMonth, setStudentCalendarMonth] = useState(() => getMonthStart());
   const [selectedMonitoringSessionId, setSelectedMonitoringSessionId] = useState(null);
@@ -412,7 +485,14 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   const isInstructor = role === 'instructor';
   const isStudent = role === 'student';
   const rawRequestedPanel = forcedPanel || searchParams.get('panel') || 'overview';
-  const requestedPanel = rawRequestedPanel === 'overview' && (isTeacher || isInstructor) ? 'all-in-one' : rawRequestedPanel;
+  const requestedPanel =
+    rawRequestedPanel === 'overview'
+      ? isTeacher
+        ? 'all-in-one'
+        : isInstructor
+          ? 'slots'
+          : rawRequestedPanel
+      : rawRequestedPanel;
   const requestedCourseId = searchParams.get('courseId') || '';
   const requestedSlotId = searchParams.get('slotId') || '';
   const panelLabelMap = {
@@ -438,11 +518,15 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     ? 'Book Your Exam Slot and Start Only On Schedule'
     : isAllInOnePanel
       ? 'All Slots In One View For Live Monitoring and Actions'
+      : isSlotsPanel
+        ? 'Assigned Slots, Attendance, Student Count, and One-by-One Monitoring'
       : 'Monitor Slots, Violations, Attendance, and Live Actions';
   const operatorDescription = isStudent
     ? 'Ultra-strict exam mode with slot booking, camera/mic/screen-share enforcement, realtime alerts, and live monitoring for admin, teacher, and instructor.'
     : isAllInOnePanel
       ? 'See every active slot from one place, watch live screen share, camera, and microphone feeds, then warn, pause, resume, terminate, and chat with students instantly.'
+      : isSlotsPanel
+        ? 'See every slot assigned to you, mark attendance, review registrations, search students, open one live student at a time, and allow a neutral reschedule when needed.'
       : 'Ultra-strict exam mode with slot booking, camera/mic/screen-share enforcement, realtime alerts, and live monitoring for admin, teacher, and instructor.';
 
   const bookingBySlotId = useMemo(() => {
@@ -616,15 +700,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         map[session.booking_id] = session;
         return;
       }
-      const existingStatus = String(existing.status || '').toLowerCase();
-      const nextStatus = String(session.status || '').toLowerCase();
-      const existingPriority = existingStatus === 'active' ? 4 : existingStatus === 'paused' ? 3 : existingStatus === 'scheduled' ? 2 : existingStatus === 'disconnected' ? 1 : 0;
-      const nextPriority = nextStatus === 'active' ? 4 : nextStatus === 'paused' ? 3 : nextStatus === 'scheduled' ? 2 : nextStatus === 'disconnected' ? 1 : 0;
-      const existingStamp = new Date(existing.updated_at || existing.started_at || existing.created_at || 0).getTime();
-      const nextStamp = new Date(session.updated_at || session.started_at || session.created_at || 0).getTime();
-      if (nextPriority > existingPriority || (nextPriority === existingPriority && nextStamp >= existingStamp)) {
-        map[session.booking_id] = session;
-      }
+      map[session.booking_id] = choosePreferredLiveSession(existing, session);
     });
     return map;
   }, [sessions]);
@@ -655,6 +731,23 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     () => bookings.filter((booking) => String(booking.slot_id) === String(selectedSlot?.id || '')),
     [bookings, selectedSlot?.id]
   );
+  const filteredSlotBookings = useMemo(() => {
+    const term = String(slotStudentSearch || '').trim().toLowerCase();
+    if (!term) return slotBookings;
+    return slotBookings.filter((booking) => {
+      const student = profilesById[booking.student_id];
+      const haystack = [
+        student?.full_name,
+        student?.email,
+        booking?.status,
+        sessionByBookingId[booking.id]?.status,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [slotBookings, slotStudentSearch, profilesById, sessionByBookingId]);
 
   const slotSessions = useMemo(
     () => sessions.filter((session) => String(session.slot_id) === String(selectedSlot?.id || '')),
@@ -843,17 +936,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
   }, [visibleSlots, slotSearch, examsById, coursesById, profilesById, slotInstructors, bookings, sessions]);
   const latestUsableSessionByStudentId = useMemo(() => {
     const map = {};
-    const sortedSessions = [...currentSlotSessions].sort(
-      (a, b) =>
-        new Date(b.updated_at || b.started_at || b.created_at || 0) -
-        new Date(a.updated_at || a.started_at || a.created_at || 0)
-    );
-    sortedSessions.forEach((session) => {
+    currentSlotSessions.forEach((session) => {
       const studentKey = String(session.student_id || '');
-      if (!studentKey || map[studentKey]) return;
+      if (!studentKey) return;
       const status = String(session.status || '').toLowerCase();
       if (['active', 'paused', 'scheduled'].includes(status)) {
-        map[studentKey] = session;
+        map[studentKey] = choosePreferredLiveSession(map[studentKey], session);
       }
     });
     return map;
@@ -873,7 +961,10 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     if (!directSession) return null;
     const directStatus = String(directSession.status || '').toLowerCase();
     if (!['terminated', 'disconnected'].includes(directStatus)) {
-      return directSession;
+      return choosePreferredLiveSession(
+        directSession,
+        latestUsableSessionByStudentId[String(directSession.student_id || '')] || null
+      );
     }
     return latestUsableSessionByStudentId[String(directSession.student_id || '')] || directSession;
   }, [currentSlotSessions, slotSessions, selectedMonitoringSessionId, latestUsableSessionByStudentId]);
@@ -908,9 +999,11 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     const seenMonitorKeys = new Set();
     return sortedSessions.filter((session) => {
       const status = String(session.status || '').toLowerCase();
-      if (status !== 'active') return false;
+      if (!['active', 'paused'].includes(status)) return false;
       const slot = slots.find((row) => String(row.id) === String(session.slot_id));
-      if (slot && !sessionIsCurrentlyLiveForSlot(session, slot)) return false;
+      if (!slot) return false;
+      if (status === 'active' && !sessionIsCurrentlyLiveForSlot(session, slot)) return false;
+      if (status === 'paused' && slotHasEnded(slot)) return false;
       const booking =
         bookingById.get(String(session.booking_id || '')) ||
         bookingByStudentSlot.get(`${String(session.student_id || '')}:${String(session.slot_id || '')}`);
@@ -950,11 +1043,13 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     return sortedSessions.filter((session) => {
       const status = String(session.status || '').toLowerCase();
       if (!['active', 'scheduled', 'paused'].includes(status)) return false;
+      if (status === 'active' && !sessionIsCurrentlyLiveForSlot(session, selectedSlot)) return false;
+      if ((status === 'scheduled' || status === 'paused') && slotHasEnded(selectedSlot)) return false;
       if (seenStudentIds.has(String(session.student_id))) return false;
       seenStudentIds.add(String(session.student_id));
       return true;
     });
-  }, [currentSlotSessions]);
+  }, [currentSlotSessions, selectedSlot]);
   const examSearchResults = useMemo(() => {
     const term = String(examSearch || '').trim().toLowerCase();
     return Object.values(examsById)
@@ -1006,17 +1101,18 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         [selectedSlot.id]: countActiveBookingsBySlot(nextBookings)[String(selectedSlot.id)] || 0,
       }));
 
-      const missingStudentIds = Array.from(new Set(nextBookings.map((row) => row.student_id).filter(Boolean)))
-        .filter((id) => !profilesById[id]);
-      if (missingStudentIds.length > 0) {
-        const profileResp = await loadOptionalQuery(
-          supabase.from('profiles').select('id, full_name, email, role, assigned_teacher_id, premium_until').in('id', missingStudentIds),
+        const missingStudentIds = Array.from(new Set(nextBookings.map((row) => row.student_id).filter(Boolean)))
+          .filter((id) => !profilesById[id])
+          .filter(isUuid);
+        if (missingStudentIds.length > 0) {
+        const profileResp = await loadLiveExamProfiles(
+          (fields) => supabase.from('profiles').select(fields).in('id', missingStudentIds),
           [],
           10000
         );
-        if (!cancelled && profileResp.data?.length) {
-          setProfilesById((prev) => {
-            const next = { ...prev };
+          if (!cancelled && profileResp.data?.length) {
+            setProfilesById((prev) => {
+              const next = { ...prev };
             profileResp.data.forEach((row) => {
               next[row.id] = row;
             });
@@ -1306,8 +1402,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         loadOptionalQuery(supabase.from('exams').select('id, course_id, test_name').order('id'), []),
         loadOptionalQuery(supabase.from('courses').select('id, title'), []),
         shouldLoadAdminDirectory
-          ? loadOptionalQuery(
-              supabase.from('profiles').select('id, full_name, email, role, assigned_teacher_id, premium_until').in('role', ['teacher', 'instructor', 'student']).order('full_name'),
+          ? loadLiveExamProfiles(
+              (fields) => supabase.from('profiles').select(fields).in('role', ['teacher', 'instructor', 'student']).order('full_name'),
               []
             )
           : Promise.resolve({ data: [], error: null }),
@@ -1338,26 +1434,34 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       let feedProfileRows = [];
 
       if (isTeacher || isInstructor) {
+        const mergeById = (currentRows, feedRows) => {
+          const map = new Map();
+          [...currentRows, ...(feedRows || [])].forEach((row) => {
+            if (row?.id) map.set(String(row.id), row);
+          });
+          return Array.from(map.values());
+        };
+        const mergeFeedPayload = (feed) => {
+          if (!feed) return;
+          slotRows = mergeById(slotRows, feed.slots || []);
+          bookingRows = mergeById(bookingRows, feed.bookings || []);
+          sessionRows = mergeById(sessionRows, feed.sessions || []);
+          violationRows = mergeById(violationRows, feed.violations || []);
+          messageRows = mergeById(messageRows, feed.messages || []);
+          instructorRows = mergeById(instructorRows, feed.instructors || []);
+          overrideRows = mergeById(overrideRows, feed.overrides || []);
+          facultyAttendanceRows = mergeById(facultyAttendanceRows, feed.facultyAttendance || []);
+          examRows = mergeById(examRows, feed.exams || []);
+          courseRows = mergeById(courseRows, feed.courses || []);
+          feedProfileRows = mergeById(feedProfileRows, feed.profiles || []);
+        };
+
+        const assignedFeed = await loadAssignedLiveExamSlotsFeed();
+        mergeFeedPayload(assignedFeed);
+
         const staffFeed = await loadStaffLiveExamFeed();
         if (staffFeed?.sessions?.length) {
-          const mergeById = (currentRows, feedRows) => {
-            const map = new Map();
-            [...currentRows, ...(feedRows || [])].forEach((row) => {
-              if (row?.id) map.set(String(row.id), row);
-            });
-            return Array.from(map.values());
-          };
-          slotRows = mergeById(slotRows, staffFeed.slots || []);
-          bookingRows = mergeById(bookingRows, staffFeed.bookings || []);
-          sessionRows = mergeById(sessionRows, staffFeed.sessions || []);
-          violationRows = mergeById(violationRows, staffFeed.violations || []);
-          messageRows = mergeById(messageRows, staffFeed.messages || []);
-          instructorRows = mergeById(instructorRows, staffFeed.instructors || []);
-          overrideRows = mergeById(overrideRows, staffFeed.overrides || []);
-          facultyAttendanceRows = mergeById(facultyAttendanceRows, staffFeed.facultyAttendance || []);
-          examRows = mergeById(examRows, staffFeed.exams || []);
-          courseRows = mergeById(courseRows, staffFeed.courses || []);
-          feedProfileRows = staffFeed.profiles || [];
+          mergeFeedPayload(staffFeed);
         }
       }
 
@@ -1394,8 +1498,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       staffRows.forEach((row) => profileIds.add(row.id));
 
       const profileIdList = Array.from(profileIds).filter(Boolean);
-      const profileResp = profileIdList.length
-        ? await loadOptionalQuery(supabase.from('profiles').select('id, full_name, email, role, assigned_teacher_id, premium_until').in('id', profileIdList), [])
+      const validProfileIdList = profileIdList.filter(isUuid);
+      const profileResp = validProfileIdList.length
+        ? await loadLiveExamProfiles((fields) => supabase.from('profiles').select(fields).in('id', validProfileIdList), [])
         : { data: [], error: null };
 
       if (activeLoadIdRef.current !== loadId) return;
@@ -1896,6 +2001,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setError('');
     setInfo('');
     try {
+      if (profile?.is_exam_banned) {
+        throw new Error(getExamBanMessage(profile));
+      }
       const existingBookingForExam = bookingByExamId[slot.exam_id];
       if (existingBookingForExam && String(existingBookingForExam.slot_id) !== String(slot.id)) {
         throw new Error('You have already booked a slot for this exam. Use Start on the booked slot.');
@@ -2453,6 +2561,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     setError('');
     setInfo('');
     try {
+      if (profile?.is_exam_banned) {
+        throw new Error(getExamBanMessage(profile));
+      }
       const exam = examsById[slot.exam_id];
       let session = sessionByBookingId[booking.id];
       const existingStatus = String(session?.status || '').toLowerCase();
@@ -2537,24 +2648,23 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       setSelectedMonitoringSessionId(session.id);
 
       try {
-        sessionStorage.setItem(
-          LIVE_EXAM_CONTEXT_KEY,
-          JSON.stringify({
-            slotId: slot.id,
-            bookingId: booking.id,
-            sessionId: session.id,
-            examId: slot.exam_id,
-            examName: exam?.test_name || slot.title || 'Live Exam',
-            slotTitle: slot.title || exam?.test_name || 'Live Exam Slot',
-            monitorRoomName: roomNameForSlot(slot, exam),
-            slotStartsAt: slot.starts_at,
-            slotEndsAt: slot.ends_at,
-          })
-        );
+        const nextLiveExamContext = JSON.stringify({
+          slotId: slot.id,
+          bookingId: booking.id,
+          sessionId: session.id,
+          examId: slot.exam_id,
+          examName: exam?.test_name || slot.title || 'Live Exam',
+          slotTitle: slot.title || exam?.test_name || 'Live Exam Slot',
+          monitorRoomName: roomNameForSlot(slot, exam),
+          slotStartsAt: slot.starts_at,
+          slotEndsAt: slot.ends_at,
+        });
+        sessionStorage.setItem(LIVE_EXAM_CONTEXT_KEY, nextLiveExamContext);
+        localStorage.setItem(LIVE_EXAM_CONTEXT_KEY, nextLiveExamContext);
       } catch {
         // ignore storage errors
       }
-      navigate(`/live-test/${slot.exam_id}`);
+      navigate(`/live-test/${slot.exam_id}?slotId=${slot.id}&bookingId=${booking.id}&sessionId=${session.id}`);
     } catch (actionError) {
       setError(actionError.message || 'Failed to start exam session.');
     } finally {
@@ -2675,6 +2785,101 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
     }
   };
 
+  const handleBanStudentFromExam = async (booking, session = null) => {
+    if (!isAdmin || !booking?.student_id) return;
+    const student = profilesById[booking.student_id];
+    const slot = slots.find((row) => String(row.id) === String(booking.slot_id));
+    const reason = await askPrompt(
+      'Ban In Exam',
+      'Reason for banning this user from all future exams?',
+      'Banned from exams by admin.',
+      'Ban User',
+      'Back'
+    );
+    if (reason === null) return;
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      const timestamp = nowIso();
+      const resolvedSession = session || sessionByBookingId[booking.id] || null;
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          is_exam_banned: true,
+          exam_ban_reason: reason || 'Banned from exams by admin.',
+          exam_banned_at: timestamp,
+          exam_banned_by: profile.id,
+        })
+        .eq('id', booking.student_id);
+      if (profileError) throw profileError;
+
+      if (resolvedSession?.id) {
+        const { error: sessionError } = await supabase
+          .from('exam_live_sessions')
+          .update({
+            status: 'terminated',
+            ended_at: timestamp,
+            termination_reason: reason || 'Banned from exams by admin.',
+            updated_at: timestamp,
+          })
+          .eq('id', resolvedSession.id);
+        if (sessionError) throw sessionError;
+
+        const { error: bookingError } = await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'terminated',
+            updated_at: timestamp,
+          })
+          .eq('id', booking.id);
+        if (bookingError) throw bookingError;
+
+        const { error: failResultError } = await supabase
+          .from('exam_submissions')
+          .upsert({
+            exam_id: resolvedSession.exam_id,
+            user_id: booking.student_id,
+            score_percent: 0,
+            passed: false,
+            submitted_at: timestamp,
+            next_attempt_allowed_at: null,
+          }, { onConflict: 'exam_id,user_id' });
+        if (failResultError) throw failResultError;
+      } else {
+        const { error: bookingError } = await supabase
+          .from('exam_slot_bookings')
+          .update({
+            status: 'cancelled',
+            cancelled_at: timestamp,
+            cancellation_reason: reason || 'Student was banned from exams by admin.',
+            updated_at: timestamp,
+          })
+          .eq('id', booking.id);
+        if (bookingError) throw bookingError;
+      }
+
+      await insertNotifications([
+        {
+          title: 'Exam Access Blocked',
+          content: `You are banned from writing exams. ${reason || ''}`.trim(),
+          type: 'warning',
+          target_role: 'student',
+          target_user_id: booking.student_id,
+        },
+      ]).catch(() => null);
+
+      setInfo(`${student?.full_name || student?.email || 'Student'} is now banned from exams.`);
+      await loadData({ silent: true });
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to ban this student from exams.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSessionAction = async (session, actionType) => {
     if (!session?.id) return;
     if (actionType === 'lock' && !isAdmin) {
@@ -2689,7 +2894,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           : actionType === 'resume'
             ? await askPrompt('Resume Exam', 'Resume message?', 'Exam resumed by invigilator.', 'Resume Exam', 'Back')
           : actionType === 'terminate'
-            ? await askPrompt('Terminate Exam', 'Termination reason?', 'Exam terminated by invigilator.', 'Terminate Exam', 'Back')
+            ? await askPrompt('Terminate Exam', 'Termination reason?', 'Unusual activity detected. Your exam has been cancelled by SkillPro team.', 'Terminate Exam', 'Back')
             : await askPrompt('Lock Account', 'Lock reason?', `Account locked by ${role}.`, 'Lock Account', 'Back');
     if (message === null) return;
 
@@ -2717,6 +2922,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       const bookingPatch = { updated_at: nowIso() };
       if (actionType === 'pause') {
         sessionPatch.status = 'paused';
+        sessionPatch.ended_at = null;
+        sessionPatch.last_heartbeat_at = nowIso();
+        sessionPatch.termination_reason = message || 'Exam paused by invigilator.';
       }
       if (actionType === 'resume') {
         sessionPatch.status = 'active';
@@ -2728,7 +2936,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       if (actionType === 'terminate') {
         sessionPatch.status = 'terminated';
         sessionPatch.ended_at = nowIso();
-        sessionPatch.termination_reason = message || 'Terminated by invigilator';
+        sessionPatch.termination_reason = message || 'Unusual activity detected. Your exam has been cancelled by SkillPro team.';
         bookingPatch.status = 'terminated';
         const { error: failResultError } = await supabase
           .from('exam_submissions')
@@ -2780,6 +2988,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         if (bookingError) throw bookingError;
       }
 
+      const { error: messageError } = await supabase
+        .from('exam_live_messages')
+        .insert({
+          slot_id: targetSession.slot_id,
+          session_id: targetSession.id,
+          sender_id: profile.id,
+          sender_role: role,
+          recipient_id: targetSession.student_id,
+          is_broadcast: false,
+          content: message || `${actionType} issued by ${role}.`,
+        });
       const { error: actionError } = await supabase
         .from('exam_live_actions')
         .insert({
@@ -2792,20 +3011,16 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           message: message || null,
           lock_days: actionType === 'lock' ? Math.min(60, Math.max(1, Number(lockDays) || DEFAULT_LOCK_DAYS)) : null,
         });
-      if (actionError) throw actionError;
-
-      const { error: messageError } = await supabase
-        .from('exam_live_messages')
-        .insert({
-          slot_id: targetSession.slot_id,
-          session_id: targetSession.id,
-          sender_id: profile.id,
-          sender_role: role,
-          recipient_id: targetSession.student_id,
-          is_broadcast: false,
-          content: message || `${actionType} issued by ${role}.`,
-        });
-      if (messageError) throw messageError;
+      if (actionType === 'warning') {
+        if (messageError && actionError) {
+          throw messageError;
+        }
+      } else if (messageError) {
+        console.warn('Live exam message delivery failed.', messageError.message || messageError);
+      }
+      if (actionError) {
+        console.warn('Live exam action log failed.', actionError.message || actionError);
+      }
 
       const slot = slots.find((row) => String(row.id) === String(targetSession.slot_id));
       const targetStudentProfile = profilesById[targetSession.student_id] || null;
@@ -2862,7 +3077,17 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
         )));
       }
       setSelectedMonitoringSessionId(targetSession.id);
-      setInfo(`Student ${actionType} action completed.`);
+      setInfo(
+        actionType === 'terminate'
+          ? 'Student exam terminated and marked as failed.'
+          : actionType === 'resume'
+            ? 'Student exam resumed.'
+            : actionType === 'pause'
+              ? 'Student exam paused.'
+              : actionType === 'warning'
+                ? 'Warning sent to student.'
+                : 'Student account locked and exam marked as failed.'
+      );
       await loadData({ silent: true });
     } catch (actionError) {
       setError(actionError.message || `Failed to ${actionType} session.`);
@@ -2970,6 +3195,70 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
       await loadData({ silent: true });
     } catch (actionError) {
       setError(actionError.message || 'Failed to send instruction to student.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAllowReschedule = async (booking, session = null) => {
+    if (!(isAdmin || isTeacher || isInstructor) || !booking?.id) return;
+    const student = profilesById[booking.student_id];
+    const slot = slots.find((row) => String(row.id) === String(booking.slot_id));
+    const reason = await askPrompt(
+      'Allow Reschedule',
+      'Reason for allowing this student to reschedule?',
+      'Reschedule allowed by staff. This booking is cancelled without pass/fail.',
+      'Allow Reschedule',
+      'Back'
+    );
+    if (reason === null) return;
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      const timestamp = nowIso();
+      const resolvedSession = session || sessionByBookingId[booking.id] || null;
+
+      const { error: bookingError } = await supabase
+        .from('exam_slot_bookings')
+        .update({
+          status: 'cancelled',
+          cancelled_at: timestamp,
+          cancellation_reason: reason || 'Reschedule allowed by staff.',
+          updated_at: timestamp,
+        })
+        .eq('id', booking.id);
+      if (bookingError) throw bookingError;
+
+      const { error: sessionError } = await supabase
+        .from('exam_live_sessions')
+        .update({
+          status: 'cancelled',
+          ended_at: timestamp,
+          termination_reason: reason || 'Reschedule allowed by staff.',
+          updated_at: timestamp,
+        })
+        .eq('booking_id', booking.id);
+      if (sessionError) throw sessionError;
+
+      await insertNotifications([
+        {
+          title: 'Exam Reschedule Allowed',
+          content: `${slot?.title || examsById[slot?.exam_id]?.test_name || 'Your exam slot'} was cancelled so you can reschedule again. ${reason || ''}`.trim(),
+          type: 'info',
+          target_role: 'student',
+          target_user_id: booking.student_id,
+        },
+      ]).catch(() => null);
+
+      if (resolvedSession && String(selectedMonitoringSessionId) === String(resolvedSession.id)) {
+        setSelectedMonitoringSessionId(null);
+      }
+      setInfo(`${student?.full_name || student?.email || 'Student'} can now reschedule this exam again.`);
+      await loadData({ silent: true });
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to allow reschedule.');
     } finally {
       setSaving(false);
     }
@@ -3622,8 +3911,8 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       ) : (
                         <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
                           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Big Live View</p>
-                          <h3 className="mt-3 text-3xl font-semibold text-slate-900">No User Writing Now</h3>
-                          <p className="mt-3 max-w-xl text-sm text-slate-500">When a student starts writing the live exam, their screen share, camera, and actions will appear here.</p>
+                          <h3 className="mt-3 text-3xl font-semibold text-slate-900">No Live Student Right Now</h3>
+                          <p className="mt-3 max-w-xl text-sm text-slate-500">When a student is active or paused inside the live exam, their screen share, camera, and actions will stay visible here for monitoring.</p>
                           <button
                             type="button"
                             onClick={() => setShowBigLiveModal(false)}
@@ -3764,7 +4053,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                                 {session
                                   ? (session.camera_connected || session.screen_share_connected || session.mic_connected
                                       ? 'Live stream connected. Use Open Big Screen to watch this student.'
-                                      : 'Waiting for student camera/screen share...')
+                                      : String(session.status || '').toLowerCase() === 'active'
+                                        ? 'Student is still on the permission/fullscreen steps. Live camera and screen will appear after they allow access.'
+                                        : 'Waiting for student camera/screen share...')
                                   : 'Student has not started the exam yet.'}
                               </div>
                               {session ? (
@@ -3974,10 +4265,12 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               </div>
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
-                              <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-800">Send Warning</button>
-                              <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume Exam' : 'Pause Exam'}</button>
-                              <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-800">Terminate</button>
-                              {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white">Lock Account</button> : null}
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'warning')} className="rounded-xl bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-800">Send Warning</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume Exam' : 'Pause Exam'}</button>
+                            <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-800">Terminate</button>
+                            {selectedMonitoringBooking ? <button type="button" onClick={() => handleAllowReschedule(selectedMonitoringBooking, selectedMonitoringSession)} className="rounded-xl bg-blue-100 px-3 py-2 text-sm font-semibold text-blue-700">Allow Reschedule</button> : null}
+                            {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white">Lock Account</button> : null}
+                            {isAdmin && selectedMonitoringBooking ? <button type="button" onClick={() => handleBanStudentFromExam(selectedMonitoringBooking, selectedMonitoringSession)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Ban In Exam</button> : null}
                             </div>
                           </div>
 
@@ -4031,11 +4324,23 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                       </button>
                     ) : null}
                   </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <input
+                      type="search"
+                      value={slotStudentSearch}
+                      onChange={(event) => setSlotStudentSearch(event.target.value)}
+                      placeholder="Search student, email, or status"
+                      className="w-full max-w-md rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    />
+                    <span className="text-sm text-slate-500">
+                      {filteredSlotBookings.length} of {slotBookings.length} student{slotBookings.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
                   <div className="mt-4 overflow-x-auto">
                     <table className="min-w-full text-sm">
                       <thead className="bg-slate-50 text-slate-600"><tr><th className="px-3 py-2 text-left">Student</th><th className="px-3 py-2 text-left">Exam</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Attendance</th><th className="px-3 py-2 text-left">Marked By</th><th className="px-3 py-2 text-left">Actions</th></tr></thead>
                       <tbody>
-                        {slotBookings.length === 0 ? <tr><td colSpan="6" className="px-3 py-6 text-center text-slate-500">No students booked yet.</td></tr> : slotBookings.map((booking) => {
+                        {slotBookings.length === 0 ? <tr><td colSpan="6" className="px-3 py-6 text-center text-slate-500">No students booked yet.</td></tr> : filteredSlotBookings.length === 0 ? <tr><td colSpan="6" className="px-3 py-6 text-center text-slate-500">No students match this search.</td></tr> : filteredSlotBookings.map((booking) => {
                           const student = profilesById[booking.student_id];
                           const session = sessionByBookingId[booking.id];
                           const marker = session?.attendance_marked_by ? profilesById[session.attendance_marked_by] : null;
@@ -4051,7 +4356,19 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                               <td className="px-3 py-3"><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{session?.status || booking.status}</span></td>
                               <td className="px-3 py-3"><div className="space-y-2"><p className="text-slate-700">{session?.attendance_status || 'pending'}</p>{session ? <div className="flex gap-2"><button type="button" onClick={() => handleAttendance(session, 'present')} className="rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Present</button><button type="button" onClick={() => handleAttendance(session, 'absent')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Absent</button></div> : null}</div></td>
                               <td className="px-3 py-3 text-slate-600">{marker ? `${marker.full_name || marker.email} (${session?.attendance_marked_role || '-'})` : '-'}</td>
-                              <td className="px-3 py-3">{session ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleSessionAction(session, 'warning')} className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Warn</button><button type="button" onClick={() => handleSessionAction(session, session.status === 'paused' ? 'resume' : 'pause')} className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{session.status === 'paused' ? 'Resume' : 'Pause'}</button><button type="button" onClick={() => handleSessionAction(session, 'terminate')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Terminate</button>{isAdmin ? <button type="button" onClick={() => handleSessionAction(session, 'lock')} className="rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white">Lock</button> : null}{isAdmin ? <button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button> : null}</div> : isAdmin ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button></div> : <span className="text-xs text-slate-500">Not joined yet</span>}</td>
+                              <td className="px-3 py-3">
+                                <div className="flex flex-wrap gap-2">
+                                  {session ? <button type="button" onClick={() => selectMonitoringSession(session, { openModal: true, tab: 'screen' })} className="rounded-lg bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">Open Live</button> : null}
+                                  {session ? <button type="button" onClick={() => handleSessionAction(session, 'warning')} className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Warn</button> : null}
+                                  {session ? <button type="button" onClick={() => handleSessionAction(session, session.status === 'paused' ? 'resume' : 'pause')} className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{session.status === 'paused' ? 'Resume' : 'Pause'}</button> : null}
+                                  {session ? <button type="button" onClick={() => handleSessionAction(session, 'terminate')} className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">Terminate</button> : null}
+                                  {(isAdmin || isTeacher || isInstructor) ? <button type="button" onClick={() => handleAllowReschedule(booking, session)} className="rounded-lg bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">Allow Reschedule</button> : null}
+                                  {isAdmin ? <button type="button" onClick={() => handleCancelStudentExam(booking)} className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Cancel Exam</button> : null}
+                                  {isAdmin && session ? <button type="button" onClick={() => handleSessionAction(session, 'lock')} className="rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white">Lock</button> : null}
+                                  {isAdmin ? <button type="button" onClick={() => handleBanStudentFromExam(booking, session)} className="rounded-lg bg-slate-900 px-2 py-1 text-xs font-semibold text-white">Ban In Exam</button> : null}
+                                  {!session && !(isAdmin || isTeacher || isInstructor) ? <span className="text-xs text-slate-500">Not joined yet</span> : null}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -4146,7 +4463,9 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
                             <button type="button" onClick={() => handleSpeakToStudent(selectedMonitoringSession)} className="rounded-xl bg-teal-100 px-4 py-2 text-sm font-semibold text-teal-800">Speak</button>
                             <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, selectedMonitoringSession.status === 'paused' ? 'resume' : 'pause')} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{selectedMonitoringSession.status === 'paused' ? 'Resume' : 'Pause'}</button>
                             <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'terminate')} className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-800">Terminate</button>
+                            {selectedMonitoringBooking ? <button type="button" onClick={() => handleAllowReschedule(selectedMonitoringBooking, selectedMonitoringSession)} className="rounded-xl bg-blue-100 px-4 py-2 text-sm font-semibold text-blue-700">Allow Reschedule</button> : null}
                             {isAdmin ? <button type="button" onClick={() => handleSessionAction(selectedMonitoringSession, 'lock')} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">Lock</button> : null}
+                            {isAdmin && selectedMonitoringBooking ? <button type="button" onClick={() => handleBanStudentFromExam(selectedMonitoringBooking, selectedMonitoringSession)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Ban In Exam</button> : null}
                           </div>
                         </>
                       ) : (

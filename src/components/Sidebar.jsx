@@ -504,11 +504,11 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
               <LayoutDashboard size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Dashboard</span>}
             </NavLink>
-            <NavLink to="/app/all-in-one" className={navItemClass} title="All In One">
+            <NavLink to="/app/instructor/all-in-one" className={navItemClass} title="All In One">
               <MonitorUp size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">All In One</span>}
             </NavLink>
-            <NavLink to="/app/live-exams" className={navItemClass} title="Live Exams">
+            <NavLink to="/app/instructor/live-exams" className={navItemClass} title="Live Exams">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Live Exams</span>}
             </NavLink>
@@ -1003,6 +1003,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/admin/exam-overrides" className={navItemClass} title="Exam Retake Overrides">
               <Clock size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Exam Retake Overrides</span>}
+            </NavLink>
+            <NavLink to="/app/admin/exam-bans" className={navItemClass} title="Exam Bans">
+              <ShieldAlert size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Exam Bans</span>}
             </NavLink>
             <NavLink to="/app/admin/choose-meet" className={navItemClass} title="Choose Meet">
               <Video size={28} />

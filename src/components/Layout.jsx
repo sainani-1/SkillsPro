@@ -186,6 +186,7 @@ const Layout = () => {
       { label: 'All In One', path: '/app/all-in-one' },
       { label: 'Live Exams', path: '/app/live-exams' },
       { label: 'Live Exam Slots', path: '/app/live-exam-slots' },
+      { label: 'Exam Bans', path: '/app/admin/exam-bans' },
       { label: 'Live Monitoring', path: '/app/live-monitoring' },
       { label: 'Exam Attendance', path: '/app/live-attendance' },
       { label: 'Faculty Attendance', path: '/app/faculty-attendance' },
@@ -245,8 +246,8 @@ const Layout = () => {
 
     const instructorTargets = [
       { label: 'Dashboard', path: '/app' },
-      { label: 'All In One', path: '/app/all-in-one' },
-      { label: 'Live Exams', path: '/app/live-exams' },
+      { label: 'All In One', path: '/app/instructor/all-in-one' },
+      { label: 'Live Exams', path: '/app/instructor/live-exams' },
     ];
 
     const verifierTargets = [

@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionState, LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client';
 import { getLiveKitTokenForSession } from '../lib/livekitSession';
+import {
+  LIVE_EXAM_SIGNAL_TABLE,
+  buildPeerKey,
+  createLiveExamPeer,
+  serializeIceCandidate,
+  serializeSessionDescription,
+} from '../lib/liveExamWebRTC';
 import { supabase } from '../supabaseClient';
 
 const ROOM_IDLE_DISCONNECT_MS = 30000;
@@ -27,6 +34,27 @@ function isTerminalSessionStatus(status) {
   return ['terminated', 'disconnected', 'completed', 'cancelled'].includes(String(status || '').toLowerCase());
 }
 
+function getSessionMediaScore(session) {
+  return (
+    Number(Boolean(session?.screen_share_connected)) +
+    Number(Boolean(session?.camera_connected)) +
+    Number(Boolean(session?.mic_connected))
+  );
+}
+
+function getSessionStatusPriority(session) {
+  const status = String(session?.status || '').toLowerCase();
+  if (status === 'active') return 4;
+  if (status === 'paused') return 3;
+  if (status === 'scheduled') return 2;
+  if (status === 'disconnected') return 1;
+  return 0;
+}
+
+function getSessionRecency(session) {
+  return new Date(session?.updated_at || session?.started_at || session?.created_at || 0).getTime();
+}
+
 function resolvePreferredSession(currentSession, nextSession) {
   if (!nextSession) return nextSession;
   if (!currentSession) return nextSession;
@@ -45,6 +73,19 @@ function resolvePreferredSession(currentSession, nextSession) {
   }
   if (sameBooking && currentTerminal && !nextTerminal) {
     return nextSession;
+  }
+  if (String(currentSession?.id || '') === String(nextSession?.id || '')) {
+    return getSessionRecency(nextSession) >= getSessionRecency(currentSession) ? nextSession : currentSession;
+  }
+  const currentMediaScore = getSessionMediaScore(currentSession);
+  const nextMediaScore = getSessionMediaScore(nextSession);
+  if (nextMediaScore !== currentMediaScore) {
+    return nextMediaScore > currentMediaScore ? nextSession : currentSession;
+  }
+  const currentPriority = getSessionStatusPriority(currentSession);
+  const nextPriority = getSessionStatusPriority(nextSession);
+  if (nextPriority !== currentPriority) {
+    return nextPriority > currentPriority ? nextSession : currentSession;
   }
   if (sameBooking) {
     return nextStamp >= currentStamp ? nextSession : currentSession;
@@ -164,20 +205,6 @@ function bindSharedRoomStateListeners(entry) {
   });
 
   entry.room.on(RoomEvent.TrackSubscribed, (track, publication) => {
-    if (publication?.source === Track.Source.ScreenShare && track?.kind === Track.Kind.Video) {
-      emitSharedRoomState(entry, {
-        debugState: { screen: 'connected' },
-        status: 'Live stream connected.',
-        error: '',
-      });
-    }
-    if (publication?.source === Track.Source.Camera && track?.kind === Track.Kind.Video) {
-      emitSharedRoomState(entry, {
-        debugState: { camera: 'connected' },
-        status: 'Live stream connected.',
-        error: '',
-      });
-    }
     if (publication?.source === Track.Source.Microphone && track?.kind === Track.Kind.Audio) {
       emitSharedRoomState(entry, {
         debugState: { mic: 'connected' },
@@ -214,7 +241,7 @@ function bindSharedRoomStateListeners(entry) {
   entry.room.on(RoomEvent.Reconnected, () => {
     emitSharedRoomState(entry, {
       debugState: { room: ConnectionState.Connected },
-      status: 'Live stream connected.',
+      status: 'Waiting for student media...',
       error: '',
     });
   });
@@ -239,9 +266,14 @@ export default function LiveExamStreamMonitor({
   const [debugState, setDebugState] = useState(createDefaultDebugState());
   const sharedEntryRef = useRef(null);
   const supportMicTrackRef = useRef(null);
+  const lastMediaReconnectSignatureRef = useRef('');
+  const mediaReconnectAttemptsRef = useRef(new Map());
   const screenVideoRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const audioRef = useRef(null);
+  const webRtcPeersRef = useRef(new Map());
+  const webRtcPollTimerRef = useRef(null);
+  const processedWebRtcSignalIdsRef = useRef(new Set());
 
   const streamCardClass = compact
     ? 'rounded-2xl border border-slate-800 bg-slate-950 p-2'
@@ -336,6 +368,46 @@ export default function LiveExamStreamMonitor({
       cancelled = true;
     };
   }, [session?.booking_id, session?.status]);
+
+  useEffect(() => {
+    if (!resolvedSession?.id) return undefined;
+
+    let cancelled = false;
+    const refreshSession = async () => {
+      let query = supabase
+        .from('exam_live_sessions')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(10);
+
+      if (resolvedSession.booking_id) {
+        query = query.eq('booking_id', resolvedSession.booking_id);
+      } else {
+        query = query
+          .eq('student_id', resolvedSession.student_id)
+          .eq('slot_id', resolvedSession.slot_id);
+      }
+
+      const { data, error: sessionError } = await query;
+      if (cancelled || sessionError || !data?.length) return;
+      const nextSession = data.reduce((bestSession, row) => {
+        if (!bestSession) return row;
+        return resolvePreferredSession(bestSession, row);
+      }, null);
+      if (!nextSession) return;
+      setResolvedSession((currentSession) => resolvePreferredSession(currentSession, nextSession));
+    };
+
+    void refreshSession();
+    const timer = window.setInterval(() => {
+      void refreshSession();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [resolvedSession?.id]);
 
   useEffect(() => {
     if (!resolvedSession?.id || !viewerId) {
@@ -508,6 +580,40 @@ export default function LiveExamStreamMonitor({
       });
     };
 
+    const participantConnectedHandler = (participant) => {
+      subscribeParticipantTracks(participant);
+    };
+    const trackPublishedHandler = (publication, participant) => {
+      publication?.setSubscribed?.(true);
+      subscribeParticipantTracks(participant);
+    };
+    const trackSubscribedHandler = (track, publication) => {
+      void attachPublication({ ...publication, track });
+    };
+    const trackUnsubscribedHandler = (track, publication) => {
+      const trackSid = publication?.trackSid || track?.sid || `${publication?.source || 'unknown'}-${track?.kind || 'track'}`;
+      attachedTrackSids.delete(trackSid);
+    };
+
+    const locallyBoundRooms = new WeakSet();
+    const bindLocalRoomHandlers = (room) => {
+      if (!room || locallyBoundRooms.has(room)) return;
+      locallyBoundRooms.add(room);
+      room.on(RoomEvent.ParticipantConnected, participantConnectedHandler);
+      room.on(RoomEvent.TrackPublished, trackPublishedHandler);
+      room.on(RoomEvent.TrackSubscribed, trackSubscribedHandler);
+      room.on(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+    };
+
+    const unbindLocalRoomHandlers = (room) => {
+      if (!room || !locallyBoundRooms.has(room)) return;
+      room.off(RoomEvent.ParticipantConnected, participantConnectedHandler);
+      room.off(RoomEvent.TrackPublished, trackPublishedHandler);
+      room.off(RoomEvent.TrackSubscribed, trackSubscribedHandler);
+      room.off(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+      locallyBoundRooms.delete(room);
+    };
+
     const connectRoom = async () => {
       const isAbortLikeError = (error) => {
         const message = String(error?.message || error || '').toLowerCase();
@@ -538,6 +644,7 @@ export default function LiveExamStreamMonitor({
           dynacast: false,
         });
         sharedEntry.room = room;
+        bindLocalRoomHandlers(room);
         bindSharedRoomStateListeners(sharedEntry);
 
         await room.connect(tokenData.url, tokenData.token, {
@@ -552,7 +659,10 @@ export default function LiveExamStreamMonitor({
 
         emitSharedRoomState(sharedEntry, {
           error: '',
-          status: 'Waiting for student camera/screen share...',
+          status:
+            String(resolvedSession?.status || '').toLowerCase() === 'active'
+              ? 'Student is still on the permission/fullscreen steps. Live camera and screen will appear after they allow access.'
+              : 'Waiting for student camera/screen share...',
           debugState: { room: ConnectionState.Connected },
         });
 
@@ -571,6 +681,7 @@ export default function LiveExamStreamMonitor({
           } catch (attemptError) {
             lastError = attemptError;
             const shouldRetry = isAbortLikeError(attemptError);
+            unbindLocalRoomHandlers(sharedEntry.room);
             sharedEntry.room?.disconnect?.();
             sharedEntry.room = null;
             sharedEntry.listenersBound = false;
@@ -595,26 +706,9 @@ export default function LiveExamStreamMonitor({
     };
 
     const room = sharedEntry.room;
-    const participantConnectedHandler = (participant) => {
-      subscribeParticipantTracks(participant);
-    };
-    const trackPublishedHandler = (publication, participant) => {
-      publication?.setSubscribed?.(true);
-      subscribeParticipantTracks(participant);
-    };
-    const trackSubscribedHandler = (track, publication) => {
-      void attachPublication({ ...publication, track });
-    };
-    const trackUnsubscribedHandler = (track, publication) => {
-      const trackSid = publication?.trackSid || track?.sid || `${publication?.source || 'unknown'}-${track?.kind || 'track'}`;
-      attachedTrackSids.delete(trackSid);
-    };
 
     if (room) {
-      room.on(RoomEvent.ParticipantConnected, participantConnectedHandler);
-      room.on(RoomEvent.TrackPublished, trackPublishedHandler);
-      room.on(RoomEvent.TrackSubscribed, trackSubscribedHandler);
-      room.on(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+      bindLocalRoomHandlers(room);
       room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
     }
 
@@ -625,10 +719,7 @@ export default function LiveExamStreamMonitor({
     } else if (sharedEntry.connectPromise) {
       void sharedEntry.connectPromise.then(() => {
         if (!mounted || !sharedEntry.room) return;
-        sharedEntry.room.on(RoomEvent.ParticipantConnected, participantConnectedHandler);
-        sharedEntry.room.on(RoomEvent.TrackPublished, trackPublishedHandler);
-        sharedEntry.room.on(RoomEvent.TrackSubscribed, trackSubscribedHandler);
-        sharedEntry.room.on(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+        bindLocalRoomHandlers(sharedEntry.room);
         sharedEntry.room.remoteParticipants.forEach((participant) => subscribeParticipantTracks(participant));
       });
     }
@@ -638,10 +729,7 @@ export default function LiveExamStreamMonitor({
       unsubscribeSharedState();
       cleanupLocalBindings();
       if (sharedEntry.room) {
-        sharedEntry.room.off(RoomEvent.ParticipantConnected, participantConnectedHandler);
-        sharedEntry.room.off(RoomEvent.TrackPublished, trackPublishedHandler);
-        sharedEntry.room.off(RoomEvent.TrackSubscribed, trackSubscribedHandler);
-        sharedEntry.room.off(RoomEvent.TrackUnsubscribed, trackUnsubscribedHandler);
+        unbindLocalRoomHandlers(sharedEntry.room);
       }
       sharedEntry.refCount = Math.max(0, sharedEntry.refCount - 1);
       scheduleSharedRoomDisconnect(sharedEntry);
@@ -655,6 +743,182 @@ export default function LiveExamStreamMonitor({
   useEffect(() => () => {
     void stopSupportTalk();
   }, []);
+
+  useEffect(() => {
+    if (!resolvedSession?.id || !resolvedSession?.student_id || !viewerId) return undefined;
+
+    const attachRemoteTrack = (streamType, event) => {
+      const remoteStream = event?.streams?.[0];
+      const track = event?.track;
+      if (!track) return;
+
+      if (streamType === 'screen' && track.kind === 'video' && screenVideoRef.current) {
+        const element = screenVideoRef.current;
+        element.srcObject = remoteStream || new MediaStream([track]);
+        element.muted = true;
+        element.autoplay = true;
+        element.playsInline = true;
+        void playMediaElement(element);
+        setDebugState((prev) => ({ ...prev, screen: 'connected' }));
+        setStatus('Live stream connected.');
+        return;
+      }
+
+      if (streamType === 'camera') {
+        if (track.kind === 'video' && cameraVideoRef.current) {
+          const element = cameraVideoRef.current;
+          element.srcObject = remoteStream || new MediaStream([track]);
+          element.muted = true;
+          element.autoplay = true;
+          element.playsInline = true;
+          void playMediaElement(element);
+          setDebugState((prev) => ({ ...prev, camera: 'connected' }));
+          setStatus('Live stream connected.');
+        }
+        if (track.kind === 'audio' && audioRef.current) {
+          const element = audioRef.current;
+          element.srcObject = remoteStream || new MediaStream([track]);
+          element.muted = !audioEnabled;
+          element.autoplay = true;
+          void playMediaElement(element);
+          setDebugState((prev) => ({ ...prev, mic: 'connected' }));
+        }
+      }
+    };
+
+    const sendSignal = async ({ signalType, streamType, payload }) => {
+      await supabase.from(LIVE_EXAM_SIGNAL_TABLE).insert({
+        slot_id: resolvedSession.slot_id,
+        session_id: resolvedSession.id,
+        from_user_id: viewerId,
+        from_role: viewerRole,
+        to_user_id: resolvedSession.student_id,
+        signal_type: signalType,
+        stream_type: streamType,
+        payload,
+      });
+    };
+
+    const ensurePeer = async (streamType) => {
+      const connectionId = viewerInstanceId || 'default';
+      const peerKey = buildPeerKey(resolvedSession.student_id, streamType, connectionId);
+      const existingPeer = webRtcPeersRef.current.get(peerKey);
+      if (existingPeer) return { peer: existingPeer, connectionId };
+
+      const peer = createLiveExamPeer({
+        onIceCandidate: (candidate) =>
+          void sendSignal({
+            signalType: 'ice-candidate',
+            streamType,
+            payload: {
+              ...serializeIceCandidate(candidate),
+              connectionId,
+            },
+          }),
+        onTrack: (event) => attachRemoteTrack(streamType, event),
+      });
+
+      webRtcPeersRef.current.set(peerKey, peer);
+      return { peer, connectionId };
+    };
+
+    const requestStream = async (streamType) => {
+      const { peer, connectionId } = await ensurePeer(streamType);
+      if (peer.signalingState !== 'stable') return;
+      const offer = await peer.createOffer({
+        offerToReceiveAudio: streamType === 'camera',
+        offerToReceiveVideo: true,
+      });
+      await peer.setLocalDescription(offer);
+      await sendSignal({
+        signalType: 'offer',
+        streamType,
+        payload: {
+          ...serializeSessionDescription(peer.localDescription),
+          connectionId,
+        },
+      });
+    };
+
+    const handleSignal = async (row) => {
+      if (!row || processedWebRtcSignalIdsRef.current.has(String(row.id))) return;
+      if (String(row.session_id || '') !== String(resolvedSession.id)) return;
+      if (String(row.to_user_id || '') !== String(viewerId)) return;
+      if (String(row.from_user_id || '') !== String(resolvedSession.student_id)) return;
+
+      const streamType = row.stream_type === 'screen' ? 'screen' : 'camera';
+      const connectionId = String(row.payload?.connectionId || viewerInstanceId || 'default');
+      const peerKey = buildPeerKey(resolvedSession.student_id, streamType, connectionId);
+      let peer = webRtcPeersRef.current.get(peerKey);
+      if (!peer) {
+        const ensured = await ensurePeer(streamType);
+        peer = ensured.peer;
+      }
+
+      if (row.signal_type === 'answer' && row.payload?.sdp) {
+        await peer.setRemoteDescription(new RTCSessionDescription(row.payload));
+        processedWebRtcSignalIdsRef.current.add(String(row.id));
+        return;
+      }
+
+      if (row.signal_type === 'ice-candidate' && row.payload?.candidate) {
+        await peer.addIceCandidate(new RTCIceCandidate(row.payload));
+        processedWebRtcSignalIdsRef.current.add(String(row.id));
+      }
+    };
+
+    const closePeers = () => {
+      if (webRtcPollTimerRef.current) {
+        window.clearInterval(webRtcPollTimerRef.current);
+        webRtcPollTimerRef.current = null;
+      }
+      webRtcPeersRef.current.forEach((peer) => {
+        try {
+          peer.close();
+        } catch {
+          // ignore peer close errors
+        }
+      });
+      webRtcPeersRef.current.clear();
+    };
+
+    const channel = supabase
+      .channel(`live-exam-webrtc-viewer-${resolvedSession.id}-${viewerId}-${viewerInstanceId || 'default'}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: LIVE_EXAM_SIGNAL_TABLE },
+        (payload) => {
+          void handleSignal(payload?.new);
+        }
+      )
+      .subscribe();
+
+    const fetchRecentSignals = async () => {
+      const { data, error: signalError } = await supabase
+        .from(LIVE_EXAM_SIGNAL_TABLE)
+        .select('*')
+        .eq('session_id', resolvedSession.id)
+        .eq('to_user_id', viewerId)
+        .order('created_at', { ascending: false })
+        .limit(40);
+      if (signalError) return;
+      (data || []).reverse().forEach((row) => {
+        void handleSignal(row);
+      });
+    };
+
+    void requestStream('screen');
+    void requestStream('camera');
+    void fetchRecentSignals();
+    webRtcPollTimerRef.current = window.setInterval(() => {
+      void fetchRecentSignals();
+    }, 2000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      closePeers();
+    };
+  }, [audioEnabled, resolvedSession?.id, resolvedSession?.slot_id, resolvedSession?.student_id, viewerId, viewerInstanceId, viewerRole]);
 
   useEffect(() => {
     if (!connectionKey) return;
@@ -673,6 +937,57 @@ export default function LiveExamStreamMonitor({
       }
     }
   }, [audioEnabled]);
+
+  useEffect(() => {
+    if (!resolvedSession?.id) return;
+    const roomConnected =
+      String(debugState.room).toLowerCase() === String(ConnectionState.Connected).toLowerCase();
+    const sessionMediaConnected =
+      Boolean(resolvedSession?.screen_share_connected) ||
+      Boolean(resolvedSession?.camera_connected) ||
+      Boolean(resolvedSession?.mic_connected);
+    const hasVideoFeed =
+      debugState.screen === 'connected' ||
+      debugState.camera === 'connected';
+
+    if (!roomConnected || !sessionMediaConnected || hasVideoFeed) return;
+
+    const reconnectSignature = [
+      resolvedSession.id,
+      resolvedSession.updated_at || '',
+      resolvedSession.screen_share_connected ? 'screen' : '',
+      resolvedSession.camera_connected ? 'camera' : '',
+      resolvedSession.mic_connected ? 'mic' : '',
+    ].join(':');
+
+    if (lastMediaReconnectSignatureRef.current !== reconnectSignature) {
+      lastMediaReconnectSignatureRef.current = reconnectSignature;
+      mediaReconnectAttemptsRef.current.set(reconnectSignature, 0);
+    }
+
+    const attempts = mediaReconnectAttemptsRef.current.get(reconnectSignature) || 0;
+    if (attempts >= 3) return;
+
+    const timer = window.setTimeout(() => {
+      mediaReconnectAttemptsRef.current.set(reconnectSignature, attempts + 1);
+      disconnectSharedRoomNow(connectionKey, 'Refreshing live preview...');
+      setRoomReconnectNonce((value) => value + 1);
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    connectionKey,
+    debugState.camera,
+    debugState.room,
+    debugState.screen,
+    resolvedSession?.camera_connected,
+    resolvedSession?.id,
+    resolvedSession?.mic_connected,
+    resolvedSession?.screen_share_connected,
+    resolvedSession?.updated_at,
+  ]);
 
   useEffect(() => {
     if (error) return;
@@ -696,15 +1011,22 @@ export default function LiveExamStreamMonitor({
       Boolean(resolvedSession?.mic_connected);
     const hasVideoFeed =
       debugState.screen === 'connected' ||
-      debugState.camera === 'connected' ||
-      sessionMediaConnected;
+      debugState.camera === 'connected';
 
     if (hasVideoFeed) {
       setStatus('Live stream connected.');
       return;
     }
+    if (roomConnected && sessionMediaConnected) {
+      setStatus('Live media was granted. Waiting for the preview stream to attach...');
+      return;
+    }
     if (roomConnected) {
-      setStatus('Waiting for student camera/screen share...');
+      setStatus(
+        String(sessionStatus).toLowerCase() === 'active'
+          ? 'Student is still on the permission/fullscreen steps. Live camera and screen will appear after they allow access.'
+          : 'Waiting for student camera/screen share...'
+      );
       return;
     }
     if (String(debugState.room).toLowerCase() === 'fetching token') {

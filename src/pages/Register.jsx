@@ -106,9 +106,6 @@ const Register = () => {
       } else if (formData.password.length < 6) {
         stepErrors.password = 'Password must be at least 6 characters';
       }
-      if (!file) {
-        stepErrors.file = 'Profile photo is required';
-      }
     }
 
     if (step === 4 && !termsAccepted) {
@@ -137,9 +134,6 @@ const Register = () => {
       newErrors.password = 'Password is required';
     } else if (formData.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
-    }
-    if (!file) {
-      newErrors.file = 'Profile photo is required';
     }
     if (!formData.educationLevel) {
       newErrors.educationLevel = 'Education level is required';

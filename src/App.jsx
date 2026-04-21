@@ -95,6 +95,7 @@ import StudentWriteTest from './pages/StudentWriteTest';
 import ResumeBuilder from './pages/ResumeBuilder';
 import ReportIssue from './pages/ReportIssue';
 import AdminIssueReports from './pages/AdminIssueReports';
+import AdminExamBans from './pages/AdminExamBans';
 import AdminGrowthAnalytics from './pages/AdminGrowthAnalytics';
 import AdminLeadInbox from './pages/AdminLeadInbox';
 import AdminPaymentAttempts from './pages/AdminPaymentAttempts';
@@ -403,7 +404,7 @@ function App() {
           <Route path="admin/teacher-progress" element={<AdminRoute><TeacherProgress /></AdminRoute>} />
           <Route path="admin/courses" element={<AdminRoute><AdminCourses /></AdminRoute>} />
           <Route path="teacher/tests" element={<TeacherRoute><TeacherConductTests /></TeacherRoute>} />
-          <Route path="instructor/live-exams" element={<InstructorRoute><LiveExamProctoring /></InstructorRoute>} />
+          <Route path="instructor/live-exams" element={<InstructorRoute><LiveExamProctoring forcedPanel="slots" /></InstructorRoute>} />
           <Route path="instructor/all-in-one" element={<InstructorRoute><LiveExamProctoring forcedPanel="all-in-one" /></InstructorRoute>} />
           <Route path="instructor/live-exam-slots" element={<InstructorRoute><LiveExamProctoring forcedPanel="slots" /></InstructorRoute>} />
           <Route path="instructor/live-monitoring" element={<InstructorRoute><LiveExamProctoring forcedPanel="monitoring" /></InstructorRoute>} />
@@ -430,6 +431,7 @@ function App() {
           <Route path="admin/access-codes" element={<AdminRoute><AdminAccessCodes /></AdminRoute>} />
           <Route path="admin/notifications" element={<AdminRoute><AdminNotifications /></AdminRoute>} />
           <Route path="admin/exam-overrides" element={<AdminRoute><AdminExamOverrides /></AdminRoute>} />
+          <Route path="admin/exam-bans" element={<AdminRoute><AdminExamBans /></AdminRoute>} />
           <Route path="admin/live-exam-booking-controls" element={<AdminRoute><AdminLiveExamBookingControls /></AdminRoute>} />
           <Route path="admin/allow-failed-to-book-slot" element={<AdminRoute><AdminLiveExamBookingControls /></AdminRoute>} />
           <Route path="admin/choose-meet" element={<AdminRoute><AdminChooseMeet /></AdminRoute>} />

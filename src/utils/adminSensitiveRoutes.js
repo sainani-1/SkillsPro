@@ -46,6 +46,7 @@ export const ADMIN_SENSITIVE_ROUTE_OPTIONS = [
   createRouteOption('/app/admin/multi-session-alerts', 'Multi Session Alerts', 'Review multi-device or multi-session detections.'),
   createRouteOption('/app/admin/courses', 'Admin Courses', 'Admin course creation and course content updates.'),
   createRouteOption('/app/admin/exam-overrides', 'Exam Retake Overrides', 'Override exam eligibility and retake access.'),
+  createRouteOption('/app/admin/exam-bans', 'Exam Bans', 'Block or restore exam access for specific users.'),
   createRouteOption('/app/admin/choose-meet', 'Choose Meet', 'Select meeting provider settings.'),
   createRouteOption('/app/admin/allow-failed-to-book-slot', 'Allow Failed Slot Booking', 'Allow students to rebook failed live slots.'),
   createRouteOption('/app/admin/exam-retakes', 'Release Exams', 'Release terminated exams for another attempt.'),

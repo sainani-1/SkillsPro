@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { runCode } from "../logicBuilding/codeRunner";
 import MonacoCdnEditor from "../components/MonacoCdnEditor";
@@ -168,11 +169,15 @@ function formatCountdown(totalSeconds) {
 export default function Exam({ examMode = "certification" }) {
   const { fetchProfile } = useAuth();
   const { courseId: routeCourseId, examId: routeExamId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isTeacherTestMode = examMode === "teacher-test";
   const isLiveProctoredMode = examMode === "live-proctored";
   const requiresLiveMedia = isLiveProctoredMode;
   const routeIdentity = isTeacherTestMode || isLiveProctoredMode ? routeExamId : routeCourseId;
+  const requestedLiveSessionId = String(searchParams.get("sessionId") || "").trim();
+  const requestedLiveSlotId = String(searchParams.get("slotId") || "").trim();
+  const requestedLiveBookingId = String(searchParams.get("bookingId") || "").trim();
 
   const [examId, setExamId] = useState(null);
   const [resolvedCourseId, setResolvedCourseId] = useState(routeCourseId || null);
@@ -231,9 +236,12 @@ export default function Exam({ examMode = "certification" }) {
   const [resumeWarningMessage, setResumeWarningMessage] = useState("");
   const [invigilatorWarningMessage, setInvigilatorWarningMessage] = useState("");
   const [invigilatorPauseMessage, setInvigilatorPauseMessage] = useState("");
+  const [showWaitingHallPopup, setShowWaitingHallPopup] = useState(false);
+  const [dismissedWaitingHallPopupKey, setDismissedWaitingHallPopupKey] = useState("");
   const [submitReady, setSubmitReady] = useState(false);
   const [submitCountdown, setSubmitCountdown] = useState(6);
   const [submitDelaySeconds, setSubmitDelaySeconds] = useState(6);
+  const [supportVoiceConnected, setSupportVoiceConnected] = useState(false);
   const [submissionFinalized, setSubmissionFinalized] = useState(false);
   const [examStartedAt, setExamStartedAt] = useState(null);
   const [examEndsAt, setExamEndsAt] = useState(null);
@@ -246,7 +254,11 @@ export default function Exam({ examMode = "certification" }) {
   const hasRestoredSessionRef = useRef(false);
   const processedLiveActionIdsRef = useRef(new Set());
   const processedLiveMessageIdsRef = useRef(new Set());
+  const lastObservedLiveSessionStatusRef = useRef("");
+  const lastHandledStaffSignalRef = useRef("");
+  const liveSignalCutoffRef = useRef(Date.now());
   const resumeTimerRef = useRef(null);
+  const autoResumeFullscreenAttemptedRef = useRef(false);
   const tabSwitchTimerRef = useRef(null);
   const tabSwitchGraceActiveRef = useRef(false);
   const blankScreenWarnedRef = useRef(false);
@@ -304,7 +316,7 @@ export default function Exam({ examMode = "certification" }) {
     safeLocalRemove(key);
   };
   const getStoredLiveExamContext = () =>
-    safeLocalGet(LIVE_EXAM_CONTEXT_KEY) || safeSessionGet(LIVE_EXAM_CONTEXT_KEY);
+    safeSessionGet(LIVE_EXAM_CONTEXT_KEY) || safeLocalGet(LIVE_EXAM_CONTEXT_KEY);
   const setStoredLiveExamContext = (value) => {
     safeSessionSet(LIVE_EXAM_CONTEXT_KEY, value);
     safeLocalSet(LIVE_EXAM_CONTEXT_KEY, value);
@@ -321,6 +333,96 @@ export default function Exam({ examMode = "certification" }) {
   const isLiveManagedExam = Boolean(liveExamContext?.sessionId);
   const isInvigilatorPaused = Boolean(invigilatorPauseMessage);
   const isExamInteractionBlocked = needsFullscreenResume || isInvigilatorPaused;
+  const isWaitingHallPhase =
+    phase === EXAM_PHASES.RULES ||
+    phase === EXAM_PHASES.PERMISSION ||
+    phase === EXAM_PHASES.FULLSCREEN;
+  const waitingHallStatusTone = invigilatorPauseMessage
+    ? "border-amber-200 bg-amber-50 text-amber-900"
+    : invigilatorWarningMessage
+      ? "border-red-200 bg-red-50 text-red-900"
+      : errorMsg
+        ? "border-rose-200 bg-rose-50 text-rose-900"
+        : "border-blue-200 bg-blue-50 text-blue-900";
+  const waitingHallStatusTitle = invigilatorPauseMessage
+    ? "Exam Paused By Team"
+    : invigilatorWarningMessage
+      ? "Warning From Team"
+      : errorMsg
+        ? "Action Needed"
+        : "Waiting Hall Live Status";
+  const waitingHallStatusMessage = invigilatorPauseMessage || invigilatorWarningMessage || errorMsg || infoMsg || "Stay on this screen. Team instructions, pause updates, warnings, and voice support will appear here before the exam starts.";
+  const waitingHallPopup = isWaitingHallPhase
+    ? invigilatorPauseMessage
+      ? {
+          key: `pause:${invigilatorPauseMessage}`,
+          title: "Exam Paused By Team",
+          message: invigilatorPauseMessage,
+          tone: "border-amber-200 bg-amber-50 text-amber-900",
+        }
+      : invigilatorWarningMessage
+        ? {
+            key: `warning:${invigilatorWarningMessage}`,
+            title: "Warning From Team",
+            message: invigilatorWarningMessage,
+            tone: "border-red-200 bg-red-50 text-red-900",
+          }
+        : errorMsg
+          ? {
+              key: `error:${errorMsg}`,
+              title: "Action Needed",
+              message: errorMsg,
+              tone: "border-rose-200 bg-rose-50 text-rose-900",
+            }
+          : null
+    : null;
+  const liveStatusPopup = !isWaitingHallPhase && errorMsg
+    ? {
+        title: "Action Needed",
+        message: errorMsg,
+        tone: "border-rose-200 bg-rose-50 text-rose-900",
+      }
+    : !isWaitingHallPhase && infoMsg
+      ? {
+          title: "Live Update",
+          message: infoMsg,
+          tone: "border-blue-200 bg-blue-50 text-blue-900",
+        }
+      : null;
+  const waitingHallPopupOverlay =
+    typeof document !== "undefined" && showWaitingHallPopup && waitingHallPopup
+      ? createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-md">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_40%)]" />
+            <div className={`relative w-full max-w-2xl overflow-hidden rounded-[2.2rem] border shadow-[0_36px_110px_rgba(15,23,42,0.38)] animate-[fadeIn_220ms_ease-out,zoomIn_300ms_cubic-bezier(.22,1,.36,1)] ${waitingHallPopup.tone}`}>
+              <div className="absolute inset-x-0 top-0 h-2 bg-gradient-to-r from-white/85 via-white/30 to-white/85" />
+              <div className="px-6 py-8 text-center md:px-8 md:py-10">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white/85 shadow-[0_18px_40px_rgba(255,255,255,0.28)]">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-current/15">
+                    <div className="h-4 w-4 rounded-full bg-current animate-pulse" />
+                  </div>
+                </div>
+                <p className="mt-6 text-xs font-semibold uppercase tracking-[0.28em]">{waitingHallPopup.title}</p>
+                <p className="mt-4 text-lg font-bold leading-8 md:text-2xl">{waitingHallPopup.message}</p>
+                <p className="mt-4 text-sm font-medium opacity-80 md:text-base">
+                  Stay in this waiting step, keep camera and microphone enabled, and follow the SkillPro team instructions.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDismissedWaitingHallPopupKey(waitingHallPopup.key);
+                    setShowWaitingHallPopup(false);
+                  }}
+                  className="mt-7 inline-flex min-w-36 items-center justify-center rounded-full bg-slate-900 px-7 py-3 text-sm font-bold text-white shadow-lg transition duration-200 hover:scale-[1.03] hover:bg-slate-800"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   const getCodingAnswer = (question) => {
     const answer = answers[question.id];
@@ -331,6 +433,30 @@ export default function Exam({ examMode = "certification" }) {
       "python";
     return { code, language };
   };
+
+  useEffect(() => {
+    if (waitingHallPopup && waitingHallPopup.key !== dismissedWaitingHallPopupKey) {
+      setShowWaitingHallPopup(true);
+      return;
+    }
+    if (!isWaitingHallPhase) {
+      setShowWaitingHallPopup(false);
+      setDismissedWaitingHallPopupKey("");
+    }
+  }, [dismissedWaitingHallPopupKey, isWaitingHallPhase, waitingHallPopup]);
+
+  useEffect(() => {
+    if (!showWaitingHallPopup || !waitingHallPopup?.key) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setDismissedWaitingHallPopupKey(waitingHallPopup.key);
+      setShowWaitingHallPopup(false);
+    }, 90 * 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [showWaitingHallPopup, waitingHallPopup?.key]);
 
   const buildCodingMarkers = (errorText) => {
     const source = String(errorText || "").trim();
@@ -370,14 +496,45 @@ export default function Exam({ examMode = "certification" }) {
       const rawLiveContext = getStoredLiveExamContext();
       if (rawLiveContext) {
         const parsed = JSON.parse(rawLiveContext);
-        if (parsed?.sessionId) {
+        const parsedExamId = String(parsed?.examId || '');
+        const currentRouteExamId = String(routeExamId || '');
+        if (parsed?.sessionId && (!currentRouteExamId || !parsedExamId || parsedExamId === currentRouteExamId)) {
           setLiveExamContext(parsed);
+        } else if (parsed?.sessionId) {
+          clearStoredLiveExamContext();
         }
       }
     } catch {
       // ignore storage parse failures
     }
-  }, []);
+  }, [routeExamId]);
+
+  useEffect(() => {
+    if (!isLiveProctoredMode) return;
+    if (!requestedLiveSessionId && !requestedLiveSlotId && !requestedLiveBookingId) return;
+
+    const nextContext = {
+      sessionId: requestedLiveSessionId || null,
+      slotId: requestedLiveSlotId || null,
+      bookingId: requestedLiveBookingId || null,
+      examId: routeExamId || null,
+    };
+
+    setLiveExamContext((current) => ({
+      ...(current || {}),
+      ...nextContext,
+    }));
+    setStoredLiveExamContext(JSON.stringify({
+      ...(liveExamContext || {}),
+      ...nextContext,
+    }));
+  }, [
+    isLiveProctoredMode,
+    requestedLiveBookingId,
+    requestedLiveSessionId,
+    requestedLiveSlotId,
+    routeExamId,
+  ]);
 
   useEffect(() => {
     if (!isLiveProctoredMode || !currentUserId || !routeExamId) return;
@@ -395,6 +552,13 @@ export default function Exam({ examMode = "certification" }) {
       cancelled = true;
     };
   }, [currentUserId, isLiveProctoredMode, routeExamId]);
+
+  useEffect(() => {
+    if (!liveExamContext?.sessionId && !liveExamContext?.slotId) return;
+    liveSignalCutoffRef.current = Date.now();
+    processedLiveActionIdsRef.current.clear();
+    processedLiveMessageIdsRef.current.clear();
+  }, [liveExamContext?.sessionId, liveExamContext?.slotId]);
 
   useEffect(() => {
     const activeLiveSessionId = liveExamContext?.sessionId || null;
@@ -423,6 +587,13 @@ export default function Exam({ examMode = "certification" }) {
         expectedSlotId: activeLiveSlotId,
         expectedStudentId: currentUserId,
       });
+      if (String(action.target_student_id || '') !== String(currentUserId)) {
+        console.warn('[Exam] Ignored live action: target_student_id mismatch', {
+          actionTargetStudentId: action.target_student_id,
+          expectedStudentId: currentUserId,
+        });
+        return;
+      }
       let actionTargetsCurrentLiveContext =
         String(action.session_id || '') === String(activeLiveSessionId || '') ||
         (
@@ -439,18 +610,23 @@ export default function Exam({ examMode = "certification" }) {
           );
       }
       if (!actionTargetsCurrentLiveContext) {
+        const adoptedContext = await adoptLiveExamContext({
+          sessionId: action.session_id,
+          slotId: action.slot_id,
+        });
+        actionTargetsCurrentLiveContext =
+          String(action.session_id || '') === String(adoptedContext?.sessionId || '') ||
+          (
+            adoptedContext?.slotId &&
+            String(action.slot_id || '') === String(adoptedContext.slotId)
+          );
+      }
+      if (!actionTargetsCurrentLiveContext) {
         console.warn('[Exam] Ignored live action: session_id mismatch', {
           actionSessionId: action.session_id,
           expectedSessionId: activeLiveSessionId,
           actionSlotId: action.slot_id,
           expectedSlotId: activeLiveSlotId,
-        });
-        return;
-      }
-      if (String(action.target_student_id || '') !== String(currentUserId)) {
-        console.warn('[Exam] Ignored live action: target_student_id mismatch', {
-          actionTargetStudentId: action.target_student_id,
-          expectedStudentId: currentUserId,
         });
         return;
       }
@@ -460,18 +636,18 @@ export default function Exam({ examMode = "certification" }) {
 
       const actionType = String(action.action_type || '').toLowerCase();
       const actionMessage = String(action.message || '').trim();
+      const actionSignalKey = `${actionType}:${actionMessage}:${String(action.session_id || '')}`;
+      lastHandledStaffSignalRef.current = actionSignalKey;
 
       if (actionType === 'warning' || actionType === 'warn') {
         console.debug('[Exam] Handling invigilator warning:', actionMessage);
         setInvigilatorWarningMessage(actionMessage || 'Invigilator warning received.');
-        setInfoMsg(actionMessage || 'Invigilator warning received.');
         return;
       }
 
       if (actionType === 'pause') {
         console.debug('[Exam] Handling invigilator pause:', actionMessage);
         setInvigilatorPauseMessage(actionMessage || 'Exam paused by invigilator.');
-        setInfoMsg(actionMessage || 'Exam paused by invigilator.');
         await syncLiveExamSession({ status: 'paused' });
         return;
       }
@@ -486,7 +662,7 @@ export default function Exam({ examMode = "certification" }) {
 
       if (actionType === 'terminate') {
         console.debug('[Exam] Handling invigilator terminate:', actionMessage);
-        await terminateExamForViolation(actionMessage || 'Exam terminated by invigilator.', {
+        await terminateExamForViolation(actionMessage || 'Unusual activity detected. Your exam has been cancelled by SkillPro team.', {
           lockAccountOverride: false,
           preserveRetakeAccess: true,
         });
@@ -502,8 +678,85 @@ export default function Exam({ examMode = "certification" }) {
       }
     };
 
+    const handleLiveSessionState = async (payload) => {
+      const sessionRow = payload?.new;
+      if (!sessionRow) return;
+      if (String(sessionRow.student_id || '') !== String(currentUserId)) return;
+
+      let sessionTargetsCurrentLiveContext =
+        String(sessionRow.id || '') === String(activeLiveSessionId || '') ||
+        (
+          activeLiveSlotId &&
+          String(sessionRow.slot_id || '') === String(activeLiveSlotId)
+        );
+      if (!sessionTargetsCurrentLiveContext) {
+        const refreshedContext = await ensureLiveSessionContext({ force: true });
+        sessionTargetsCurrentLiveContext =
+          String(sessionRow.id || '') === String(refreshedContext?.sessionId || '') ||
+          (
+            refreshedContext?.slotId &&
+            String(sessionRow.slot_id || '') === String(refreshedContext.slotId)
+          );
+      }
+      if (!sessionTargetsCurrentLiveContext) {
+        const adoptedContext = await adoptLiveExamContext({
+          sessionId: sessionRow.id,
+          slotId: sessionRow.slot_id,
+        });
+        sessionTargetsCurrentLiveContext =
+          String(sessionRow.id || '') === String(adoptedContext?.sessionId || '') ||
+          (
+            adoptedContext?.slotId &&
+            String(sessionRow.slot_id || '') === String(adoptedContext.slotId)
+          );
+      }
+      if (!sessionTargetsCurrentLiveContext) return;
+
+      const nextStatus = String(sessionRow.status || '').toLowerCase();
+      const previousStatus = lastObservedLiveSessionStatusRef.current;
+      lastObservedLiveSessionStatusRef.current = nextStatus;
+      if (nextStatus === 'paused') {
+        setInvigilatorPauseMessage(String(sessionRow.termination_reason || 'Exam paused by invigilator.'));
+        return;
+      }
+      if (nextStatus === 'active') {
+        setInvigilatorPauseMessage('');
+        if (previousStatus === 'paused') {
+          setInfoMsg('Exam resumed by invigilator.');
+        }
+        return;
+      }
+      if (nextStatus === 'terminated') {
+        await terminateExamForViolation(
+          String(sessionRow.termination_reason || 'Unusual activity detected. Your exam has been cancelled by SkillPro team.'),
+          {
+            lockAccountOverride: false,
+            preserveRetakeAccess: true,
+          }
+        );
+      }
+    };
+
+    const rowTargetsActiveLiveContext = (row) => {
+      if (!row) return false;
+      return (
+        String(row.session_id || row.id || '') === String(activeLiveSessionId || '') ||
+        (
+          activeLiveSlotId &&
+          String(row.slot_id || '') === String(activeLiveSlotId)
+        )
+      );
+    };
+
     const channel = supabase
       .channel(`live-exam-actions-${activeLiveSessionId || activeLiveSlotId}-${currentUserId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'exam_live_sessions' },
+        (payload) => {
+          void handleLiveSessionState(payload);
+        }
+      )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'exam_live_actions' },
@@ -527,39 +780,80 @@ export default function Exam({ examMode = "certification" }) {
           if (!messageTargetsCurrentLiveContext) return;
           if (message.recipient_id && String(message.recipient_id) !== String(currentUserId)) return;
           if (String(message.sender_role || '').toLowerCase() === 'student') return;
+          const messageContent = String(message.content || '').trim();
+          const messageSignalKey = `message:${messageContent}:${String(message.session_id || '')}`;
+          const currentWarningKey = `message:${String(invigilatorWarningMessage || '').trim()}:${String(message.session_id || '')}`;
+          const currentPauseKey = `message:${String(invigilatorPauseMessage || '').trim()}:${String(message.session_id || '')}`;
+          const lastActionAsMessageKey = `message:${String(lastHandledStaffSignalRef.current || '').split(':').slice(1, -1).join(':')}:${String(message.session_id || '')}`;
+          if (
+            messageSignalKey === currentWarningKey ||
+            messageSignalKey === currentPauseKey ||
+            messageSignalKey === lastActionAsMessageKey
+          ) {
+            return;
+          }
           if (message.id) {
             processedLiveMessageIdsRef.current.add(String(message.id));
           }
-          setInfoMsg(String(message.content || 'New invigilator message received.'));
+          setInfoMsg(messageContent || 'New invigilator message received.');
         }
       )
       .subscribe();
 
     const pollRecentLiveSignals = async () => {
-      const actionsQuery = supabase
+      let actionsQuery = supabase
         .from('exam_live_actions')
         .select('*')
         .eq('target_student_id', currentUserId)
         .order('created_at', { ascending: false })
         .limit(20);
-      const messagesQuery = supabase
+      let sessionsQuery = supabase
+        .from('exam_live_sessions')
+        .select('*')
+        .eq('student_id', currentUserId)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+      let messagesQuery = supabase
         .from('exam_live_messages')
         .select('*')
         .eq('recipient_id', currentUserId)
         .order('created_at', { ascending: false })
         .limit(20);
 
-      const [{ data: recentActions }, { data: recentMessages }] = await Promise.all([
+      if (activeLiveSessionId) {
+        actionsQuery = actionsQuery.eq('session_id', activeLiveSessionId);
+        sessionsQuery = sessionsQuery.eq('id', activeLiveSessionId);
+        messagesQuery = messagesQuery.eq('session_id', activeLiveSessionId);
+      } else if (activeLiveSlotId) {
+        actionsQuery = actionsQuery.eq('slot_id', activeLiveSlotId);
+        sessionsQuery = sessionsQuery.eq('slot_id', activeLiveSlotId);
+        messagesQuery = messagesQuery.eq('slot_id', activeLiveSlotId);
+      }
+
+      const [{ data: recentActions }, { data: recentSessions }, { data: recentMessages }] = await Promise.all([
         actionsQuery,
+        sessionsQuery,
         messagesQuery,
       ]);
+      const cutoffTime = liveSignalCutoffRef.current;
 
       (recentActions || [])
         .slice()
         .reverse()
         .forEach((action) => {
+          if (!rowTargetsActiveLiveContext(action)) return;
+          const createdAt = new Date(action?.created_at || 0).getTime();
+          if (createdAt && createdAt < cutoffTime) return;
           if (action?.id && processedLiveActionIdsRef.current.has(String(action.id))) return;
           void handleLiveAction({ new: action });
+        });
+
+      (recentSessions || [])
+        .slice()
+        .reverse()
+        .forEach((sessionRow) => {
+          if (!rowTargetsActiveLiveContext(sessionRow)) return;
+          void handleLiveSessionState({ new: sessionRow });
         });
 
       (recentMessages || [])
@@ -567,19 +861,34 @@ export default function Exam({ examMode = "certification" }) {
         .reverse()
         .forEach((message) => {
           if (!message) return;
+          if (!rowTargetsActiveLiveContext(message)) return;
+          const createdAt = new Date(message?.created_at || 0).getTime();
+          if (createdAt && createdAt < cutoffTime) return;
           if (message.id && processedLiveMessageIdsRef.current.has(String(message.id))) return;
           const messageTargetsCurrentLiveContext =
             String(message.session_id || '') === String(activeLiveSessionId || '') ||
             (
               activeLiveSlotId &&
               String(message.slot_id || '') === String(activeLiveSlotId)
-            );
+          );
           if (!messageTargetsCurrentLiveContext) return;
           if (String(message.sender_role || '').toLowerCase() === 'student') return;
+          const messageContent = String(message.content || '').trim();
+          const messageSignalKey = `message:${messageContent}:${String(message.session_id || '')}`;
+          const currentWarningKey = `message:${String(invigilatorWarningMessage || '').trim()}:${String(message.session_id || '')}`;
+          const currentPauseKey = `message:${String(invigilatorPauseMessage || '').trim()}:${String(message.session_id || '')}`;
+          const lastActionAsMessageKey = `message:${String(lastHandledStaffSignalRef.current || '').split(':').slice(1, -1).join(':')}:${String(message.session_id || '')}`;
+          if (
+            messageSignalKey === currentWarningKey ||
+            messageSignalKey === currentPauseKey ||
+            messageSignalKey === lastActionAsMessageKey
+          ) {
+            return;
+          }
           if (message.id) {
             processedLiveMessageIdsRef.current.add(String(message.id));
           }
-          setInfoMsg(String(message.content || 'New invigilator message received.'));
+          setInfoMsg(messageContent || 'New invigilator message received.');
         });
     };
 
@@ -599,10 +908,9 @@ export default function Exam({ examMode = "certification" }) {
       document.removeEventListener('visibilitychange', repollNow);
       supabase.removeChannel(channel);
     };
-  }, [liveExamContext?.sessionId, liveExamContext?.slotId, currentUserId]);
+  }, [currentUserId, invigilatorPauseMessage, invigilatorWarningMessage, liveExamContext?.sessionId, liveExamContext?.slotId]);
 
   useEffect(() => {
-    if (USE_LIVEKIT_TRANSPORT) return undefined;
     if (!isLiveManagedExam || !liveExamContext?.sessionId || !currentUserId) return undefined;
 
     const closePublisherPeers = () => {
@@ -772,6 +1080,7 @@ export default function Exam({ examMode = "certification" }) {
       const room = liveKitRoomRef.current;
       const publishedTracks = liveKitPublishedTracksRef.current;
       liveKitPublishedTracksRef.current = [];
+      setSupportVoiceConnected(false);
       if (room) {
         for (const track of publishedTracks) {
           try {
@@ -835,6 +1144,7 @@ export default function Exam({ examMode = "certification" }) {
               element.srcObject = new MediaStream([track.mediaStreamTrack]);
             }
           }
+          setSupportVoiceConnected(true);
           const playPromise = element.play?.();
           if (playPromise?.catch) {
             playPromise.catch(() => {
@@ -980,9 +1290,14 @@ export default function Exam({ examMode = "certification" }) {
       }
       if (parsed?.phase === EXAM_PHASES.RUNNING || parsed?.phase === EXAM_PHASES.SUBMITTING) {
         if (requiresLiveMedia) {
-          setPhase(EXAM_PHASES.PERMISSION);
-          setNeedsFullscreenResume(false);
-          setInfoMsg("Allow camera, microphone, and entire-screen sharing again to continue this live exam.");
+          setPhase(EXAM_PHASES.RUNNING);
+          setNeedsFullscreenResume(true);
+          setInfoMsg(
+            `Session restored. Re-enter fullscreen to continue from question ${Math.max(
+              (parsed.activeQuestionIndex ?? 0) + 1,
+              1
+            )}.`
+          );
         } else {
           setPhase(EXAM_PHASES.RUNNING);
           setNeedsFullscreenResume(true);
@@ -999,8 +1314,9 @@ export default function Exam({ examMode = "certification" }) {
         parsed?.phase === EXAM_PHASES.FULLSCREEN
       ) {
         if (requiresLiveMedia && parsed.phase === EXAM_PHASES.FULLSCREEN) {
-          setPhase(EXAM_PHASES.PERMISSION);
-          setInfoMsg("Allow camera, microphone, and entire-screen sharing before entering fullscreen.");
+          setPhase(EXAM_PHASES.FULLSCREEN);
+          setNeedsFullscreenResume(false);
+          setInfoMsg("Session restored. Enter fullscreen to continue.");
         } else {
           setPhase(parsed.phase);
         }
@@ -1085,7 +1401,7 @@ export default function Exam({ examMode = "certification" }) {
       setCurrentUserId(userData.user.id);
       const { data: lockProfile, error: lockProfileError } = await supabase
         .from("profiles")
-        .select("is_locked, locked_until")
+        .select("is_locked, locked_until, is_exam_banned, exam_ban_reason")
         .eq("id", userData.user.id)
         .maybeSingle();
       if (lockProfileError) {
@@ -1104,6 +1420,18 @@ export default function Exam({ examMode = "certification" }) {
           lockUntilDate
             ? `Account blocked until ${lockUntilDate.toLocaleDateString("en-IN")} due to strict proctoring violation.`
             : "Account is locked due to strict proctoring violation."
+        );
+        clearSavedExamProgress(getSessionKey(userData.user.id));
+        clearSavedExamProgress(getSessionKey());
+        return;
+      }
+      if (!isTeacherTestMode && lockProfile?.is_exam_banned) {
+        setPhase(EXAM_PHASES.TERMINATED);
+        setTerminateReason("Account is banned from writing exams.");
+        setErrorMsg(
+          lockProfile?.exam_ban_reason
+            ? `Exam access blocked: ${lockProfile.exam_ban_reason}`
+            : "Exam access blocked by admin."
         );
         clearSavedExamProgress(getSessionKey(userData.user.id));
         clearSavedExamProgress(getSessionKey());
@@ -1271,11 +1599,21 @@ export default function Exam({ examMode = "certification" }) {
               EXAM_PHASES.SUBMITTING,
             ]);
             if (resumablePhases.has(parsed?.phase)) {
+              const restoredEndTime = parsed?.examEndsAt ? new Date(parsed.examEndsAt).getTime() : 0;
+              if (restoredEndTime && restoredEndTime <= Date.now()) {
+                await failRestoredExamForTimeout();
+                return;
+              }
               if (parsed.phase === EXAM_PHASES.RUNNING || parsed.phase === EXAM_PHASES.SUBMITTING) {
                 if (requiresLiveMedia) {
-                  setPhase(EXAM_PHASES.PERMISSION);
-                  setNeedsFullscreenResume(false);
-                  setInfoMsg("Allow camera, microphone, and entire-screen sharing again to continue this live exam.");
+                  setPhase(EXAM_PHASES.RUNNING);
+                  setNeedsFullscreenResume(true);
+                  setInfoMsg(
+                    `Session restored. Re-enter fullscreen to continue from question ${Math.max(
+                      (parsed.activeQuestionIndex ?? 0) + 1,
+                      1
+                    )}.`
+                  );
                 } else {
                   setPhase(EXAM_PHASES.RUNNING);
                   setNeedsFullscreenResume(true);
@@ -1288,8 +1626,9 @@ export default function Exam({ examMode = "certification" }) {
                 }
               } else {
                 if (requiresLiveMedia && parsed.phase === EXAM_PHASES.FULLSCREEN) {
-                  setPhase(EXAM_PHASES.PERMISSION);
-                  setInfoMsg("Allow camera, microphone, and entire-screen sharing before entering fullscreen.");
+                  setPhase(EXAM_PHASES.FULLSCREEN);
+                  setNeedsFullscreenResume(false);
+                  setInfoMsg("Session restored. Enter fullscreen to continue.");
                 } else {
                   setPhase(parsed.phase);
                 }
@@ -1356,6 +1695,7 @@ export default function Exam({ examMode = "certification" }) {
       examStartedAt,
       examEndsAt,
       phase,
+      needsFullscreenResume,
       fullscreenWarnings,
       tabSwitchWarnings,
       invigilatorPauseMessage,
@@ -1373,6 +1713,7 @@ export default function Exam({ examMode = "certification" }) {
     examStartedAt,
     examEndsAt,
     phase,
+    needsFullscreenResume,
     fullscreenWarnings,
     tabSwitchWarnings,
     invigilatorPauseMessage,
@@ -1624,10 +1965,6 @@ export default function Exam({ examMode = "certification" }) {
       micIssueStartedAtRef.current = 0;
       micSilenceStartedAtRef.current = 0;
       micSilenceWarnedRef.current = false;
-      if (micAudioContextRef.current) {
-        micAudioContextRef.current.close?.().catch?.(() => {});
-        micAudioContextRef.current = null;
-      }
       return undefined;
     }
 
@@ -1661,8 +1998,10 @@ export default function Exam({ examMode = "certification" }) {
 
     try {
       if (audioTrack) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        micAudioContextRef.current = audioContext;
+        audioContext = micAudioContextRef.current;
+        if (audioContext?.state === "suspended") {
+          audioContext.resume?.().catch?.(() => {});
+        }
         source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 1024;
@@ -1731,10 +2070,15 @@ export default function Exam({ examMode = "certification" }) {
       audioTrack?.removeEventListener?.("unmute", handleMicUnmute);
       source?.disconnect?.();
       analyser?.disconnect?.();
-      audioContext?.close?.().catch?.(() => {});
-      if (micAudioContextRef.current === audioContext) micAudioContextRef.current = null;
     };
   }, [cameraStream, phase, isInvigilatorPaused, terminateExamForViolation]);
+
+  useEffect(() => () => {
+    if (micAudioContextRef.current) {
+      micAudioContextRef.current.close?.().catch?.(() => {});
+      micAudioContextRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return;
@@ -2010,6 +2354,43 @@ export default function Exam({ examMode = "certification" }) {
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.RUNNING) return;
+    if (!isInvigilatorPaused) return;
+    if (needsFullscreenResume) return;
+    if (document.fullscreenElement) return;
+
+    fullscreenWarningsRef.current = Math.max(fullscreenWarningsRef.current, 1);
+    setFullscreenWarnings((prev) => Math.max(prev, 1));
+    setShowFullscreenPrompt(true);
+    setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
+
+    if (fullscreenTimerRef.current) {
+      clearInterval(fullscreenTimerRef.current);
+    }
+    fullscreenTimerRef.current = setInterval(() => {
+      setFullscreenCountdown((prev) => {
+        if (prev <= 1) {
+          if (fullscreenTimerRef.current) {
+            clearInterval(fullscreenTimerRef.current);
+            fullscreenTimerRef.current = null;
+          }
+          void recordLiveExamViolation("fullscreen_timeout", 2, "Did not return to fullscreen while exam was paused.");
+          void terminateExamForViolation("Did not return to fullscreen while the exam was paused.");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (fullscreenTimerRef.current) {
+        clearInterval(fullscreenTimerRef.current);
+        fullscreenTimerRef.current = null;
+      }
+    };
+  }, [isInvigilatorPaused, needsFullscreenResume, phase]);
+
+  useEffect(() => {
+    if (phase !== EXAM_PHASES.RUNNING) return;
     if (needsFullscreenResume) return;
 
     const handleTouchStart = (event) => {
@@ -2104,6 +2485,21 @@ export default function Exam({ examMode = "certification" }) {
   }, [needsFullscreenResume, phase]);
 
   useEffect(() => {
+    if (phase !== EXAM_PHASES.RUNNING && phase !== EXAM_PHASES.SUBMITTING) return undefined;
+
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [phase]);
+
+  useEffect(() => {
     if (!needsFullscreenResume) return;
     if (document.fullscreenElement) {
       setNeedsFullscreenResume(false);
@@ -2115,6 +2511,30 @@ export default function Exam({ examMode = "certification" }) {
       }
     }
   }, [needsFullscreenResume]);
+
+  useEffect(() => {
+    if (!needsFullscreenResume || phase !== EXAM_PHASES.RUNNING) return;
+    if (autoResumeFullscreenAttemptedRef.current) return;
+
+    autoResumeFullscreenAttemptedRef.current = true;
+    const timer = window.setTimeout(() => {
+      void enterFullscreen().then((ok) => {
+        if (!ok || !document.fullscreenElement) return;
+        setNeedsFullscreenResume(false);
+        setResumeWarningMessage("");
+        setShowFullscreenPrompt(false);
+        setResumeCountdown(FULLSCREEN_TIMEOUT_SEC);
+        if (resumeTimerRef.current) {
+          clearInterval(resumeTimerRef.current);
+          resumeTimerRef.current = null;
+        }
+      });
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [needsFullscreenResume, phase]);
 
   useEffect(() => {
     if (phase !== EXAM_PHASES.SUBMITTING || !pendingResultData) return;
@@ -2206,23 +2626,145 @@ export default function Exam({ examMode = "certification" }) {
     clearStoredLiveExamContext();
   }
 
-  async function syncLiveExamSession(patch = {}) {
-    if (!liveExamContext?.sessionId) return;
+  async function adoptLiveExamContext(nextPartialContext = {}) {
+    const sessionId = nextPartialContext?.sessionId || nextPartialContext?.id || null;
+    const slotId = nextPartialContext?.slotId || nextPartialContext?.slot_id || null;
+
+    if (!sessionId && !slotId) return null;
+
     try {
-      await supabase
+      let query = supabase
         .from("exam_live_sessions")
-        .update({
-          ...patch,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", liveExamContext.sessionId);
+        .select("id, slot_id, booking_id, exam_id, student_id, status, updated_at, started_at, ended_at, termination_reason")
+        .eq("student_id", currentUserId)
+        .order("updated_at", { ascending: false })
+        .limit(10);
+
+      if (sessionId) {
+        query = query.eq("id", sessionId);
+      } else if (slotId) {
+        query = query.eq("slot_id", slotId);
+      }
+
+      const { data: rows, error } = await query;
+      if (error || !rows?.length) return null;
+
+      const preferredRow =
+        rows.find((row) => ["active", "paused", "scheduled"].includes(String(row.status || "").toLowerCase())) ||
+        rows[0];
+      if (!preferredRow) return null;
+
+      const nextContext = {
+        slotId: preferredRow.slot_id,
+        bookingId: preferredRow.booking_id,
+        sessionId: preferredRow.id,
+        examId: preferredRow.exam_id,
+      };
+
+      setLiveExamContext(nextContext);
+      setInvigilatorPauseMessage(
+        String(preferredRow.status || "").toLowerCase() === "paused"
+          ? String(preferredRow.termination_reason || "Exam paused by invigilator.")
+          : ""
+      );
+      setStoredLiveExamContext(JSON.stringify(nextContext));
+      return nextContext;
+    } catch {
+      return null;
+    }
+  }
+
+  async function syncLiveExamSession(patch = {}, contextOverride = null) {
+    const context = contextOverride || liveExamContext;
+    if (!context?.sessionId) return;
+    try {
+      const nextPatch = {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      };
+
+      let targetedQuery = supabase
+        .from("exam_live_sessions")
+        .update(nextPatch)
+        .eq("id", context.sessionId);
+
+      if (currentUserId) {
+        targetedQuery = targetedQuery.eq("student_id", currentUserId);
+      }
+
+      const { data: targetedRows, error: targetedError } = await targetedQuery.select("id");
+      if (targetedError) throw targetedError;
+
+      if (!(targetedRows || []).length) {
+        let fallbackQuery = supabase
+          .from("exam_live_sessions")
+          .update(nextPatch);
+
+        if (currentUserId) {
+          fallbackQuery = fallbackQuery.eq("student_id", currentUserId);
+        }
+
+        if (context.bookingId) {
+          fallbackQuery = fallbackQuery.eq("booking_id", context.bookingId);
+        } else if (context.slotId) {
+          fallbackQuery = fallbackQuery.eq("slot_id", context.slotId);
+        }
+
+        if (context.examId) {
+          fallbackQuery = fallbackQuery.eq("exam_id", context.examId);
+        }
+
+        const { error: fallbackError } = await fallbackQuery.select("id");
+        if (fallbackError) throw fallbackError;
+      } else if (context.bookingId || context.slotId) {
+        let siblingQuery = supabase
+          .from("exam_live_sessions")
+          .update(nextPatch);
+
+        if (currentUserId) {
+          siblingQuery = siblingQuery.eq("student_id", currentUserId);
+        }
+
+        if (context.bookingId) {
+          siblingQuery = siblingQuery.eq("booking_id", context.bookingId);
+        } else {
+          siblingQuery = siblingQuery.eq("slot_id", context.slotId);
+        }
+
+        if (context.examId) {
+          siblingQuery = siblingQuery.eq("exam_id", context.examId);
+        }
+
+        await siblingQuery.select("id");
+      }
     } catch {
       // best effort only
     }
   }
 
-  async function syncLiveExamBooking(patch = {}) {
-    if (!liveExamContext?.bookingId) return;
+  async function primeMicAudioContext() {
+    if (typeof window === "undefined") return null;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return null;
+
+    try {
+      let context = micAudioContextRef.current;
+      if (!context || context.state === "closed") {
+        context = new AudioContextCtor();
+        micAudioContextRef.current = context;
+      }
+      if (context.state === "suspended") {
+        await context.resume?.();
+      }
+      return context;
+    } catch {
+      return null;
+    }
+  }
+
+  async function syncLiveExamBooking(patch = {}, contextOverride = null) {
+    const context = contextOverride || liveExamContext;
+    if (!context?.bookingId) return;
     try {
       await supabase
         .from("exam_slot_bookings")
@@ -2230,9 +2772,96 @@ export default function Exam({ examMode = "certification" }) {
           ...patch,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", liveExamContext.bookingId);
+        .eq("id", context.bookingId);
     } catch {
       // best effort only
+    }
+  }
+
+  async function persistLiveSessionAndBooking(sessionPatch = {}, bookingPatch = {}, contextOverride = null) {
+    const context = contextOverride || liveExamContext;
+    if (!context?.sessionId) return false;
+
+    try {
+      const nextPatch = {
+        ...sessionPatch,
+        updated_at: new Date().toISOString(),
+      };
+
+      let targetedQuery = supabase
+        .from("exam_live_sessions")
+        .update(nextPatch)
+        .eq("id", context.sessionId);
+
+      if (currentUserId) {
+        targetedQuery = targetedQuery.eq("student_id", currentUserId);
+      }
+
+      const { data: targetedRows, error: sessionError } = await targetedQuery.select("id");
+      if (sessionError) throw sessionError;
+
+      if (!(targetedRows || []).length) {
+        let fallbackQuery = supabase
+          .from("exam_live_sessions")
+          .update(nextPatch);
+
+        if (currentUserId) {
+          fallbackQuery = fallbackQuery.eq("student_id", currentUserId);
+        }
+
+        if (context.bookingId) {
+          fallbackQuery = fallbackQuery.eq("booking_id", context.bookingId);
+        } else if (context.slotId) {
+          fallbackQuery = fallbackQuery.eq("slot_id", context.slotId);
+        }
+
+        if (context.examId) {
+          fallbackQuery = fallbackQuery.eq("exam_id", context.examId);
+        }
+
+        const { data: fallbackRows, error: fallbackError } = await fallbackQuery.select("id");
+        if (fallbackError) throw fallbackError;
+        if (!(fallbackRows || []).length) {
+          throw new Error("No live exam session row was updated for this student.");
+        }
+      } else if (context.bookingId || context.slotId) {
+        let siblingQuery = supabase
+          .from("exam_live_sessions")
+          .update(nextPatch);
+
+        if (currentUserId) {
+          siblingQuery = siblingQuery.eq("student_id", currentUserId);
+        }
+
+        if (context.bookingId) {
+          siblingQuery = siblingQuery.eq("booking_id", context.bookingId);
+        } else {
+          siblingQuery = siblingQuery.eq("slot_id", context.slotId);
+        }
+
+        if (context.examId) {
+          siblingQuery = siblingQuery.eq("exam_id", context.examId);
+        }
+
+        const { error: siblingError } = await siblingQuery.select("id");
+        if (siblingError) throw siblingError;
+      }
+
+      if (context.bookingId && Object.keys(bookingPatch || {}).length) {
+        const { error: bookingError } = await supabase
+          .from("exam_slot_bookings")
+          .update({
+            ...bookingPatch,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", context.bookingId);
+        if (bookingError) throw bookingError;
+      }
+
+      return true;
+    } catch (persistError) {
+      setErrorMsg(persistError?.message || "Failed to update live exam session.");
+      return false;
     }
   }
 
@@ -2244,6 +2873,96 @@ export default function Exam({ examMode = "certification" }) {
       return liveExamContext;
     }
 
+    const candidateSessionIds = [];
+    if (requestedLiveSessionId && !candidateSessionIds.includes(requestedLiveSessionId)) {
+      candidateSessionIds.push(requestedLiveSessionId);
+    }
+    if (liveExamContext?.sessionId) {
+      candidateSessionIds.push(String(liveExamContext.sessionId));
+    }
+    try {
+      const rawStoredContext = getStoredLiveExamContext();
+      if (rawStoredContext) {
+        const parsedStoredContext = JSON.parse(rawStoredContext);
+        if (parsedStoredContext?.sessionId) {
+          const storedId = String(parsedStoredContext.sessionId);
+          if (!candidateSessionIds.includes(storedId)) {
+            candidateSessionIds.push(storedId);
+          }
+        }
+      }
+    } catch {
+      // ignore storage parse failures
+    }
+
+    const routeExamKey = String(routeExamId || '');
+    const sessionMatchesCurrentExam = (sessionRow) =>
+      String(sessionRow?.student_id || '') === String(currentUserId) &&
+      (!routeExamKey || String(sessionRow?.exam_id || '') === routeExamKey);
+
+    for (const sessionId of candidateSessionIds) {
+      const { data: directSession, error: directSessionError } = await supabase
+        .from("exam_live_sessions")
+        .select("id, slot_id, booking_id, exam_id, student_id, status, updated_at, started_at, ended_at, termination_reason")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (!directSessionError && directSession && sessionMatchesCurrentExam(directSession)) {
+        const directContext = {
+          slotId: directSession.slot_id,
+          bookingId: directSession.booking_id,
+          sessionId: directSession.id,
+          examId: directSession.exam_id,
+        };
+        setLiveExamContext(directContext);
+        setInvigilatorPauseMessage(
+          String(directSession.status || "").toLowerCase() === "paused"
+            ? "Exam paused by invigilator."
+            : ""
+        );
+        setStoredLiveExamContext(JSON.stringify(directContext));
+        return directContext;
+      }
+    }
+
+    if (requestedLiveBookingId || requestedLiveSlotId) {
+      let exactQuery = supabase
+        .from("exam_live_sessions")
+        .select("id, slot_id, booking_id, exam_id, student_id, status, updated_at, started_at, ended_at, termination_reason")
+        .eq("student_id", currentUserId)
+        .eq("exam_id", routeExamId)
+        .order("updated_at", { ascending: false })
+        .limit(10);
+
+      if (requestedLiveBookingId) {
+        exactQuery = exactQuery.eq("booking_id", requestedLiveBookingId);
+      } else if (requestedLiveSlotId) {
+        exactQuery = exactQuery.eq("slot_id", requestedLiveSlotId);
+      }
+
+      const { data: exactRows, error: exactError } = await exactQuery;
+      if (!exactError && exactRows?.length) {
+        const exactSession =
+          exactRows.find((row) => ["active", "paused", "scheduled"].includes(String(row.status || "").toLowerCase())) ||
+          exactRows[0];
+        if (exactSession && sessionMatchesCurrentExam(exactSession)) {
+          const nextContext = {
+            slotId: exactSession.slot_id,
+            bookingId: exactSession.booking_id,
+            sessionId: exactSession.id,
+            examId: exactSession.exam_id,
+          };
+          setLiveExamContext(nextContext);
+          setInvigilatorPauseMessage(
+            String(exactSession.status || "").toLowerCase() === "paused"
+              ? "Exam paused by invigilator."
+              : ""
+          );
+          setStoredLiveExamContext(JSON.stringify(nextContext));
+          return nextContext;
+        }
+      }
+    }
+
     const { data: sessionRows, error: sessionError } = await supabase
       .from("exam_live_sessions")
       .select("id, slot_id, booking_id, exam_id, status, updated_at, started_at, ended_at, termination_reason")
@@ -2253,9 +2972,22 @@ export default function Exam({ examMode = "certification" }) {
       .limit(10);
     if (sessionError) return null;
 
+    let candidateRows = sessionRows || [];
+    if (!candidateRows.length) {
+      const { data: fallbackRows, error: fallbackError } = await supabase
+        .from("exam_live_sessions")
+        .select("id, slot_id, booking_id, exam_id, status, updated_at, started_at, ended_at, termination_reason")
+        .eq("student_id", currentUserId)
+        .order("updated_at", { ascending: false })
+        .limit(10);
+      if (!fallbackError && fallbackRows?.length) {
+        candidateRows = fallbackRows.filter((row) => String(row?.exam_id || '') === routeExamKey);
+      }
+    }
+
     const preferredSession =
-      (sessionRows || []).find((row) => ["active", "paused", "scheduled"].includes(String(row.status || "").toLowerCase())) ||
-      (sessionRows || [])[0];
+      candidateRows.find((row) => ["active", "paused", "scheduled"].includes(String(row.status || "").toLowerCase())) ||
+      candidateRows[0];
     if (!preferredSession) return null;
 
     const { data: bookingRow } = await supabase
@@ -2324,6 +3056,18 @@ export default function Exam({ examMode = "certification" }) {
     });
   }
 
+  async function listenToTeamVoice() {
+    const element = supportAudioRef.current;
+    if (!element) return;
+    try {
+      element.muted = false;
+      await element.play?.();
+      setInfoMsg("Team voice is connected.");
+    } catch {
+      setInfoMsg("Tap the page once, then press Listen Team Voice again if the browser is blocking audio.");
+    }
+  }
+
   async function recordLiveExamViolation(violationType, attemptCount, details) {
     if (!liveExamContext?.sessionId) return;
     try {
@@ -2358,9 +3102,10 @@ export default function Exam({ examMode = "certification" }) {
     setPermissionLoading(true);
     setErrorMsg("");
     setInfoMsg("");
+    let ensuredContext = liveExamContext;
 
     if (requiresLiveMedia) {
-      await ensureLiveSessionContext({ force: true });
+      ensuredContext = await ensureLiveSessionContext({ force: true });
     }
 
     const stream = await requestCameraMicPermissions();
@@ -2381,14 +3126,15 @@ export default function Exam({ examMode = "certification" }) {
 
     setCameraStream(stream);
     setScreenShareStream(displayStream);
+    await primeMicAudioContext();
     // Debug: Log stream info after permissions granted
     console.log('[Exam] Camera stream set:', stream, stream?.getTracks?.().map(t => ({kind: t.kind, readyState: t.readyState, enabled: t.enabled})));
     if (displayStream) {
       console.log('[Exam] Screen share stream set:', displayStream, displayStream?.getTracks?.().map(t => ({kind: t.kind, readyState: t.readyState, enabled: t.enabled})));
     }
 
-    if (isLiveManagedExam) {
-      void syncLiveExamSession({
+    if (ensuredContext?.sessionId) {
+      const sessionPersisted = await persistLiveSessionAndBooking({
         status: 'active',
         attendance_status: 'present',
         started_at: new Date().toISOString(),
@@ -2396,8 +3142,11 @@ export default function Exam({ examMode = "certification" }) {
         camera_connected: (stream.getVideoTracks?.() || []).some((track) => track.readyState === 'live' && track.enabled),
         mic_connected: (stream.getAudioTracks?.() || []).some((track) => track.readyState === 'live' && track.enabled),
         screen_share_connected: (displayStream?.getVideoTracks?.() || []).some((track) => track.readyState === 'live' && track.enabled),
-      });
-      void syncLiveExamBooking({ status: 'active' });
+      }, { status: 'active' }, ensuredContext);
+      if (!sessionPersisted) {
+        setPermissionLoading(false);
+        return;
+      }
     }
 
     // --- INSTANTLY START WEBRTC PUBLISHING ---
@@ -2418,12 +3167,14 @@ export default function Exam({ examMode = "certification" }) {
     if (phase !== EXAM_PHASES.FULLSCREEN) return;
     setErrorMsg("");
     setInfoMsg("");
+    await primeMicAudioContext();
+    let ensuredContext = liveExamContext;
     if (requiresLiveMedia && !isEntireScreenShareStream(screenShareStream)) {
       setErrorMsg("Share the entire screen first. Tab share or app-window share is not allowed.");
       return;
     }
     if (requiresLiveMedia) {
-      await ensureLiveSessionContext({ reactivate: true, force: true });
+      ensuredContext = await ensureLiveSessionContext({ reactivate: true, force: true });
     }
     const fullscreenOk = await enterFullscreen();
     if (!fullscreenOk) {
@@ -2449,8 +3200,8 @@ export default function Exam({ examMode = "certification" }) {
     } catch {
       // Best effort only; some browsers/OS combinations do not support this API.
     }
-    if (isLiveManagedExam) {
-      void syncLiveExamSession({
+    if (ensuredContext?.sessionId) {
+      await persistLiveSessionAndBooking({
         status: "active",
         started_at: examStartedAt || new Date().toISOString(),
         attendance_status: "present",
@@ -2458,17 +3209,38 @@ export default function Exam({ examMode = "certification" }) {
         camera_connected: (cameraStream?.getVideoTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
         mic_connected: (cameraStream?.getAudioTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
         screen_share_connected: (screenShareStream?.getVideoTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
-      });
-      void syncLiveExamBooking({ status: "active" });
+      }, { status: "active" }, ensuredContext);
     }
     setInfoMsg("Strict proctoring is active. Do not switch tabs/apps or exit fullscreen.");
   }
 
   async function reEnterFullscreen() {
-    if (requiresLiveMedia && !isEntireScreenShareStream(screenShareStream)) {
-      setErrorMsg("Entire-screen sharing is required before returning to fullscreen.");
-      return;
+    let nextCameraStream = cameraStream;
+    let nextScreenStream = screenShareStream;
+
+    if (!hasActiveVideoTrack(nextCameraStream)) {
+      const refreshedCameraStream = await requestCameraMicPermissions();
+      if (!refreshedCameraStream) return;
+      if (cameraStream && cameraStream !== refreshedCameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+      nextCameraStream = refreshedCameraStream;
+      setCameraStream(refreshedCameraStream);
     }
+
+    if (requiresLiveMedia && !isEntireScreenShareStream(nextScreenStream)) {
+      const refreshedScreenStream = await requestScreenSharePermissions();
+      if (!refreshedScreenStream) {
+        setErrorMsg("Entire-screen sharing is required before returning to fullscreen.");
+        return;
+      }
+      if (screenShareStream && screenShareStream !== refreshedScreenStream) {
+        screenShareStream.getTracks().forEach((track) => track.stop());
+      }
+      nextScreenStream = refreshedScreenStream;
+      setScreenShareStream(refreshedScreenStream);
+    }
+
     const ok = await enterFullscreen();
     if (!ok) return;
     setNeedsFullscreenResume(false);
@@ -2476,6 +3248,7 @@ export default function Exam({ examMode = "certification" }) {
     setShowFullscreenPrompt(false);
     setFullscreenCountdown(FULLSCREEN_TIMEOUT_SEC);
     setResumeCountdown(FULLSCREEN_TIMEOUT_SEC);
+    setErrorMsg("");
     try {
       if (navigator.keyboard?.lock) {
         await navigator.keyboard.lock(["MetaLeft", "MetaRight", "ControlLeft", "ControlRight", "KeyG"]);
@@ -2486,6 +3259,16 @@ export default function Exam({ examMode = "certification" }) {
     if (resumeTimerRef.current) {
       clearInterval(resumeTimerRef.current);
       resumeTimerRef.current = null;
+    }
+    if (isLiveManagedExam) {
+      await persistLiveSessionAndBooking({
+        status: "active",
+        attendance_status: "present",
+        last_heartbeat_at: new Date().toISOString(),
+        camera_connected: (nextCameraStream?.getVideoTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
+        mic_connected: (nextCameraStream?.getAudioTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
+        screen_share_connected: (nextScreenStream?.getVideoTracks?.() || []).some((track) => track.readyState === "live" && track.enabled),
+      }, { status: "active" });
     }
   }
 
@@ -2508,6 +3291,45 @@ export default function Exam({ examMode = "certification" }) {
       .upsert([payload], { onConflict: "exam_id,user_id" });
     if (error) throw new Error(error.message);
     return userData.user.id;
+  }
+
+  async function failRestoredExamForTimeout(reason = "Exam time expired while the browser was closed.") {
+    try {
+      const failedAt = new Date().toISOString();
+      await upsertFailedSubmission(null);
+      await syncLiveExamSession({
+        status: "terminated",
+        ended_at: failedAt,
+        termination_reason: reason,
+        last_heartbeat_at: failedAt,
+        camera_connected: false,
+        mic_connected: false,
+        screen_share_connected: false,
+      });
+      await syncLiveExamBooking({ status: "terminated" });
+    } catch (error) {
+      console.error("[Exam] Failed to record timeout failure:", error);
+    }
+
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      setCameraStream(null);
+    }
+    if (screenShareStream) {
+      screenShareStream.getTracks().forEach((track) => track.stop());
+      setScreenShareStream(null);
+    }
+    setTerminateReason(reason);
+    setErrorMsg("Time is over. This exam attempt has been marked as failed.");
+    setInfoMsg("");
+    setNeedsFullscreenResume(false);
+    setShowFullscreenPrompt(false);
+    setResumeWarningMessage("");
+    setRemainingExamSeconds(0);
+    setPhase(EXAM_PHASES.TERMINATED);
+    clearSavedExamProgress(getSessionKey(currentUserId));
+    clearSavedExamProgress(getSessionKey());
+    clearLiveExamContext();
   }
 
   useEffect(() => {
@@ -2602,7 +3424,7 @@ export default function Exam({ examMode = "certification" }) {
       setRetakeLockedUntil(shouldLockAccount ? lockUntil : null);
       setErrorMsg(
         !shouldLockAccount
-          ? "Exam terminated by invigilator. Your attempt has been marked as failed."
+          ? "Unusual activity detected. Your exam has been cancelled by SkillPro team."
           : `Exam terminated. Your account has been locked for ${lockDays} day${lockDays === 1 ? "" : "s"}.`
       );
     } catch (error) {
@@ -3026,7 +3848,7 @@ export default function Exam({ examMode = "certification" }) {
           <p className="text-slate-700">
             {isTeacherTestMode
               ? "This teacher test is blocked for you until the teacher updates the questions."
-              : "This exam is blocked for you due to suspicious activity."}
+              : "Unusual activity detected. Your exam has been cancelled by SkillPro team."}
           </p>
           {terminateReason ? (
             <p className="text-sm text-slate-500">Reason: {terminateReason}</p>
@@ -3299,6 +4121,35 @@ export default function Exam({ examMode = "certification" }) {
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+      {waitingHallPopupOverlay}
+      {liveStatusPopup ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.22),transparent_42%)]" />
+          <div className={`relative w-full max-w-xl overflow-hidden rounded-[2rem] border shadow-[0_30px_90px_rgba(15,23,42,0.35)] animate-[fadeIn_220ms_ease-out,zoomIn_260ms_ease-out] ${liveStatusPopup.tone}`}>
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-white/80 via-white/30 to-white/80" />
+            <div className="px-6 py-7 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white/80 shadow-lg">
+                <div className="h-7 w-7 rounded-full bg-current opacity-80 animate-ping" />
+              </div>
+              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.24em]">{liveStatusPopup.title}</p>
+              <p className="mt-4 text-base font-semibold leading-7 md:text-lg">{liveStatusPopup.message}</p>
+              <p className="mt-3 text-sm opacity-80">
+                Follow this instruction from the SkillPro team and press OK to continue.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (errorMsg) setErrorMsg("");
+                  else setInfoMsg("");
+                }}
+                className="mt-6 inline-flex min-w-32 items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-bold text-white shadow-lg transition duration-200 hover:scale-[1.03] hover:bg-slate-800"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div
         className={`mx-auto grid gap-6 ${
           isExamWorkspace
@@ -3382,8 +4233,6 @@ export default function Exam({ examMode = "certification" }) {
                 </div>
               ) : null}
             </div>
-            {infoMsg ? <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">{infoMsg}</p> : null}
-            {errorMsg ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errorMsg}</p> : null}
           </header>
 
           {phase === EXAM_PHASES.RULES ||
@@ -3408,6 +4257,32 @@ export default function Exam({ examMode = "certification" }) {
               </div>
 
               <div className="p-6 md:p-8 bg-white text-slate-900">
+                <div className={`mb-5 rounded-2xl border px-4 py-4 ${waitingHallStatusTone}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em]">Live Support</p>
+                      <h3 className="mt-1 text-base font-bold">{waitingHallStatusTitle}</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${supportVoiceConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {supportVoiceConnected ? 'Team Voice Connected' : 'Voice Waiting'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={listenToTeamVoice}
+                        className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white"
+                      >
+                        Listen Team Voice
+                      </button>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm font-medium">{waitingHallStatusMessage}</p>
+                  {invigilatorPauseMessage ? (
+                    <p className="mt-2 text-xs">
+                      Your exam is paused by SkillPro team. Wait here until they resume it.
+                    </p>
+                  ) : null}
+                </div>
                 {phase === EXAM_PHASES.RULES ? (
                   <div className="space-y-5">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
