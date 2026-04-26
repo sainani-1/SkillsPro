@@ -30,6 +30,8 @@ const toExternalUrl = (value) => {
   return `https://${url}`;
 };
 
+const isImageUrl = (value) => /\.(png|jpe?g|webp|gif|avif)(\?.*)?$/i.test(String(value || ''));
+
 const PublicPortfolio = () => {
   const { username } = useParams();
   const [loading, setLoading] = useState(true);
@@ -40,6 +42,7 @@ const PublicPortfolio = () => {
   const decodedUsername = useMemo(() => decodeURIComponent(username || ''), [username]);
   const content = portfolio?.content || {};
   const theme = themeClass[portfolio?.theme] || themeClass.slate;
+  const resumeUrl = toExternalUrl(content.resumeUrl || content.cvUrl || content.resume || '');
 
   useEffect(() => {
     let active = true;
@@ -108,6 +111,7 @@ const PublicPortfolio = () => {
     { label: 'LinkedIn', href: toExternalUrl(content.linkedin), icon: Linkedin },
     { label: 'GitHub', href: toExternalUrl(content.github), icon: Github },
     { label: 'Website', href: toExternalUrl(content.website), icon: ExternalLink },
+    { label: 'Resume / CV', href: resumeUrl, icon: ExternalLink },
   ].filter((item) => item.href);
 
   return (
@@ -151,6 +155,46 @@ const PublicPortfolio = () => {
       </section>
 
       <main className="mx-auto max-w-6xl space-y-8 px-4 py-10">
+        {(content.about || content.goals) ? (
+          <section className="grid gap-4 lg:grid-cols-2">
+            {content.about ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="text-2xl font-black">About Me</h2>
+                <p className="mt-4 text-sm leading-7 text-slate-600">{content.about}</p>
+              </div>
+            ) : null}
+            {content.goals ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="text-2xl font-black">Goals and Personality</h2>
+                <p className="mt-4 text-sm leading-7 text-slate-600">{content.goals}</p>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {resumeUrl ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-700">Resume / CV</p>
+                <h2 className="mt-2 text-2xl font-black text-slate-900">Professional history</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  View or download the resume/CV for full education, skills, and work details.
+                </p>
+              </div>
+              <a
+                href={resumeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+              >
+                Open Resume / CV
+                <ExternalLink size={16} />
+              </a>
+            </div>
+          </section>
+        ) : null}
+
         {(content.skills || []).filter(Boolean).length ? (
           <section>
             <h2 className="text-2xl font-black">Skills</h2>
@@ -159,6 +203,33 @@ const PublicPortfolio = () => {
                 <span key={`${skill}-${index}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">
                   {skill}
                 </span>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {(content.caseStudies || []).filter((study) => study?.title || study?.problem || study?.process || study?.outcome).length ? (
+          <section>
+            <h2 className="text-2xl font-black">Case Studies / Work Samples</h2>
+            <div className="mt-4 grid gap-5">
+              {(content.caseStudies || []).filter((study) => study?.title || study?.problem || study?.process || study?.outcome).map((study, index) => (
+                <article key={index} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <h3 className="text-xl font-black">{study.title || `Case Study ${index + 1}`}</h3>
+                    {study.link ? (
+                      <a href={toExternalUrl(study.link)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-amber-700 hover:text-amber-800">
+                        View work
+                        <ExternalLink size={15} />
+                      </a>
+                    ) : null}
+                  </div>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <CaseBlock title="Problem" value={study.problem} />
+                    <CaseBlock title="My Role" value={study.role} />
+                    <CaseBlock title="Process" value={study.process} />
+                    <CaseBlock title="Outcome" value={study.outcome} />
+                  </div>
+                </article>
               ))}
             </div>
           </section>
@@ -184,6 +255,55 @@ const PublicPortfolio = () => {
           </section>
         ) : null}
 
+        {(content.visuals || []).filter((visual) => visual?.url || visual?.caption || visual?.title).length ? (
+          <section>
+            <h2 className="text-2xl font-black">Visual Work</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {(content.visuals || []).filter((visual) => visual?.url || visual?.caption || visual?.title).map((visual, index) => {
+                const visualUrl = toExternalUrl(visual.url);
+                return (
+                  <article key={index} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    {visualUrl && isImageUrl(visualUrl) ? (
+                      <img src={visualUrl} alt={visual.title || 'Portfolio visual'} className="h-64 w-full object-cover" />
+                    ) : visualUrl ? (
+                      <div className="flex h-40 items-center justify-center bg-slate-100">
+                        <a href={visualUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800">
+                          Open visual
+                          <ExternalLink size={15} />
+                        </a>
+                      </div>
+                    ) : null}
+                    <div className="p-5">
+                      <h3 className="font-black">{visual.title || `Visual ${index + 1}`}</h3>
+                      {visual.caption ? <p className="mt-2 text-sm leading-6 text-slate-600">{visual.caption}</p> : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {(content.processDocs || []).filter((doc) => doc?.title || doc?.description || doc?.link).length ? (
+          <section>
+            <h2 className="text-2xl font-black">Process Documentation</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {(content.processDocs || []).filter((doc) => doc?.title || doc?.description || doc?.link).map((doc, index) => (
+                <article key={index} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="text-lg font-black">{doc.title || `Process Item ${index + 1}`}</h3>
+                  {doc.description ? <p className="mt-3 text-sm leading-6 text-slate-600">{doc.description}</p> : null}
+                  {doc.link ? (
+                    <a href={toExternalUrl(doc.link)} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-amber-700 hover:text-amber-800">
+                      View prototype/document
+                      <ExternalLink size={15} />
+                    </a>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {(content.achievements || []).filter(Boolean).length ? (
           <section>
             <h2 className="text-2xl font-black">Achievements</h2>
@@ -196,7 +316,34 @@ const PublicPortfolio = () => {
             </div>
           </section>
         ) : null}
+
+        {(content.testimonials || []).filter((item) => item?.quote || item?.author).length ? (
+          <section>
+            <h2 className="text-2xl font-black">Social Proof / Testimonials</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {(content.testimonials || []).filter((item) => item?.quote || item?.author).map((item, index) => (
+                <figure key={index} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  {item.quote ? <blockquote className="text-sm leading-7 text-slate-700">"{item.quote}"</blockquote> : null}
+                  <figcaption className="mt-4">
+                    <p className="font-black text-slate-900">{item.author || 'Reviewer'}</p>
+                    {item.context ? <p className="text-sm text-slate-500">{item.context}</p> : null}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </main>
+    </div>
+  );
+};
+
+const CaseBlock = ({ title, value }) => {
+  if (!value) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-700">{value}</p>
     </div>
   );
 };

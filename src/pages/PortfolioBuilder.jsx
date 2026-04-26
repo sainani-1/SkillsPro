@@ -6,12 +6,19 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const emptyProject = { title: '', description: '', link: '' };
 const emptySkill = '';
+const emptyCaseStudy = { title: '', problem: '', process: '', role: '', outcome: '', link: '' };
+const emptyTestimonial = { quote: '', author: '', context: '' };
+const emptyVisual = { title: '', url: '', caption: '' };
+const emptyProcessDoc = { title: '', description: '', link: '' };
 
 const defaultContent = (profile) => ({
   headline: profile?.full_name ? `${profile.full_name} Portfolio` : 'My Portfolio',
   role: profile?.core_subject || 'Student Developer',
   location: '',
   summary: 'I am building practical skills through SkillPro courses, projects, exams, and mentorship.',
+  about: '',
+  goals: '',
+  resumeUrl: '',
   email: profile?.email || '',
   phone: profile?.phone || '',
   linkedin: '',
@@ -26,6 +33,10 @@ const defaultContent = (profile) => ({
     },
   ],
   achievements: ['SkillPro learner'],
+  caseStudies: [],
+  testimonials: [],
+  visuals: [],
+  processDocs: [],
 });
 
 const themeOptions = [
@@ -112,6 +123,30 @@ const PortfolioBuilder = () => {
     const next = [...(content.projects || [])];
     next[index] = { ...next[index], ...patch };
     updateContent({ projects: next });
+  };
+
+  const updateCaseStudy = (index, patch) => {
+    const next = [...(content.caseStudies || [])];
+    next[index] = { ...next[index], ...patch };
+    updateContent({ caseStudies: next });
+  };
+
+  const updateTestimonial = (index, patch) => {
+    const next = [...(content.testimonials || [])];
+    next[index] = { ...next[index], ...patch };
+    updateContent({ testimonials: next });
+  };
+
+  const updateVisual = (index, patch) => {
+    const next = [...(content.visuals || [])];
+    next[index] = { ...next[index], ...patch };
+    updateContent({ visuals: next });
+  };
+
+  const updateProcessDoc = (index, patch) => {
+    const next = [...(content.processDocs || [])];
+    next[index] = { ...next[index], ...patch };
+    updateContent({ processDocs: next });
   };
 
   const savePortfolio = async (publish = false) => {
@@ -224,6 +259,8 @@ const PortfolioBuilder = () => {
               </div>
             </div>
             <TextArea label="About Summary" value={content.summary || ''} onChange={(value) => updateContent({ summary: value })} />
+            <TextArea label="About Me Bio" value={content.about || ''} onChange={(value) => updateContent({ about: value })} />
+            <TextArea label="Goals and Personality" value={content.goals || ''} onChange={(value) => updateContent({ goals: value })} />
           </EditorPanel>
 
           <EditorPanel title="Contact Links">
@@ -233,6 +270,7 @@ const PortfolioBuilder = () => {
               <Field label="LinkedIn URL" value={content.linkedin || ''} onChange={(value) => updateContent({ linkedin: value })} />
               <Field label="GitHub URL" value={content.github || ''} onChange={(value) => updateContent({ github: value })} />
               <Field label="Website URL" value={content.website || ''} onChange={(value) => updateContent({ website: value })} />
+              <Field label="Resume / CV URL" value={content.resumeUrl || ''} onChange={(value) => updateContent({ resumeUrl: value })} />
             </div>
           </EditorPanel>
 
@@ -272,6 +310,72 @@ const PortfolioBuilder = () => {
             </div>
           </EditorPanel>
 
+          <EditorPanel title="Case Studies / Work Samples">
+            <div className="space-y-4">
+              {(content.caseStudies || []).map((study, index) => (
+                <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-900">Case Study {index + 1}</p>
+                    <button type="button" onClick={() => removeListItem('caseStudies', index)} className="text-red-500 hover:text-red-700">
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <Field label="Title" value={study.title || ''} onChange={(value) => updateCaseStudy(index, { title: value })} />
+                    <TextArea label="Problem" value={study.problem || ''} onChange={(value) => updateCaseStudy(index, { problem: value })} />
+                    <TextArea label="Your Process" value={study.process || ''} onChange={(value) => updateCaseStudy(index, { process: value })} />
+                    <Field label="Your Specific Role" value={study.role || ''} onChange={(value) => updateCaseStudy(index, { role: value })} />
+                    <TextArea label="Final Outcome" value={study.outcome || ''} onChange={(value) => updateCaseStudy(index, { outcome: value })} />
+                    <Field label="Work Sample Link" value={study.link || ''} onChange={(value) => updateCaseStudy(index, { link: value })} />
+                  </div>
+                </div>
+              ))}
+              <AddButton label="Add case study" onClick={() => updateContent({ caseStudies: [...(content.caseStudies || []), emptyCaseStudy] })} />
+            </div>
+          </EditorPanel>
+
+          <EditorPanel title="High-Quality Visuals">
+            <div className="space-y-4">
+              {(content.visuals || []).map((visual, index) => (
+                <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-900">Visual {index + 1}</p>
+                    <button type="button" onClick={() => removeListItem('visuals', index)} className="text-red-500 hover:text-red-700">
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <Field label="Title" value={visual.title || ''} onChange={(value) => updateVisual(index, { title: value })} />
+                    <Field label="Image / Video URL" value={visual.url || ''} onChange={(value) => updateVisual(index, { url: value })} />
+                    <TextArea label="Caption" value={visual.caption || ''} onChange={(value) => updateVisual(index, { caption: value })} />
+                  </div>
+                </div>
+              ))}
+              <AddButton label="Add visual" onClick={() => updateContent({ visuals: [...(content.visuals || []), emptyVisual] })} />
+            </div>
+          </EditorPanel>
+
+          <EditorPanel title="Process Documentation">
+            <div className="space-y-4">
+              {(content.processDocs || []).map((doc, index) => (
+                <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-900">Process Item {index + 1}</p>
+                    <button type="button" onClick={() => removeListItem('processDocs', index)} className="text-red-500 hover:text-red-700">
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <Field label="Title" value={doc.title || ''} onChange={(value) => updateProcessDoc(index, { title: value })} />
+                    <TextArea label="Sketches, Drafts, Prototype Notes" value={doc.description || ''} onChange={(value) => updateProcessDoc(index, { description: value })} />
+                    <Field label="Prototype / Document Link" value={doc.link || ''} onChange={(value) => updateProcessDoc(index, { link: value })} />
+                  </div>
+                </div>
+              ))}
+              <AddButton label="Add process item" onClick={() => updateContent({ processDocs: [...(content.processDocs || []), emptyProcessDoc] })} />
+            </div>
+          </EditorPanel>
+
           <EditorPanel title="Achievements">
             <div className="space-y-3">
               {(content.achievements || []).map((item, index) => (
@@ -284,6 +388,27 @@ const PortfolioBuilder = () => {
                 />
               ))}
               <AddButton label="Add achievement" onClick={() => updateContent({ achievements: [...(content.achievements || []), ''] })} />
+            </div>
+          </EditorPanel>
+
+          <EditorPanel title="Social Proof / Testimonials">
+            <div className="space-y-4">
+              {(content.testimonials || []).map((testimonial, index) => (
+                <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-900">Testimonial {index + 1}</p>
+                    <button type="button" onClick={() => removeListItem('testimonials', index)} className="text-red-500 hover:text-red-700">
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <TextArea label="Quote / Review / Accolade" value={testimonial.quote || ''} onChange={(value) => updateTestimonial(index, { quote: value })} />
+                    <Field label="Author" value={testimonial.author || ''} onChange={(value) => updateTestimonial(index, { author: value })} />
+                    <Field label="Context" value={testimonial.context || ''} onChange={(value) => updateTestimonial(index, { context: value })} />
+                  </div>
+                </div>
+              ))}
+              <AddButton label="Add testimonial" onClick={() => updateContent({ testimonials: [...(content.testimonials || []), emptyTestimonial] })} />
             </div>
           </EditorPanel>
         </section>
