@@ -23,6 +23,13 @@ const themeClass = {
   },
 };
 
+const toExternalUrl = (value) => {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  if (/^(mailto:|tel:|https?:\/\/)/i.test(url)) return url;
+  return `https://${url}`;
+};
+
 const PublicPortfolio = () => {
   const { username } = useParams();
   const [loading, setLoading] = useState(true);
@@ -98,9 +105,9 @@ const PublicPortfolio = () => {
   const links = [
     { label: 'Email', href: content.email ? `mailto:${content.email}` : '', icon: Mail },
     { label: 'Phone', href: content.phone ? `tel:${content.phone}` : '', icon: Phone },
-    { label: 'LinkedIn', href: content.linkedin, icon: Linkedin },
-    { label: 'GitHub', href: content.github, icon: Github },
-    { label: 'Website', href: content.website, icon: ExternalLink },
+    { label: 'LinkedIn', href: toExternalUrl(content.linkedin), icon: Linkedin },
+    { label: 'GitHub', href: toExternalUrl(content.github), icon: Github },
+    { label: 'Website', href: toExternalUrl(content.website), icon: ExternalLink },
   ].filter((item) => item.href);
 
   return (
@@ -166,7 +173,7 @@ const PublicPortfolio = () => {
                   <h3 className="text-lg font-black">{project.title || 'Untitled Project'}</h3>
                   {project.description ? <p className="mt-3 text-sm leading-6 text-slate-600">{project.description}</p> : null}
                   {project.link ? (
-                    <a href={project.link} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-amber-700 hover:text-amber-800">
+                    <a href={toExternalUrl(project.link)} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-amber-700 hover:text-amber-800">
                       View project
                       <ExternalLink size={15} />
                     </a>
