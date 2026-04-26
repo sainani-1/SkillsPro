@@ -128,6 +128,7 @@ import TeacherCareerQueue from './pages/TeacherCareerQueue';
 import AdminCareerAnalytics from './pages/AdminCareerAnalytics';
 import PortfolioBuilder from './pages/PortfolioBuilder';
 import PublicPortfolio from './pages/PublicPortfolio';
+import AdminLoginOtpSettings from './pages/AdminLoginOtpSettings';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -451,6 +452,7 @@ function App() {
           <Route path="admin/issue-reports" element={<AdminRoute><AdminIssueReports /></AdminRoute>} />
           <Route path="admin/reset-password" element={<AdminRoute><AdminResetPassword /></AdminRoute>} />
           <Route path="admin/mfa-management" element={<AdminRoute><AdminMFAManagement /></AdminRoute>} />
+          <Route path="admin/login-otp" element={<AdminRoute><AdminLoginOtpSettings /></AdminRoute>} />
           <Route path="admin/mfa-rules" element={<AdminRoute><RequireSensitiveAdminMFA><AdminMFARules /></RequireSensitiveAdminMFA></AdminRoute>} />
           <Route path="admin/multi-session-alerts" element={<AdminRoute><AdminMultiSessionAlerts /></AdminRoute>} />
           <Route path="admin/deleted-accounts" element={<AdminRoute><AdminDeletedAccounts /></AdminRoute>} />

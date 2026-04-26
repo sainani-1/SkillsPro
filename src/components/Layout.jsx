@@ -239,6 +239,7 @@ const Layout = () => {
       { label: 'Growth Analytics', path: '/app/admin/growth-analytics' },
       { label: 'Issue Reports', path: '/app/admin/issue-reports' },
       { label: 'MFA Management', path: '/app/admin/mfa-management' },
+      { label: 'Login OTP', path: '/app/admin/login-otp' },
       { label: 'MFA Rules', path: '/app/admin/mfa-rules' },
       { label: 'Deleted Accounts', path: '/app/admin/deleted-accounts' },
       { label: 'Startup Ideas', path: '/app/admin/startup-ideas' },

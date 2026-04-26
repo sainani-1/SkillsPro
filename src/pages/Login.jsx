@@ -148,6 +148,21 @@ const Login = () => {
     }
   };
 
+  const isLoginOtpEnabled = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'login_email_otp_enabled')
+        .maybeSingle();
+      if (error) throw error;
+      return data?.value !== 'false';
+    } catch (error) {
+      console.warn('Login OTP setting check failed, defaulting to enabled:', error?.message || error);
+      return true;
+    }
+  };
+
   const otpCodeValue = otpCode.join('');
 
   const focusOtpInput = (index) => {
@@ -506,7 +521,7 @@ const Login = () => {
         console.warn('Referral attach failed after login:', referralError.message || referralError);
       }
 
-      if (requireEmailOtp) {
+      if (requireEmailOtp && await isLoginOtpEnabled()) {
         try {
           setOtpSending(true);
           await supabase.auth.signOut();

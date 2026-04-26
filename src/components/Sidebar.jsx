@@ -1072,6 +1072,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">MFA Management</span>}
             </NavLink>
+            <NavLink to="/app/admin/login-otp" className={navItemClass} title="Login OTP">
+              <KeyRound size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Login OTP</span>}
+            </NavLink>
             <NavLink to="/app/admin/mfa-rules" className={navItemClass} title="MFA Rules">
               <ShieldCheck size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">MFA Rules</span>}
