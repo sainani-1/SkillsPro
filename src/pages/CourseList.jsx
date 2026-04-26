@@ -728,7 +728,7 @@ const CourseList = () => {
                             <Link to={`/app/course/${course.id}`} className="w-full block text-center bg-nani-dark text-white py-2 rounded-lg hover:bg-nani-accent transition-colors">
                               Open Course
                             </Link>
-                            <div className="grid grid-cols-3 gap-2 text-xs">
+                            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
                               <Link to={`/app/course/${course.id}`} className="flex items-center justify-center gap-1 bg-blue-50 text-blue-700 py-2 rounded-md hover:bg-blue-100 transition-colors">
                                 <Play size={14}/> Watch
                               </Link>

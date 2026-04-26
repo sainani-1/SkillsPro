@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard, X, Download, ListChecks, Globe2 } from 'lucide-react';
+import { LayoutDashboard, BookOpen, User, GraduationCap, Video, Users, CheckSquare, LogOut, FileBadge, ShieldCheck, ClipboardList, Sparkles, MessageCircle, Calendar, Award, UserPlus, Lock, Unlock, Bell, Clock, Briefcase, ChevronLeft, ChevronRight, Settings, Gift, Trash2, Mail, FileText, Wrench, BarChart3, Code2, MessageSquare, KeyRound, MonitorUp, ShieldAlert, CreditCard, X, Download, ListChecks, Globe2, Trophy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { useNotifications } from '../context/NotificationContext';
@@ -543,6 +543,10 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
               <Sparkles size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Logic Building</span>}
             </NavLink>
+            <NavLink to="/app/logic-building-leaderboard" className={navItemClass} title="Logic Building Leaderboard">
+              <Trophy size={28} />
+              {shouldShowText && <span className="truncate text-sm font-medium">Leaderboard</span>}
+            </NavLink>
             {role === 'admin' && (
               <NavLink to="/app/admin/logic-building-admin-scoreboard" className={navItemClass} title="Logic Building Admin Scoreboard">
                 <Award size={28} />
@@ -705,14 +709,6 @@ const Sidebar = ({ isMobile = false, mobileOpen = false, onClose = () => {}, onR
             <NavLink to="/app/request-teacher" className={navItemClass} title="Request Teacher">
               <UserPlus size={28} />
               {shouldShowText && <span className="truncate text-sm font-medium">Request Teacher</span>}
-            </NavLink>
-            <NavLink to="/app/startup-ideas" className={navItemClass} title="Startup Ideas">
-              <Briefcase size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Startup Ideas</span>}
-            </NavLink>
-            <NavLink to="/app/startup-collaborations" className={navItemClass} title="Startup Collaborations">
-              <Users size={28} />
-              {shouldShowText && <span className="truncate text-sm font-medium">Collaborations</span>}
             </NavLink>
             <NavLink to="/app/report-issue" className={navItemClass} title="Report Issue">
               <Wrench size={28} />

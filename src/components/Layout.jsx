@@ -113,6 +113,8 @@ const Layout = () => {
     const common = [
       { label: 'Dashboard', path: '/app' },
       { label: 'Logic Building', path: '/app/logic-building-contest' },
+      { label: 'Logic Building Leaderboard', path: '/app/logic-building-leaderboard' },
+      { label: 'Leaderboard', path: '/app/logic-building-leaderboard' },
       { label: 'Courses', path: '/app/courses' },
       { label: 'Verify Certificate', path: '/app/verify' },
       { label: 'Profile', path: '/app/profile' },
@@ -152,8 +154,6 @@ const Layout = () => {
       { label: 'Attendance', path: '/app/attendance' },
       { label: 'Ask a Doubt', path: '/app/chat' },
       { label: 'Request Teacher', path: '/app/request-teacher' },
-      { label: 'Startup Ideas', path: '/app/startup-ideas' },
-      { label: 'Startup Collaborations', path: '/app/startup-collaborations' },
       { label: 'Report Issue', path: '/app/report-issue' },
     ];
 

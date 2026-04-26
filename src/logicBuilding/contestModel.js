@@ -52,20 +52,33 @@ export const weeklyContest = {
 
 
 export async function isContestActive() {
-  // Get server time from Firestore
+  const state = await getContestResultState();
+  return state.isActive;
+}
+
+const getServerDate = async () => {
   const serverTimeDoc = doc(db, 'logicBuilding', 'serverTime');
-  let serverDate = null;
   try {
     await setDoc(serverTimeDoc, { ts: serverTimestamp() });
     const snap = await getDoc(serverTimeDoc);
     if (snap.exists() && snap.data().ts) {
-      serverDate = snap.data().ts.toDate();
+      return snap.data().ts.toDate();
     }
   } catch (e) {
-    // fallback to client time if server time fails
-    serverDate = new Date();
+    // fallback below
   }
-  const date = serverDate || new Date();
+  return new Date();
+};
+
+const getDateKey = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+export async function getContestResultState() {
+  const date = await getServerDate();
   const day = date.toLocaleString('en-US', { weekday: 'long' });
   const [startHour, startMin] = weeklyContest.startTime.split(':').map(Number);
   const [endHour, endMin] = weeklyContest.endTime.split(':').map(Number);
@@ -77,23 +90,34 @@ export async function isContestActive() {
     console.log('[LogicBuilding] Server day:', day, '| Contest day:', weeklyContest.day);
     console.log('[LogicBuilding] Server hour:min:', nowHour + ':' + nowMin, '| Contest window:', weeklyContest.startTime, '-', weeklyContest.endTime);
   }
-  // Handle contest windows that may cross midnight
+
   const startMinutes = startHour * 60 + startMin;
   const endMinutes = endHour * 60 + endMin;
   const nowMinutes = nowHour * 60 + nowMin;
+  const isContestDay = day === weeklyContest.day;
   let inWindow = false;
+  let isResultTime = false;
+
   if (endMinutes > startMinutes) {
-    // Normal case: e.g., 20:00-22:00
-    inWindow = nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+    inWindow = isContestDay && nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+    isResultTime = isContestDay && nowMinutes > endMinutes;
   } else {
-    // Crosses midnight: e.g., 23:00-01:00
-    inWindow = nowMinutes >= startMinutes || nowMinutes <= endMinutes;
+    // For windows crossing midnight, publish results after the end time on the next calendar day.
+    inWindow = isContestDay ? nowMinutes >= startMinutes : nowMinutes <= endMinutes;
+    isResultTime = !isContestDay && nowMinutes > endMinutes && nowMinutes < startMinutes;
   }
+
   if (shouldLog) {
     console.log('[LogicBuilding] In window:', inWindow);
   }
-  if (day !== weeklyContest.day) return false;
-  return inWindow;
+
+  return {
+    checkedAt: date,
+    contestKey: `logic-${weeklyContest.day}-${getDateKey(date)}-${weeklyContest.startTime}-${weeklyContest.endTime}`,
+    isContestDay,
+    isActive: inWindow,
+    isResultTime,
+  };
 }
 
 export function getContestQuestions() {

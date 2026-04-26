@@ -4,12 +4,13 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabaseClient';
 import { db } from './firebase';
-import { collection, doc, getDoc, setDoc, getDocs, updateDoc, increment } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, getDocs } from 'firebase/firestore';
 import { isContestActive, getContestQuestions } from './contestModel';
 import { weeklyContest } from './contestModel';
 import { runCode } from './codeRunner';
 import Toast from '../components/Toast';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { estimateCodeComplexity } from './leaderboardUtils';
 
 export default function LogicBuildingContest() {
         // State for inline while loop suggestion
@@ -48,13 +49,29 @@ export default function LogicBuildingContest() {
   const [prizeTitle, setPrizeTitle] = useState('');
   const [prizeDescription, setPrizeDescription] = useState('');
 
+  const getLogicUsername = ({ promptIfMissing = false } = {}) => {
+    const profileUsername = profile?.username?.trim();
+    if (profileUsername) {
+      localStorage.setItem('logicbuilding_username', profileUsername);
+      return profileUsername;
+    }
+    let username = localStorage.getItem('logicbuilding_username') || '';
+    if (!username.trim() && promptIfMissing) {
+      username = prompt('Enter your username for the leaderboard:') || '';
+      if (username.trim()) localStorage.setItem('logicbuilding_username', username.trim());
+    }
+    return username.trim();
+  };
+
+  const getLogicScoreDocId = () => profile?.id || getLogicUsername();
+
   // Check if already solved when question changes
   useEffect(() => {
     async function checkDone() {
       if (!selectedQuestion) return setDone(false);
-      let username = localStorage.getItem('logicbuilding_username');
-      if (!username) return setDone(false);
-      const userRef = doc(db, 'logicBuildingScores', username);
+      const scoreDocId = getLogicScoreDocId();
+      if (!scoreDocId) return setDone(false);
+      const userRef = doc(db, 'logicBuildingScores', scoreDocId);
       const userSnap = await getDoc(userRef);
       if (userSnap.exists() && userSnap.data().solved && userSnap.data().solved[selectedQuestion.title]) {
         setDone(true);
@@ -63,7 +80,7 @@ export default function LogicBuildingContest() {
       }
     }
     checkDone();
-  }, [selectedQuestion]);
+  }, [selectedQuestion, profile?.id, profile?.username]);
 
   React.useEffect(() => {
     async function checkActive() {
@@ -103,14 +120,16 @@ export default function LogicBuildingContest() {
     if (allPassed) {
       // Award random points between 16 and 20
       const points = Math.floor(Math.random() * 5) + 16;
+      const complexity = estimateCodeComplexity(code);
+      const solvedAt = new Date().toISOString();
       setScoreMsg(`Congratulations! All test cases passed. You earned ${points} points for this question.`);
       // Save/update score in Firestore (by user/question)
-      let username = localStorage.getItem('logicbuilding_username');
+      const username = getLogicUsername({ promptIfMissing: true });
       if (!username) {
-        username = prompt('Enter your name for the scoreboard:');
-        localStorage.setItem('logicbuilding_username', username);
+        setToast({ show: true, message: 'Username is required for the leaderboard.', type: 'error' });
+        return;
       }
-      const userRef = doc(db, 'logicBuildingScores', username);
+      const userRef = doc(db, 'logicBuildingScores', profile?.id || username);
       const userSnap = await getDoc(userRef);
       let prevScore = 0;
       let solved = {};
@@ -119,11 +138,20 @@ export default function LogicBuildingContest() {
         solved = userSnap.data().solved || {};
       }
       solved[selectedQuestion.title] = true;
+      const prevComplexityScore = userSnap.exists() ? Number(userSnap.data().complexity_score || 0) : 0;
+      const firstSolvedAt = userSnap.exists() && userSnap.data().first_solved_at
+        ? userSnap.data().first_solved_at
+        : solvedAt;
       await setDoc(userRef, {
         name: username,
+        username,
         email: profile?.email || '',
         user_id: profile?.id || '',
         score: prevScore + points,
+        complexity_score: prevComplexityScore + complexity.score,
+        complexity_label: complexity.label,
+        first_solved_at: firstSolvedAt,
+        last_solved_at: solvedAt,
         solved,
         code
       }, { merge: true });
@@ -137,7 +165,7 @@ export default function LogicBuildingContest() {
       snap.forEach(doc => {
         const data = doc.data();
         if (data.solved && data.solved[selectedQuestion.title] && data.code) {
-          submissions.push({ user: data.name, code: data.code, score: data.score });
+          submissions.push({ id: doc.id, user: data.username || data.name, code: data.code, score: data.score });
         }
       });
       // Compare codes for similarity
@@ -151,8 +179,8 @@ export default function LogicBuildingContest() {
               let penaltyMsg = 'Copied code detected! Points reduced by 200.';
               let newScoreI = submissions[i].score < 200 ? 0 : submissions[i].score - 200;
               let newScoreJ = submissions[j].score < 200 ? 0 : submissions[j].score - 200;
-              const userRefI = doc(db, 'logicBuildingScores', submissions[i].user);
-              const userRefJ = doc(db, 'logicBuildingScores', submissions[j].user);
+              const userRefI = doc(db, 'logicBuildingScores', submissions[i].id);
+              const userRefJ = doc(db, 'logicBuildingScores', submissions[j].id);
               await setDoc(userRefI, { score: newScoreI }, { merge: true });
               await setDoc(userRefJ, { score: newScoreJ }, { merge: true });
               setScoreMsg(penaltyMsg);

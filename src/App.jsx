@@ -3,6 +3,7 @@ import AdminContestSetup from './logicBuilding/AdminContestSetup';
 import LogicBuildingContest from './logicBuilding/LogicBuildingContest';
 import AdminChangeCourse from './pages/AdminChangeCourse';
 import AdminScoreboard from './logicBuilding/AdminScoreboard';
+import LogicBuildingLeaderboard from './logicBuilding/LogicBuildingLeaderboard';
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
@@ -340,6 +341,7 @@ function App() {
         <Route path="/app" element={<ProtectedRoute><RequireAdminMFA><RequireConfiguredSensitiveAdminMFA><Layout /></RequireConfiguredSensitiveAdminMFA></RequireAdminMFA></ProtectedRoute>}>
                               <Route path="admin/logic-building-setup" element={<AdminRoute><AdminContestSetup /></AdminRoute>} />
                     <Route path="logic-building-contest" element={<LogicBuildingContest />} />
+                    <Route path="logic-building-leaderboard" element={<LogicBuildingLeaderboard />} />
           <Route path="admin/exam-settings" element={<AdminRoute><AdminExamSettings /></AdminRoute>} />
           <Route index element={<Dashboard />} />
           <Route path="courses" element={<CourseList />} />
