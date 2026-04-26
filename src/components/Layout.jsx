@@ -140,6 +140,7 @@ const Layout = () => {
       { label: 'Discussion Forum', path: '/app/discussion-forum' },
       { label: 'Skill Badges', path: '/app/skill-badges' },
       { label: 'Resume Builder', path: '/app/resume-builder' },
+      { label: 'Portfolio Generator', path: '/app/portfolio' },
       { label: 'Career Support', path: '/app/career-support' },
       { label: 'Career Report PDF', path: '/app/career-support#career-report' },
       { label: 'Career Tasks', path: '/app/career-support#career-tasks' },

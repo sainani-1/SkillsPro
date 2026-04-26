@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link, Navigate } from 'react-router-dom';
-import { ArrowLeft, KeyRound, ShieldCheck, UserRoundCheck } from 'lucide-react';
+import { ArrowLeft, KeyRound, MailCheck, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import Toast from '../components/Toast';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -18,14 +18,21 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [alertModal, setAlertModal] = useState({ show: false, title: '', message: '', type: 'info' });
   const [loggingIn, setLoggingIn] = useState(false);
+  const [otpStep, setOtpStep] = useState(false);
+  const [otpCode, setOtpCode] = useState(['', '', '', '', '', '']);
+  const [otpChallenge, setOtpChallenge] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
   const [, setGoogleSigningIn] = useState(false);
   const [processingOAuth, setProcessingOAuth] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
   const [inlineNotice, setInlineNotice] = useState('');
   const takeoverResolverRef = useRef(null);
+  const otpInputRefs = useRef([]);
   const navigate = useNavigate();
   const currentDeviceLabel = 'Web Login';
+  const loginOtpEndpoint = import.meta.env.VITE_LOGIN_OTP_ENDPOINT || '/api/login-otp';
 
   const applyPendingAvatarIfAny = async (userId, userEmail) => {
     if (!userId || !userEmail) return null;
@@ -114,6 +121,76 @@ const Login = () => {
     const resolver = takeoverResolverRef.current;
     takeoverResolverRef.current = null;
     if (resolver) resolver(accepted);
+  };
+
+  const requestLoginOtp = async (targetEmail) => {
+    const response = await fetch(loginOtpEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'send', email: targetEmail }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.challenge) {
+      throw new Error(payload?.error || 'Could not send login OTP.');
+    }
+    return payload.challenge;
+  };
+
+  const verifyLoginOtp = async ({ targetEmail, code, challenge }) => {
+    const response = await fetch(loginOtpEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify', email: targetEmail, otp: code, challenge }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'Invalid OTP.');
+    }
+  };
+
+  const otpCodeValue = otpCode.join('');
+
+  const focusOtpInput = (index) => {
+    requestAnimationFrame(() => {
+      const input = otpInputRefs.current[index];
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  };
+
+  const handleOtpDigitChange = (value, index) => {
+    const digits = value.replace(/\D/g, '');
+    if (!digits) {
+      const next = [...otpCode];
+      next[index] = '';
+      setOtpCode(next);
+      return;
+    }
+
+    const next = [...otpCode];
+    digits.slice(0, 6 - index).split('').forEach((digit, offset) => {
+      next[index + offset] = digit;
+    });
+    setOtpCode(next);
+    focusOtpInput(Math.min(index + digits.length, 5));
+  };
+
+  const handleOtpKeyDown = (event, index) => {
+    if (event.key !== 'Backspace') return;
+    if (otpCode[index]) {
+      const next = [...otpCode];
+      next[index] = '';
+      setOtpCode(next);
+      return;
+    }
+    if (index > 0) {
+      const next = [...otpCode];
+      next[index - 1] = '';
+      setOtpCode(next);
+      focusOtpInput(index - 1);
+    }
   };
 
   const ensureSingleActiveSession = async (userId, userProfile = null) => {
@@ -247,8 +324,7 @@ const Login = () => {
     };
   }, []);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  const completePasswordLogin = async ({ requireEmailOtp = true } = {}) => {
     setInlineNotice('');
     setLoggingIn(true);
     try {
@@ -430,6 +506,34 @@ const Login = () => {
         console.warn('Referral attach failed after login:', referralError.message || referralError);
       }
 
+      if (requireEmailOtp) {
+        try {
+          setOtpSending(true);
+          await supabase.auth.signOut();
+          const challenge = await requestLoginOtp(signInData.user.email || email.trim());
+          setOtpChallenge(challenge);
+          setOtpCode(['', '', '', '', '', '']);
+          setOtpStep(true);
+          setToast({
+            show: true,
+            message: 'OTP sent to your email.',
+            type: 'success'
+          });
+        } catch (otpError) {
+          await supabase.auth.signOut();
+          setAlertModal({
+            show: true,
+            title: 'OTP Error',
+            message: otpError.message || 'Could not send login OTP. Please try again.',
+            type: 'error'
+          });
+        } finally {
+          setOtpSending(false);
+          setLoggingIn(false);
+        }
+        return;
+      }
+
       // Check for admin role and MFA
       const sessionCheck = await ensureSingleActiveSession(signInData.user.id, userProfile);
       if (!sessionCheck.allowed) {
@@ -473,6 +577,66 @@ const Login = () => {
     }
   };
 
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    await completePasswordLogin({ requireEmailOtp: true });
+  };
+
+  const handleOtpVerify = async (e) => {
+    e.preventDefault();
+      const cleanCode = otpCodeValue.replace(/\D/g, '');
+    if (cleanCode.length !== 6) {
+      setAlertModal({
+        show: true,
+        title: 'Invalid OTP',
+        message: 'Enter the 6-digit OTP sent to your email.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      await verifyLoginOtp({
+        targetEmail: email.trim(),
+        code: cleanCode,
+        challenge: otpChallenge,
+      });
+      setOtpStep(false);
+      setOtpChallenge('');
+      setOtpCode(['', '', '', '', '', '']);
+      await completePasswordLogin({ requireEmailOtp: false });
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'OTP Verification Failed',
+        message: error.message || 'Invalid or expired OTP. Please try again.',
+        type: 'error'
+      });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setOtpSending(true);
+    try {
+      const challenge = await requestLoginOtp(email.trim());
+      setOtpChallenge(challenge);
+      setOtpCode(['', '', '', '', '', '']);
+      setToast({ show: true, message: 'New OTP sent to your email.', type: 'success' });
+    } catch (error) {
+      setAlertModal({
+        show: true,
+        title: 'OTP Error',
+        message: error.message || 'Could not resend OTP.',
+        type: 'error'
+      });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
   const handleGoogleLogin = async () => {
     setGoogleSigningIn(true);
     try {
@@ -502,7 +666,7 @@ const Login = () => {
     return <LoadingSpinner message="Finishing Google sign-in..." />;
   }
 
-  if (user?.id && !loggingIn && !takeoverModalOpen) {
+  if (user?.id && !loggingIn && !takeoverModalOpen && !otpStep) {
     return <Navigate to="/app" replace />;
   }
 
@@ -541,47 +705,120 @@ const Login = () => {
             <p className="mt-2 text-sm text-slate-100">Use the same email you used during registration to open your dashboard.</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            {inlineNotice ? (
-              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                {inlineNotice}
+          {otpStep ? (
+            <form onSubmit={handleOtpVerify} className="space-y-5">
+              <div className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-emerald-50 shadow-sm">
+                <div className="flex items-start gap-4 px-4 py-5 sm:px-5">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-100">
+                    <MailCheck size={24} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-base font-extrabold text-slate-900">Check your email</p>
+                    <p className="mt-1 break-words text-sm font-semibold text-emerald-800">{email}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">Enter the 6-digit code we sent. It expires in 5 minutes.</p>
+                  </div>
+                </div>
               </div>
-            ) : null}
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
-              <input
-                type="email"
-                placeholder="Enter your email"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <label className="block text-xs font-semibold text-slate-600">Password</label>
-                <Link to="/reset-password" className="text-xs font-semibold text-amber-700 hover:text-amber-800">
-                  Forgot password?
-                </Link>
+              <div>
+                <label className="mb-3 block text-center text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Email OTP</label>
+                <div className="grid grid-cols-6 gap-2 sm:gap-3">
+                  {otpCode.map((digit, index) => (
+                    <input
+                      key={index}
+                      ref={(element) => {
+                        otpInputRefs.current[index] = element;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={1}
+                      aria-label={`OTP digit ${index + 1}`}
+                      className={`aspect-square min-h-12 rounded-2xl border-2 text-center text-xl font-black text-slate-900 shadow-sm outline-none transition sm:text-2xl ${
+                        digit
+                          ? 'border-amber-500 bg-amber-50 shadow-amber-100'
+                          : 'border-slate-200 bg-slate-50 hover:border-amber-200'
+                      } focus:border-amber-500 focus:bg-white focus:ring-4 focus:ring-amber-100`}
+                      value={digit}
+                      onChange={e => handleOtpDigitChange(e.target.value, index)}
+                      onKeyDown={e => handleOtpKeyDown(e, index)}
+                    />
+                  ))}
+                </div>
               </div>
-              <input
-                type="password"
-                placeholder="Enter your password"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-60"
-              disabled={loggingIn}
-            >
-              {loggingIn ? 'Logging in...' : 'Sign In'}
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3.5 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={otpVerifying || loggingIn || otpCodeValue.length !== 6}
+              >
+                {otpVerifying || loggingIn ? 'Verifying...' : 'Verify OTP and Login'}
+              </button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={otpSending || otpVerifying || loggingIn}
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {otpSending ? 'Sending...' : 'Resend OTP'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpStep(false);
+                    setOtpChallenge('');
+                    setOtpCode(['', '', '', '', '', '']);
+                    void supabase.auth.signOut();
+                  }}
+                  disabled={otpVerifying || loggingIn}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Change email
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              {inlineNotice ? (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  {inlineNotice}
+                </div>
+              ) : null}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <label className="block text-xs font-semibold text-slate-600">Password</label>
+                  <Link to="/reset-password" className="text-xs font-semibold text-amber-700 hover:text-amber-800">
+                    Forgot password?
+                  </Link>
+                </div>
+                <input
+                  type="password"
+                  placeholder="Enter your password"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 font-bold text-white shadow-lg shadow-amber-200/70 transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-60"
+                disabled={loggingIn || otpSending}
+              >
+                {loggingIn || otpSending ? 'Checking...' : 'Sign In'}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">

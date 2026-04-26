@@ -126,6 +126,8 @@ import PremiumPlusRoadmap from './pages/PremiumPlusRoadmap';
 import CareerSupportDashboard from './pages/CareerSupportDashboard';
 import TeacherCareerQueue from './pages/TeacherCareerQueue';
 import AdminCareerAnalytics from './pages/AdminCareerAnalytics';
+import PortfolioBuilder from './pages/PortfolioBuilder';
+import PublicPortfolio from './pages/PublicPortfolio';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, realProfile, isImpersonating, loading } = useAuth();
@@ -317,6 +319,8 @@ function App() {
         <Route path="/verify/:id" element={<VerifyCertificate />} />
         <Route path="/verify" element={<VerifyCertificate />} />
         <Route path="/certificate-preview/:id" element={<CertificatePreview />} />
+        <Route path="/view-portfolio/:username" element={<PublicPortfolio />} />
+        <Route path="/view-portifolio/:username" element={<PublicPortfolio />} />
         <Route
           path="/admin-reset-pass"
           element={
@@ -378,6 +382,7 @@ function App() {
           <Route path="discussion-forum" element={<DiscussionForum />} />
           <Route path="skill-badges" element={<SkillBadges />} />
           <Route path="resume-builder" element={<ResumeBuilder />} />
+          <Route path="portfolio" element={<PortfolioBuilder />} />
           <Route path="career-support" element={<CareerSupportDashboard />} />
           <Route path="teacher/career-queue" element={<TeacherRoute><TeacherCareerQueue /></TeacherRoute>} />
           <Route path="admin/career-queue" element={<AdminRoute><TeacherCareerQueue /></AdminRoute>} />
