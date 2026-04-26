@@ -80,7 +80,7 @@ const AdminLoginOtpSettings = () => {
           </div>
           <h1 className="mt-4 text-3xl font-black tracking-tight">Email OTP Login Control</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-            Turn email OTP verification on or off for all email/password logins. Admin MFA still remains separate after admin login.
+            Turn email OTP verification on or off for every email/password login. Admin MFA still remains separate after admin login.
           </p>
         </div>
       </section>
@@ -95,7 +95,7 @@ const AdminLoginOtpSettings = () => {
               <h2 className="text-xl font-black text-slate-900">Require OTP for login</h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
                 {enabled
-                  ? 'ON: users enter email/password, receive an email OTP, then complete login.'
+                  ? 'ON: every email/password user receives an email OTP before login completes.'
                   : 'OFF: users login directly after correct email/password. No email OTP is requested.'}
               </p>
             </div>
@@ -113,7 +113,7 @@ const AdminLoginOtpSettings = () => {
         </div>
 
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-          If OTP is turned off, Gmail SMTP settings are not used during login. Password reset emails are unaffected because Supabase controls them separately.
+          OTP applies to every email/password login when this is on. Google/OAuth login and password reset emails are unaffected because they use separate flows.
         </div>
 
         <button

@@ -23,6 +23,8 @@ const Login = () => {
   const [otpChallenge, setOtpChallenge] = useState('');
   const [otpSending, setOtpSending] = useState(false);
   const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpSendCount, setOtpSendCount] = useState(0);
+  const [otpResendSeconds, setOtpResendSeconds] = useState(0);
   const [, setGoogleSigningIn] = useState(false);
   const [processingOAuth, setProcessingOAuth] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
@@ -33,6 +35,7 @@ const Login = () => {
   const navigate = useNavigate();
   const currentDeviceLabel = 'Web Login';
   const loginOtpEndpoint = import.meta.env.VITE_LOGIN_OTP_ENDPOINT || '/api/login-otp';
+  const otpResendCooldownSeconds = 60;
 
   const applyPendingAvatarIfAny = async (userId, userEmail) => {
     if (!userId || !userEmail) return null;
@@ -110,6 +113,14 @@ const Login = () => {
 
   }, []);
 
+  useEffect(() => {
+    if (!otpStep || otpResendSeconds <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      setOtpResendSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [otpStep, otpResendSeconds]);
+
   const askTakeoverConfirmation = () =>
     new Promise((resolve) => {
       takeoverResolverRef.current = resolve;
@@ -145,6 +156,35 @@ const Login = () => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload?.ok) {
       throw new Error(payload?.error || 'Invalid OTP.');
+    }
+  };
+
+  const startEmailOtpStep = async (targetEmail) => {
+    try {
+      setOtpSending(true);
+      await supabase.auth.signOut();
+      const challenge = await requestLoginOtp(targetEmail);
+      setOtpChallenge(challenge);
+      setOtpCode(['', '', '', '', '', '']);
+      setOtpSendCount(1);
+      setOtpResendSeconds(otpResendCooldownSeconds);
+      setOtpStep(true);
+      setToast({
+        show: true,
+        message: 'OTP sent to your email.',
+        type: 'success'
+      });
+    } catch (otpError) {
+      await supabase.auth.signOut();
+      setAlertModal({
+        show: true,
+        title: 'OTP Error',
+        message: otpError.message || 'Could not send login OTP. Please try again.',
+        type: 'error'
+      });
+    } finally {
+      setOtpSending(false);
+      setLoggingIn(false);
     }
   };
 
@@ -372,6 +412,11 @@ const Login = () => {
         return;
       }
 
+      if (requireEmailOtp && await isLoginOtpEnabled()) {
+        await startEmailOtpStep(signInData.user.email || email.trim());
+        return;
+      }
+
       // Fetch user profile
       let { data: userProfile, error: profileError } = await supabase
         .from('profiles')
@@ -521,34 +566,6 @@ const Login = () => {
         console.warn('Referral attach failed after login:', referralError.message || referralError);
       }
 
-      if (requireEmailOtp && await isLoginOtpEnabled()) {
-        try {
-          setOtpSending(true);
-          await supabase.auth.signOut();
-          const challenge = await requestLoginOtp(signInData.user.email || email.trim());
-          setOtpChallenge(challenge);
-          setOtpCode(['', '', '', '', '', '']);
-          setOtpStep(true);
-          setToast({
-            show: true,
-            message: 'OTP sent to your email.',
-            type: 'success'
-          });
-        } catch (otpError) {
-          await supabase.auth.signOut();
-          setAlertModal({
-            show: true,
-            title: 'OTP Error',
-            message: otpError.message || 'Could not send login OTP. Please try again.',
-            type: 'error'
-          });
-        } finally {
-          setOtpSending(false);
-          setLoggingIn(false);
-        }
-        return;
-      }
-
       // Check for admin role and MFA
       const sessionCheck = await ensureSingleActiveSession(signInData.user.id, userProfile);
       if (!sessionCheck.allowed) {
@@ -634,11 +651,32 @@ const Login = () => {
   };
 
   const handleResendOtp = async () => {
+    if (otpSendCount >= 3) {
+      setAlertModal({
+        show: true,
+        title: 'Resend Limit Reached',
+        message: 'You can send only 3 OTP emails per login attempt. Please change email or try again later.',
+        type: 'warning'
+      });
+      return;
+    }
+    if (otpResendSeconds > 0) {
+      setAlertModal({
+        show: true,
+        title: 'Please Wait',
+        message: `You can resend OTP in ${otpResendSeconds} second${otpResendSeconds === 1 ? '' : 's'}.`,
+        type: 'info'
+      });
+      return;
+    }
+
     setOtpSending(true);
     try {
       const challenge = await requestLoginOtp(email.trim());
       setOtpChallenge(challenge);
       setOtpCode(['', '', '', '', '', '']);
+      setOtpSendCount((count) => Math.min(count + 1, 3));
+      setOtpResendSeconds(otpResendCooldownSeconds);
       setToast({ show: true, message: 'New OTP sent to your email.', type: 'success' });
     } catch (error) {
       setAlertModal({
@@ -771,10 +809,16 @@ const Login = () => {
                 <button
                   type="button"
                   onClick={handleResendOtp}
-                  disabled={otpSending || otpVerifying || loggingIn}
+                  disabled={otpSending || otpVerifying || loggingIn || otpSendCount >= 3 || otpResendSeconds > 0}
                   className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {otpSending ? 'Sending...' : 'Resend OTP'}
+                  {otpSending
+                    ? 'Sending...'
+                    : otpSendCount >= 3
+                      ? 'Resend Limit Reached'
+                      : otpResendSeconds > 0
+                        ? `Resend in ${otpResendSeconds}s`
+                        : `Resend OTP (${Math.max(0, 3 - otpSendCount)} left)`}
                 </button>
                 <button
                   type="button"
@@ -782,6 +826,8 @@ const Login = () => {
                     setOtpStep(false);
                     setOtpChallenge('');
                     setOtpCode(['', '', '', '', '', '']);
+                    setOtpSendCount(0);
+                    setOtpResendSeconds(0);
                     void supabase.auth.signOut();
                   }}
                   disabled={otpVerifying || loggingIn}
