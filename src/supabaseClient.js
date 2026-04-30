@@ -5,6 +5,17 @@ import {
   readDailyLoginState,
   writeDailyLoginState
 } from './utils/dailySession';
+import {
+  migrateLegacyAuthStorage,
+  removeLegacyLocalAuthArtifacts,
+  secureSessionStorage
+} from './utils/secureAuthStorage';
+import { clearHttpOnlyAuthCookies, syncHttpOnlyAuthCookies } from './utils/authCookieBridge';
+import {
+  broadcastAuthSession,
+  broadcastAuthSignOut,
+  setupCrossTabAuthSync
+} from './utils/crossTabAuth';
 
 // NOTE: In a real deployment, these would be in a .env file.
 // Since this is a generated demo, you must replace these with your Supabase credentials.
@@ -12,17 +23,16 @@ import {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co'
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key'
 
+migrateLegacyAuthStorage();
+
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: window.localStorage,
+    storage: secureSessionStorage,
     storageKey: 'skillpro-auth',
     flowType: 'pkce',
-    // Set session expiration to 1 day (in seconds)
-    // Supabase default is 7 days, override with 1 day
-    // This is handled at the time of sign in, but we enforce logout below as well
   },
   global: {
     headers: {
@@ -35,6 +45,8 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   window.supabase = supabase;
 }
 
+setupCrossTabAuthSync(supabase);
+
 const syncDailyLoginState = (session) => {
   if (!session?.user) return;
   const existing = readDailyLoginState();
@@ -46,13 +58,33 @@ const syncDailyLoginState = (session) => {
 };
 
 supabase.auth.onAuthStateChange((event, session) => {
+  removeLegacyLocalAuthArtifacts();
   if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
     syncDailyLoginState(session);
+    broadcastAuthSession(session);
+    void syncHttpOnlyAuthCookies(session);
   }
   if (event === 'SIGNED_OUT') {
     clearDailyLoginState();
+    broadcastAuthSignOut();
+    void clearHttpOnlyAuthCookies();
   }
 });
+
+let proactiveRefreshInFlight = false;
+window.setInterval(async () => {
+  if (proactiveRefreshInFlight) return;
+  proactiveRefreshInFlight = true;
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (!data?.session?.refresh_token) return;
+    await supabase.auth.refreshSession();
+  } catch {
+    // Existing expiry checks handle failed refreshes.
+  } finally {
+    proactiveRefreshInFlight = false;
+  }
+}, 12 * 60 * 1000);
 
 async function checkSessionExpiry() {
   const loginState = readDailyLoginState();
@@ -67,13 +99,26 @@ async function checkSessionExpiry() {
   }
 }
 
-window.addEventListener('storage', (e) => {
-  if (e.key === 'skillpro-login-state') {
+async function handleBrowserResume() {
+  try {
+    await supabase.auth.getSession();
+  } finally {
     void checkSessionExpiry();
   }
-});
+}
+
 window.addEventListener('focus', () => {
-  void checkSessionExpiry();
+  void handleBrowserResume();
+});
+window.addEventListener('pageshow', () => {
+  void handleBrowserResume();
+});
+window.addEventListener('online', () => {
+  void handleBrowserResume();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  void handleBrowserResume();
 });
 window.setInterval(() => {
   void checkSessionExpiry();

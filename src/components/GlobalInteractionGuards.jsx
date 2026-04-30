@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { isLikelyDevToolsOpen } from '../utils/devtoolsDetection';
+import { hasDevToolsSizeSignal } from '../utils/devtoolsDetection';
 
 const SETTING_KEYS = [
   'disable_right_click_global',
@@ -32,6 +32,14 @@ const parseBooleanSetting = (value, fallback) => {
 
 const GlobalInteractionGuards = () => {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [blocked, setBlocked] = useState(false);
+  const detectionStrikesRef = useRef(0);
+  const lastResizeAtRef = useRef(0);
+  const mountedAtRef = useRef(Date.now());
+  const maxViewportRef = useRef({
+    width: typeof window !== 'undefined' ? window.innerWidth : 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 0,
+  });
 
   useEffect(() => {
     let active = true;
@@ -102,12 +110,12 @@ const GlobalInteractionGuards = () => {
         code === 'osright';
       const isF12 = settings.disable_f12_global && key === 'f12';
       const isInspectShortcut =
-        settings.disable_ctrl_shift_i_global && usesModifier && event.shiftKey && key === 'i';
+        settings.disable_ctrl_shift_i_global && usesModifier && event.shiftKey && (key === 'i' || code === 'keyi');
       const isConsoleShortcut =
-        settings.disable_ctrl_shift_j_global && usesModifier && event.shiftKey && key === 'j';
+        settings.disable_ctrl_shift_j_global && usesModifier && event.shiftKey && (key === 'j' || code === 'keyj');
       const isElementPickerShortcut =
-        settings.disable_ctrl_shift_c_global && usesModifier && event.shiftKey && key === 'c';
-      const isViewSourceShortcut = settings.disable_ctrl_u_global && usesModifier && key === 'u';
+        settings.disable_ctrl_shift_c_global && usesModifier && event.shiftKey && (key === 'c' || code === 'keyc');
+      const isViewSourceShortcut = settings.disable_ctrl_u_global && usesModifier && (key === 'u' || code === 'keyu');
       const isGameBarShortcut =
         settings.disable_windows_g_global && isMetaPressed && (key === 'g' || code === 'keyg');
 
@@ -124,33 +132,75 @@ const GlobalInteractionGuards = () => {
         if (typeof event.stopImmediatePropagation === 'function') {
           event.stopImmediatePropagation();
         }
+        setBlocked(true);
       }
     };
 
     const detectDevTools = () => {
       if (!settings.detect_devtools_global) return;
-      if (isLikelyDevToolsOpen()) {
-        document.body.innerHTML =
-          '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#020617;color:#fff;font-family:Arial,sans-serif;text-align:center;"><div><h1 style="font-size:28px;margin:0 0 12px;">Access blocked</h1><p style="margin:0;font-size:15px;opacity:.85;">Close developer tools and refresh the page.</p></div></div>';
+      if (Date.now() - mountedAtRef.current < 2500) return;
+      const windowRecentlyResized = Date.now() - lastResizeAtRef.current < 1200;
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      const maxWidth = maxViewportRef.current.width;
+      const maxHeight = maxViewportRef.current.height;
+      const viewportShrinkDetected =
+        (maxWidth - currentWidth > 260 && currentWidth < maxWidth * 0.82) ||
+        (maxHeight - currentHeight > 320 && currentHeight < maxHeight * 0.72);
+      const detected = !windowRecentlyResized && (hasDevToolsSizeSignal() || viewportShrinkDetected);
+
+      if (detected) {
+        detectionStrikesRef.current += 1;
+        if (detectionStrikesRef.current >= 2) {
+          setBlocked(true);
+        }
+      } else {
+        detectionStrikesRef.current = 0;
+        maxViewportRef.current = {
+          width: Math.max(maxViewportRef.current.width, currentWidth),
+          height: Math.max(maxViewportRef.current.height, currentHeight),
+        };
       }
+    };
+    const handleResize = () => {
+      lastResizeAtRef.current = Date.now();
+      window.setTimeout(detectDevTools, 1300);
     };
 
     document.addEventListener('contextmenu', blockContextMenu, true);
     window.addEventListener('contextmenu', blockContextMenu, true);
     document.addEventListener('keydown', blockRestrictedShortcuts, true);
     window.addEventListener('keydown', blockRestrictedShortcuts, true);
-    const devToolsInterval = window.setInterval(detectDevTools, 1000);
+    window.addEventListener('resize', handleResize, true);
+    window.addEventListener('focus', detectDevTools, true);
+    window.addEventListener('mousemove', detectDevTools, true);
+    window.addEventListener('keyup', detectDevTools, true);
+    detectDevTools();
+    const devToolsInterval = window.setInterval(detectDevTools, 500);
 
     return () => {
       document.removeEventListener('contextmenu', blockContextMenu, true);
       window.removeEventListener('contextmenu', blockContextMenu, true);
       document.removeEventListener('keydown', blockRestrictedShortcuts, true);
       window.removeEventListener('keydown', blockRestrictedShortcuts, true);
+      window.removeEventListener('resize', handleResize, true);
+      window.removeEventListener('focus', detectDevTools, true);
+      window.removeEventListener('mousemove', detectDevTools, true);
+      window.removeEventListener('keyup', detectDevTools, true);
       window.clearInterval(devToolsInterval);
     };
   }, [settings]);
 
-  return null;
+  if (!blocked) return null;
+
+  return (
+    <div className="fixed inset-0 z-[2147483647] flex min-h-screen items-center justify-center bg-slate-950 p-6 text-center text-white">
+      <div>
+        <h1 className="text-3xl font-bold">Access blocked</h1>
+        <p className="mt-3 text-sm text-slate-200">Close developer tools and refresh the page.</p>
+      </div>
+    </div>
+  );
 };
 
 export default GlobalInteractionGuards;

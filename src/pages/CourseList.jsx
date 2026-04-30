@@ -550,10 +550,11 @@ const CourseList = () => {
         });
 
         const getExamButton = (courseId, examResult) => {
+          const bookingPath = `/app/live-exams?courseId=${courseId}`;
           if (!examResult) {
             return (
-              <Link to={`/exam/${courseId}`} className="flex items-center justify-center gap-1 bg-orange-50 text-orange-700 py-2 rounded-md hover:bg-orange-100 transition-colors">
-                <BookIcon size={14}/> Exam
+              <Link to={bookingPath} className="flex items-center justify-center gap-1 bg-orange-50 text-orange-700 py-2 rounded-md hover:bg-orange-100 transition-colors">
+                <BookIcon size={14}/> Book
               </Link>
             );
           }
@@ -576,8 +577,8 @@ const CourseList = () => {
           }
 
           return (
-            <Link to={`/exam/${courseId}`} className="flex items-center justify-center gap-1 bg-blue-50 text-blue-700 py-2 rounded-md hover:bg-blue-100 transition-colors">
-              <RotateCcw size={14}/> Retry
+            <Link to={bookingPath} className="flex items-center justify-center gap-1 bg-blue-50 text-blue-700 py-2 rounded-md hover:bg-blue-100 transition-colors">
+              <RotateCcw size={14}/> Book
             </Link>
           );
         };

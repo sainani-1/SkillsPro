@@ -1,14 +1,20 @@
 const LOGIN_STATE_KEY = 'skillpro-login-state';
 
-const getNextMidnightTimestamp = (fromDate = new Date()) => {
-  const nextMidnight = new Date(fromDate);
-  nextMidnight.setHours(24, 0, 0, 0);
-  return nextMidnight.getTime();
+const getStorage = () => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const getThirtyDayExpiryTimestamp = (fromDate = new Date()) => {
+  return fromDate.getTime() + (30 * 24 * 60 * 60 * 1000);
 };
 
 export const readDailyLoginState = () => {
   try {
-    const raw = window.localStorage.getItem(LOGIN_STATE_KEY);
+    const raw = getStorage()?.getItem(LOGIN_STATE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch (error) {
     return null;
@@ -19,14 +25,14 @@ export const writeDailyLoginState = (payload = {}) => {
   try {
     const existing = readDailyLoginState() || {};
     const loginAt = existing.loginAt || payload.loginAt || new Date().toISOString();
-    const expiresAt = existing.expiresAt || payload.expiresAt || getNextMidnightTimestamp();
+    const expiresAt = payload.expiresAt || getThirtyDayExpiryTimestamp();
     const nextState = {
       ...existing,
       ...payload,
       loginAt,
       expiresAt
     };
-    window.localStorage.setItem(LOGIN_STATE_KEY, JSON.stringify(nextState));
+    getStorage()?.setItem(LOGIN_STATE_KEY, JSON.stringify(nextState));
     return nextState;
   } catch (error) {
     return null;
@@ -35,7 +41,7 @@ export const writeDailyLoginState = (payload = {}) => {
 
 export const clearDailyLoginState = () => {
   try {
-    window.localStorage.removeItem(LOGIN_STATE_KEY);
+    getStorage()?.removeItem(LOGIN_STATE_KEY);
   } catch (error) {
     // Ignore local storage cleanup failures.
   }

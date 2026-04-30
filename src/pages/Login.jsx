@@ -27,6 +27,7 @@ const Login = () => {
   const [otpResendSeconds, setOtpResendSeconds] = useState(0);
   const [, setGoogleSigningIn] = useState(false);
   const [processingOAuth, setProcessingOAuth] = useState(false);
+  const [restoringStoredSession, setRestoringStoredSession] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [takeoverModalOpen, setTakeoverModalOpen] = useState(false);
   const [inlineNotice, setInlineNotice] = useState('');
@@ -112,6 +113,26 @@ const Login = () => {
     }
 
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const restoreBeforeShowingLogin = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (mounted && data?.session?.user) {
+          navigate('/app', { replace: true });
+          return;
+        }
+      } finally {
+        if (mounted) setRestoringStoredSession(false);
+      }
+    };
+
+    restoreBeforeShowingLogin();
+    return () => {
+      mounted = false;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     if (!otpStep || otpResendSeconds <= 0) return undefined;
@@ -711,7 +732,7 @@ const Login = () => {
     }
   };
 
-  if (authLoading) {
+  if (authLoading || restoringStoredSession) {
     return <LoadingSpinner message="Checking session..." />;
   }
 

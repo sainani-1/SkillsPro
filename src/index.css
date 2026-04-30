@@ -109,11 +109,21 @@ aside nav::-webkit-scrollbar-thumb:hover {
 }
 
 .skillpro-media-frame:fullscreen .skillpro-custom-video {
-  display: block;
+  display: flex;
+  position: relative;
+}
+
+.skillpro-media-frame:fullscreen .skillpro-video-stage {
+  padding-bottom: 116px;
 }
 
 .skillpro-media-frame:fullscreen .skillpro-video-controls {
-  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  background: linear-gradient(to top, rgba(2, 6, 23, 0.98), rgba(2, 6, 23, 0.82));
 }
 
 .skillpro-video-3d {

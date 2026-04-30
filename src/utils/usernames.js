@@ -38,25 +38,38 @@ export const ensureUsernamesForUsers = async (users) => {
   const list = Array.isArray(users) ? users.filter((user) => user?.id) : [];
   if (!list.length) return [];
 
-  const response = await invokeUsernameRegistry({
-    action: 'ensure',
-    users: list.map((user) => ({
-      id: user.id,
-      full_name: user.full_name || '',
-      created_at: user.created_at || null,
-    })),
-  });
+  let response = {};
+  try {
+    response = await invokeUsernameRegistry({
+      action: 'ensure',
+      users: list.map((user) => ({
+        id: user.id,
+        full_name: user.full_name || '',
+        created_at: user.created_at || null,
+      })),
+    });
+  } catch (error) {
+    console.warn('Username registry unavailable; continuing without username hydration:', error?.message || error);
+    return list.map((user) => ({
+      ...user,
+      username: user.username || '',
+    }));
+  }
 
   const usernamesByUserId = response?.usernames || {};
   return list.map((user) => ({
     ...user,
-    username: usernamesByUserId[user.id] || '',
+    username: usernamesByUserId[user.id] || user.username || '',
   }));
 };
 
 export const ensureUsernameForUser = async (user) => {
-  const [result] = await ensureUsernamesForUsers(user ? [user] : []);
-  return result || user || null;
+  try {
+    const [result] = await ensureUsernamesForUsers(user ? [user] : []);
+    return result || user || null;
+  } catch {
+    return user || null;
+  }
 };
 
 export const updateUsernameForUser = async ({ userId, username }) => {

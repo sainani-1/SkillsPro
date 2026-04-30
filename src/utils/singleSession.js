@@ -4,6 +4,14 @@ const DEVICE_ID_KEY = 'single_session_device_id';
 const ACTIVE_SESSION_KEY_PREFIX = 'single_session_key_';
 const SESSION_NOTICE_KEY = 'single_session_notice';
 
+const getStorage = () => {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
 const generateRandomKey = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -12,26 +20,42 @@ const generateRandomKey = () => {
 };
 
 export const getOrCreateDeviceId = () => {
-  const existing = localStorage.getItem(DEVICE_ID_KEY);
+  const storage = getStorage();
+  const existing = storage?.getItem(DEVICE_ID_KEY);
   if (existing) return existing;
   const created = `dev_${generateRandomKey()}`;
-  localStorage.setItem(DEVICE_ID_KEY, created);
+  storage?.setItem(DEVICE_ID_KEY, created);
+  try {
+    localStorage.removeItem(DEVICE_ID_KEY);
+  } catch {
+    // Ignore legacy cleanup failures.
+  }
   return created;
 };
 
 export const getStoredSessionKey = (userId) => {
   if (!userId) return null;
-  return localStorage.getItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`) || null;
+  return getStorage()?.getItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`) || null;
 };
 
 export const setStoredSessionKey = (userId, key) => {
   if (!userId || !key) return;
-  localStorage.setItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`, key);
+  getStorage()?.setItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`, key);
+  try {
+    localStorage.removeItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`);
+  } catch {
+    // Ignore legacy cleanup failures.
+  }
 };
 
 export const clearStoredSessionKey = (userId) => {
   if (!userId) return;
-  localStorage.removeItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`);
+  getStorage()?.removeItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`);
+  try {
+    localStorage.removeItem(`${ACTIVE_SESSION_KEY_PREFIX}${userId}`);
+  } catch {
+    // Ignore legacy cleanup failures.
+  }
 };
 
 export const setSingleSessionNotice = (message) => {

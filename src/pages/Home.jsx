@@ -24,6 +24,8 @@ import { supabase } from '../supabaseClient';
 const Home = () => {
   const { user, loading } = useAuth();
   const [searchParams] = useSearchParams();
+  const [checkingStoredSession, setCheckingStoredSession] = useState(true);
+  const [storedSessionUser, setStoredSessionUser] = useState(null);
   const [leadForm, setLeadForm] = useState({
     full_name: '',
     email: '',
@@ -107,6 +109,26 @@ const Home = () => {
   ];
 
   useEffect(() => {
+    let mounted = true;
+
+    const checkStoredSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (mounted) {
+          setStoredSessionUser(data?.session?.user || null);
+        }
+      } finally {
+        if (mounted) setCheckingStoredSession(false);
+      }
+    };
+
+    checkStoredSession();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const referralCode = searchParams.get('ref');
     if (referralCode) {
       savePendingReferralCode(referralCode);
@@ -160,11 +182,11 @@ const Home = () => {
     }
   };
 
-  if (loading) {
+  if (loading || checkingStoredSession) {
     return <LoadingSpinner message="Checking session..." />;
   }
 
-  if (user?.id) {
+  if (user?.id || storedSessionUser?.id) {
     return <Navigate to="/app" replace />;
   }
 

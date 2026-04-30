@@ -1,4 +1,5 @@
-const DEVTOOLS_THRESHOLD = 160;
+const DEVTOOLS_WIDTH_THRESHOLD = 260;
+const DEVTOOLS_HEIGHT_THRESHOLD = 320;
 const ZOOM_TOLERANCE = 0.08;
 
 const getViewportZoom = () => {
@@ -10,7 +11,7 @@ const getViewportZoom = () => {
   return 1;
 };
 
-export const isLikelyDevToolsOpen = () => {
+export const hasDevToolsSizeSignal = () => {
   if (typeof window === 'undefined') return false;
 
   const zoom = getViewportZoom();
@@ -20,6 +21,13 @@ export const isLikelyDevToolsOpen = () => {
 
   const widthGap = window.outerWidth - window.innerWidth;
   const heightGap = window.outerHeight - window.innerHeight;
-  return widthGap > DEVTOOLS_THRESHOLD || heightGap > DEVTOOLS_THRESHOLD;
+  const widthLooksLikeDockedDevTools =
+    widthGap > DEVTOOLS_WIDTH_THRESHOLD && window.innerWidth < window.outerWidth * 0.85;
+  const heightLooksLikeDockedDevTools =
+    heightGap > DEVTOOLS_HEIGHT_THRESHOLD && window.innerHeight < window.outerHeight * 0.75;
+
+  return widthLooksLikeDockedDevTools || heightLooksLikeDockedDevTools;
 };
 
+export const isLikelyDevToolsOpen = hasDevToolsSizeSignal;
+export const isDeveloperToolsDetected = isLikelyDevToolsOpen;

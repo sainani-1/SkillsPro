@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { isLikelyDevToolsOpen } from '../utils/devtoolsDetection';
+import { isDeveloperToolsDetected } from '../utils/devtoolsDetection';
 
 /**
  * Strict DevTools proctoring hook.
@@ -17,11 +17,12 @@ export function useDevToolsProctor({ isActive, onTerminate }) {
   useEffect(() => {
     if (!isActive) return;
     function detectDevTools() {
-      if (isLikelyDevToolsOpen()) {
+      if (isDeveloperToolsDetected()) {
         onTerminate?.('devtools_open');
       }
     }
-    checkInterval.current = setInterval(detectDevTools, 1000);
+    detectDevTools();
+    checkInterval.current = setInterval(detectDevTools, 500);
     return () => {
       clearInterval(checkInterval.current);
     };

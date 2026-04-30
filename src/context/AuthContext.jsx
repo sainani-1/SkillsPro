@@ -15,6 +15,9 @@ import { fetchUserPremiumPlanType } from '../utils/premiumPlanTypes';
 import { clearTeacherAssignmentForStudent } from '../utils/teacherAssignment';
 import { clearAdminVerificationState } from '../utils/adminPasskey';
 import { ensureUsernameForUser } from '../utils/usernames';
+import { clearSecureAuthStorage, readStoredAuthTokens, removeLegacyLocalAuthArtifacts } from '../utils/secureAuthStorage';
+import { refreshSessionFromHttpOnlyCookie } from '../utils/authCookieBridge';
+import { requestSessionFromOtherTabs } from '../utils/crossTabAuth';
 
 const AuthContext = createContext();
 
@@ -24,13 +27,14 @@ export const AuthProvider = ({ children }) => {
   const [impersonationProfile, setImpersonationProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const conflictStateRef = useRef({ strikes: 0, lastAt: 0 });
+  const initialAuthRestoreRef = useRef(true);
 
   const PROFILE_CACHE_KEY = 'profile_cache';
   const IMPERSONATION_KEY = 'admin_impersonation_profile';
 
   const readProfileCache = () => {
     try {
-      const stored = localStorage.getItem(PROFILE_CACHE_KEY);
+      const stored = sessionStorage.getItem(PROFILE_CACHE_KEY);
       return stored ? JSON.parse(stored) : null;
     } catch (error) {
       return null;
@@ -39,7 +43,8 @@ export const AuthProvider = ({ children }) => {
 
   const writeProfileCache = (data) => {
     try {
-      localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
+      sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
+      localStorage.removeItem(PROFILE_CACHE_KEY);
     } catch (error) {
       // Ignore cache write failures; app state remains source of truth.
     }
@@ -47,6 +52,7 @@ export const AuthProvider = ({ children }) => {
 
   const clearProfileCache = () => {
     try {
+      sessionStorage.removeItem(PROFILE_CACHE_KEY);
       localStorage.removeItem(PROFILE_CACHE_KEY);
     } catch (error) {
       // Ignore cache clear failures.
@@ -90,6 +96,7 @@ export const AuthProvider = ({ children }) => {
     clearImpersonation();
     clearDailyLoginState();
     await supabase.auth.signOut();
+    clearSecureAuthStorage();
   };
 
   const handleSingleSessionConflict = async (userId) => {
@@ -105,7 +112,7 @@ export const AuthProvider = ({ children }) => {
 
   const validateSessionOwnership = async (sessionUserId) => {
     if (!sessionUserId) return true;
-    const localKey = localStorage.getItem(`single_session_key_${sessionUserId}`);
+    const localKey = sessionStorage.getItem(`single_session_key_${sessionUserId}`);
     if (!localKey) return true;
 
     const owned = await isCurrentDeviceSessionOwner(sessionUserId);
@@ -129,6 +136,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     let isMounted = true;
+    removeLegacyLocalAuthArtifacts();
     const cachedProfile = readProfileCache();
     const cachedImpersonation = readImpersonation();
     if (cachedProfile?.profile) {
@@ -136,45 +144,77 @@ export const AuthProvider = ({ children }) => {
       setImpersonationProfile(cachedImpersonation);
     }
 
-    // Wait for Supabase to restore session from localStorage
+    // Wait for Supabase to restore the tab-scoped secure session.
     const restoreSession = async () => {
       // Wait for Supabase to finish restoring session (it does this async on load)
       // Poll for up to 500ms
-      let tries = 0;
-      let session = null;
-      while (tries < 10 && !session) {
-        const { data } = await supabase.auth.getSession();
-        session = data.session;
-        if (session) break;
-        await new Promise(res => setTimeout(res, 50));
-        tries++;
-      }
-      if (!isMounted) return;
-      if (session?.user) {
-        const allowed = await validateSessionOwnership(session.user.id);
-        if (!isMounted || !allowed) {
-          setLoading(false);
-          return;
+      try {
+        let tries = 0;
+        let session = null;
+        while (tries < 10 && !session) {
+          const { data } = await supabase.auth.getSession();
+          session = data.session;
+          if (session) break;
+          await new Promise(res => setTimeout(res, 50));
+          tries++;
         }
-      }
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        if (cachedProfile?.profile) {
+        if (!session) {
+          const storedTokens = readStoredAuthTokens();
+          if (storedTokens?.access_token && storedTokens?.refresh_token) {
+            try {
+              const { data } = await supabase.auth.setSession(storedTokens);
+              session = data.session;
+            } catch {
+              session = null;
+            }
+          }
+        }
+        if (!session) {
+          const restored = await refreshSessionFromHttpOnlyCookie();
+          if (restored?.access_token && restored?.refresh_token) {
+            const { data } = await supabase.auth.setSession(restored);
+            session = data.session;
+          }
+        }
+        if (!session) {
+          const sharedSession = await requestSessionFromOtherTabs();
+          if (sharedSession?.access_token && sharedSession?.refresh_token) {
+            const { data } = await supabase.auth.setSession(sharedSession);
+            session = data.session;
+          }
+        }
+        if (!isMounted) return;
+        if (session?.user) {
+          const allowed = await validateSessionOwnership(session.user.id);
+          if (!isMounted || !allowed) {
+            setLoading(false);
+            return;
+          }
+        }
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          if (cachedProfile?.profile) {
+            setLoading(false);
+          }
+          fetchProfile(session.user.id, { background: !!cachedProfile?.profile });
+        } else {
+          setProfile(null);
+          setImpersonationProfile(null);
+          clearProfileCache();
+          clearImpersonation();
           setLoading(false);
         }
-        fetchProfile(session.user.id, { background: !!cachedProfile?.profile });
-      } else {
-        setProfile(null);
-        setImpersonationProfile(null);
-        clearProfileCache();
-        clearImpersonation();
-        setLoading(false);
+      } finally {
+        initialAuthRestoreRef.current = false;
       }
     };
 
     restoreSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user && initialAuthRestoreRef.current) {
+        return;
+      }
       setUser(session?.user ?? null);
       if (session?.user) fetchProfile(session.user.id, { background: true });
       else {
@@ -189,6 +229,83 @@ export const AuthProvider = ({ children }) => {
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    let resuming = false;
+
+    const restorePersistedSession = async () => {
+      let session = null;
+      const { data } = await supabase.auth.getSession();
+      session = data?.session || null;
+
+      if (!session) {
+        const storedTokens = readStoredAuthTokens();
+        if (storedTokens?.access_token && storedTokens?.refresh_token) {
+          try {
+            const { data: sessionData } = await supabase.auth.setSession(storedTokens);
+            session = sessionData?.session || null;
+          } catch {
+            session = null;
+          }
+        }
+      }
+
+      if (!session) {
+        const restored = await refreshSessionFromHttpOnlyCookie();
+        if (restored?.access_token && restored?.refresh_token) {
+          const { data: sessionData } = await supabase.auth.setSession(restored);
+          session = sessionData?.session || null;
+        }
+      }
+
+      if (!session) {
+        const sharedSession = await requestSessionFromOtherTabs();
+        if (sharedSession?.access_token && sharedSession?.refresh_token) {
+          const { data: sessionData } = await supabase.auth.setSession(sharedSession);
+          session = sessionData?.session || null;
+        }
+      }
+
+      return session;
+    };
+
+    const resumeAuthState = async () => {
+      if (resuming || !mounted) return;
+      resuming = true;
+      try {
+        const session = await restorePersistedSession();
+        if (!mounted || !session?.user) return;
+
+        const allowed = await validateSessionOwnership(session.user.id);
+        if (!mounted || !allowed) return;
+
+        setUser(session.user);
+        fetchProfile(session.user.id, { background: true });
+      } finally {
+        resuming = false;
+      }
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void resumeAuthState();
+      }
+    };
+
+    window.addEventListener('focus', resumeAuthState);
+    window.addEventListener('pageshow', resumeAuthState);
+    window.addEventListener('online', resumeAuthState);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('focus', resumeAuthState);
+      window.removeEventListener('pageshow', resumeAuthState);
+      window.removeEventListener('online', resumeAuthState);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 
@@ -328,7 +445,12 @@ export const AuthProvider = ({ children }) => {
         ...data,
         premium_plan_type: premiumPlanType,
       };
-      const hydratedProfile = await ensureUsernameForUser(baseProfile);
+      let hydratedProfile = baseProfile;
+      try {
+        hydratedProfile = await ensureUsernameForUser(baseProfile);
+      } catch (usernameError) {
+        console.warn('Profile loaded without username hydration:', usernameError?.message || usernameError);
+      }
 
       if (
         hydratedProfile.role === 'student' &&
@@ -396,6 +518,7 @@ export const AuthProvider = ({ children }) => {
     clearImpersonation();
     clearStoredSessionKey(currentUserId);
     clearDailyLoginState();
+    clearSecureAuthStorage();
     try {
       clearAdminVerificationState();
       sessionStorage.removeItem('admin_sensitive_mfa_verified_at');

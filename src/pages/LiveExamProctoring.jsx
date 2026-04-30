@@ -2660,7 +2660,7 @@ export default function LiveExamProctoring({ forcedPanel = '' }) {
           slotEndsAt: slot.ends_at,
         });
         sessionStorage.setItem(LIVE_EXAM_CONTEXT_KEY, nextLiveExamContext);
-        localStorage.setItem(LIVE_EXAM_CONTEXT_KEY, nextLiveExamContext);
+        localStorage.removeItem(LIVE_EXAM_CONTEXT_KEY);
       } catch {
         // ignore storage errors
       }

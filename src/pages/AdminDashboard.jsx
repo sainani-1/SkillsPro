@@ -96,6 +96,12 @@ const AdminDashboard = () => {
         description: 'View homepage leads, respond, and export to Excel CSV'
       },
       {
+        to: '/app/admin/notes-library',
+        icon: <FileText className="text-blue-600 mb-3" size={28} />,
+        title: 'Notes Library',
+        description: 'Add and publish Premium Plus notes library previews'
+      },
+      {
         to: '/app/admin/growth-analytics',
         icon: <TrendingUp className="text-emerald-600 mb-3" size={28} />,
         title: 'Growth Analytics',

@@ -56,7 +56,7 @@ const appendPdfViewerFlags = (url) => {
   if (!/\.pdf(\?|#|$)/i.test(url)) return url;
   const [base, hash = ''] = url.split('#');
   const hashParts = hash ? hash.split('&').filter(Boolean) : [];
-  const required = ['toolbar=0', 'navpanes=0', 'scrollbar=0', 'view=FitH'];
+  const required = ['toolbar=0', 'navpanes=0', 'scrollbar=1', 'view=FitH'];
   required.forEach((part) => {
     if (!hashParts.includes(part)) hashParts.push(part);
   });
@@ -1942,8 +1942,6 @@ const CourseDetail = () => {
                           <ProtectedMediaFrame
                             title={`${course.title} ${activeNote.label}`}
                             badge="Fullscreen notes preview"
-                            lockFullscreenSurface
-                            lockSurfaceAlways
                           >
                             <iframe
                               title={`${course.title} ${activeNote.label}`}

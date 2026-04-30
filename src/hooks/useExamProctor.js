@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isLikelyDevToolsOpen } from "../utils/devtoolsDetection";
+import { isDeveloperToolsDetected } from "../utils/devtoolsDetection";
 
 export function useExamProctor({
   examPhase,
@@ -78,10 +78,10 @@ export function useExamProctor({
     /* DEVTOOLS */
     const devInterval = setInterval(() => {
       if (!activeRef.current) return;
-      if (isLikelyDevToolsOpen()) {
+      if (isDeveloperToolsDetected()) {
         onTerminate("devtools_block_account");
       }
-    }, 1000);
+    }, 500);
 
     /* FACE MONITOR */
     faceInterval.current = setInterval(async () => {

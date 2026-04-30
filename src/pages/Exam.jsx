@@ -304,12 +304,11 @@ export default function Exam({ examMode = "certification" }) {
   const safeSessionSet = (key, value) => safeStorageSet(sessionStorage, key, value);
   const safeSessionRemove = (key) => safeStorageRemove(sessionStorage, key);
   const safeLocalGet = (key) => safeStorageGet(localStorage, key);
-  const safeLocalSet = (key, value) => safeStorageSet(localStorage, key, value);
   const safeLocalRemove = (key) => safeStorageRemove(localStorage, key);
   const getSavedExamProgress = (key) => safeLocalGet(key) || safeSessionGet(key);
   const setSavedExamProgress = (key, value) => {
     safeSessionSet(key, value);
-    safeLocalSet(key, value);
+    safeLocalRemove(key);
   };
   const clearSavedExamProgress = (key) => {
     safeSessionRemove(key);
@@ -319,7 +318,7 @@ export default function Exam({ examMode = "certification" }) {
     safeSessionGet(LIVE_EXAM_CONTEXT_KEY) || safeLocalGet(LIVE_EXAM_CONTEXT_KEY);
   const setStoredLiveExamContext = (value) => {
     safeSessionSet(LIVE_EXAM_CONTEXT_KEY, value);
-    safeLocalSet(LIVE_EXAM_CONTEXT_KEY, value);
+    safeLocalRemove(LIVE_EXAM_CONTEXT_KEY);
   };
   const clearStoredLiveExamContext = () => {
     safeSessionRemove(LIVE_EXAM_CONTEXT_KEY);
