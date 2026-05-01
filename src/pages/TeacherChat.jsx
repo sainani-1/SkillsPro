@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useChat } from '../context/ChatContext';
 import { Send, MessageCircle, Users } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { markChatAsRead } from '../utils/chatReadState';
 
 const TeacherChat = () => {
   const { profile } = useAuth();
@@ -19,7 +20,13 @@ const TeacherChat = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [statusError, setStatusError] = useState('');
+  const [receiverReadAt, setReceiverReadAt] = useState(null);
   const messagesEndRef = useRef(null);
+  const selectedGroupRef = useRef(null);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
 
   // Clear global unread count when opening chat
   useEffect(() => {
@@ -39,8 +46,9 @@ const TeacherChat = () => {
         schema: 'public',
         table: 'chat_messages'
       }, payload => {
+        loadChatGroups(false);
         // Only increment unread if message is NOT in currently selected group
-        if (payload.new.group_id !== selectedGroup) {
+        if (payload.new.sender_id !== profile.id && payload.new.group_id !== selectedGroupRef.current) {
           setUnreadCounts(prev => ({
             ...prev,
             [payload.new.group_id]: (prev[payload.new.group_id] || 0) + 1
@@ -90,6 +98,7 @@ const TeacherChat = () => {
     if (selectedGroup) {
       loadMessages();
       loadMembers();
+      loadReceiverReadState(selectedGroup);
       // Mark this group as seen - clear unread only for newly viewed messages
       setLastSeenGroupId(selectedGroup);
       setUnreadCounts(prev => ({
@@ -103,11 +112,17 @@ const TeacherChat = () => {
           schema: 'public',
           table: 'chat_messages',
           filter: `group_id=eq.${selectedGroup}`
-        }, payload => {
+        }, async payload => {
           if (payload.new.sender_id === profile?.id) return;
           const clearedAt = getChatClearedAt(selectedGroup);
           if (!clearedAt || new Date(payload.new.created_at) > new Date(clearedAt)) {
-            setMessages(prev => [...prev, payload.new]);
+            const { data } = await supabase
+              .from('chat_messages')
+              .select('*, profiles(full_name, avatar_url)')
+              .eq('id', payload.new.id)
+              .maybeSingle();
+            setMessages(prev => prev.some((msg) => msg.id === payload.new.id) ? prev : [...prev, data || payload.new]);
+            void markChatAsRead(profile?.id, selectedGroup);
           }
         })
         .subscribe();
@@ -117,12 +132,23 @@ const TeacherChat = () => {
   }, [selectedGroup]);
 
   useEffect(() => {
+    if (!selectedGroup || !profile?.id) return undefined;
+    const interval = window.setInterval(() => {
+      loadMessages(true);
+      loadReceiverReadState(selectedGroup);
+      loadChatGroups(false);
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [selectedGroup, profile?.id]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const loadChatGroups = async () => {
+  const loadChatGroups = async (showSpinner = true) => {
     if (!profile?.id) return;
     try {
+      if (showSpinner) setLoading(true);
       console.log('Loading chat groups for teacher:', profile.id);
       
       // Get all groups where teacher is a member
@@ -161,16 +187,42 @@ const TeacherChat = () => {
         }
         setUnreadCounts(unreadCounts);
         console.log('Setting selected group to:', groups[0].id);
-        setSelectedGroup(groups[0].id);
+        setSelectedGroup((current) => current || groups[0].id);
       }
     } catch (error) {
       console.error('Error loading chat groups:', error);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
-  const loadMessages = async () => {
+  const loadReceiverReadState = async (groupId = selectedGroup) => {
+    if (!groupId || !profile?.id) return;
+    try {
+      const { data } = await supabase
+        .from('chat_read_states')
+        .select('user_id, last_read_at')
+        .eq('group_id', groupId)
+        .neq('user_id', profile.id)
+        .order('last_read_at', { ascending: false })
+        .limit(1);
+      setReceiverReadAt(data?.[0]?.last_read_at || null);
+    } catch {
+      setReceiverReadAt(null);
+    }
+  };
+
+  const getOwnMessageStatus = (message) => {
+    if (String(message.id || '').startsWith('temp-')) {
+      return { label: 'Sending', symbol: '✓', className: 'text-slate-400' };
+    }
+    if (receiverReadAt && new Date(receiverReadAt) >= new Date(message.created_at)) {
+      return { label: 'Read', symbol: '✓✓', className: 'text-sky-300' };
+    }
+    return { label: 'Sent', symbol: '✓✓', className: 'text-slate-300' };
+  };
+
+  const loadMessages = async (markAsRead = true) => {
     if (!selectedGroup) return;
 
     try {
@@ -185,6 +237,10 @@ const TeacherChat = () => {
         return new Date(msg.created_at) > new Date(clearedAt);
       });
       setMessages(filtered);
+      if (markAsRead) {
+        await markChatAsRead(profile.id, selectedGroup);
+      }
+      await loadReceiverReadState(selectedGroup);
     } catch (error) {
       console.error('Error loading messages:', error);
     }
@@ -225,12 +281,18 @@ const TeacherChat = () => {
     setStatusError('');
 
     try {
-      const { error } = await supabase.from('chat_messages').insert({
-        group_id: selectedGroup,
-        sender_id: profile.id,
-        content
-      });
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .insert({
+          group_id: selectedGroup,
+          sender_id: profile.id,
+          content
+        })
+        .select('*, profiles(full_name, avatar_url)')
+        .single();
       if (error) throw error;
+      setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+      await markChatAsRead(profile.id, selectedGroup);
     } catch (error) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setNewMessage(content);
@@ -406,6 +468,11 @@ const TeacherChat = () => {
                             hour: '2-digit',
                             minute: '2-digit'
                           })}
+                          {isMe ? (
+                            <span className={`ml-2 font-bold ${getOwnMessageStatus(msg).className}`} title={getOwnMessageStatus(msg).label}>
+                              {getOwnMessageStatus(msg).symbol}
+                            </span>
+                          ) : null}
                         </p>
                       </div>
                     </div>
@@ -423,7 +490,7 @@ const TeacherChat = () => {
                 type="text"
                 value={newMessage}
                 onChange={e => setNewMessage(e.target.value)}
-                onKeyPress={e => e.key === 'Enter' && sendMessage()}
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
                 placeholder="Type your message..."
                 className="flex-1 border rounded-lg p-2 text-sm"
               />

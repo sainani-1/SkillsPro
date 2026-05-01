@@ -23,6 +23,7 @@ const ClearDoubts = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(false); // First confirmation
   const [deleteConfirmFinal, setDeleteConfirmFinal] = useState(false); // Second confirmation
   const [successMessage, setSuccessMessage] = useState(''); // Success toast
+  const [receiverReadAt, setReceiverReadAt] = useState(null);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -48,6 +49,16 @@ const ClearDoubts = () => {
   }, [selectedChat?.id]);
 
   useEffect(() => {
+    if (!selectedChat?.id || !profile?.id) return undefined;
+    const interval = window.setInterval(() => {
+      loadChatMessages(selectedChat.id, true);
+      loadReceiverReadState(selectedChat.id);
+      fetchStudentChats(false);
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [selectedChat?.id, profile?.id]);
+
+  useEffect(() => {
     if (profile?.role === 'teacher') {
       fetchStudentChats(true); // initial load shows spinner
       // Refresh chats every 30 seconds without spinner
@@ -55,6 +66,44 @@ const ClearDoubts = () => {
       return () => clearInterval(interval);
     }
   }, [profile]); // Only re-run when profile changes
+
+  useEffect(() => {
+    if (profile?.role !== 'teacher' || !profile?.id) return undefined;
+
+    const subscription = supabase
+      .channel(`clear-doubts-live:${profile.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'chat_messages'
+      }, async (payload) => {
+        fetchStudentChats(false);
+        if (selectedChat?.id !== payload.new.group_id) return;
+
+        const { data } = await supabase
+          .from('chat_messages')
+          .select('*, sender:profiles(id, full_name, avatar_url)')
+          .eq('id', payload.new.id)
+          .maybeSingle();
+
+        setChatMessages((prev) => {
+          if (prev.some((message) => message.id === payload.new.id)) return prev;
+          return [...prev, data || payload.new];
+        });
+
+        if (payload.new.sender_id !== profile.id) {
+          const now = await markChatAsRead(profile.id, payload.new.group_id);
+          setChatReadTimes((prev) => {
+            const next = new Map(prev);
+            next.set(payload.new.group_id, now);
+            return next;
+          });
+        }
+      })
+      .subscribe();
+
+    return () => subscription.unsubscribe();
+  }, [profile?.id, profile?.role, selectedChat?.id]);
 
   useEffect(() => {
     setChats([]);
@@ -151,7 +200,7 @@ const ClearDoubts = () => {
     }
   };
 
-  const loadChatMessages = async (groupId) => {
+  const loadChatMessages = async (groupId, markAsRead = true) => {
     try {
       const { data: messages, error } = await supabase
         .from('chat_messages')
@@ -170,10 +219,13 @@ const ClearDoubts = () => {
       setTimeout(() => scrollToBottom(), 500);
 
       // Mark this chat as read with current timestamp
-      const now = await markChatAsRead(profile.id, groupId);
-      const updatedReadTimes = new Map(chatReadTimes);
-      updatedReadTimes.set(groupId, now);
-      setChatReadTimes(updatedReadTimes);
+      if (markAsRead) {
+        const now = await markChatAsRead(profile.id, groupId);
+        const updatedReadTimes = new Map(chatReadTimes);
+        updatedReadTimes.set(groupId, now);
+        setChatReadTimes(updatedReadTimes);
+      }
+      await loadReceiverReadState(groupId);
 
       // Mark this specific chat as read in local state
       const chatToSelect = chats.find(c => c.id === groupId);
@@ -194,6 +246,32 @@ const ClearDoubts = () => {
     }
   };
 
+  const loadReceiverReadState = async (groupId = selectedChat?.id) => {
+    if (!groupId || !profile?.id) return;
+    try {
+      const { data } = await supabase
+        .from('chat_read_states')
+        .select('user_id, last_read_at')
+        .eq('group_id', groupId)
+        .neq('user_id', profile.id)
+        .order('last_read_at', { ascending: false })
+        .limit(1);
+      setReceiverReadAt(data?.[0]?.last_read_at || null);
+    } catch {
+      setReceiverReadAt(null);
+    }
+  };
+
+  const getOwnMessageStatus = (message) => {
+    if (String(message.id || '').startsWith('temp-')) {
+      return { label: 'Sending', symbol: '✓', className: 'text-slate-400' };
+    }
+    if (receiverReadAt && new Date(receiverReadAt) >= new Date(message.created_at)) {
+      return { label: 'Read', symbol: '✓✓', className: 'text-sky-500' };
+    }
+    return { label: 'Sent', symbol: '✓✓', className: 'text-slate-400' };
+  };
+
   const handleSelectChat = (chat) => {
     loadChatMessages(chat.id);
   };
@@ -202,13 +280,14 @@ const ClearDoubts = () => {
     if (!selectedChat) return;
 
     try {
-      // Delete all messages in this chat group from database
       const { error } = await supabase
         .from('chat_messages')
         .delete()
         .eq('group_id', selectedChat.id);
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Clear doubts server delete blocked/failed; clearing local view only:', error.message);
+      }
 
       // Close chat and show success
       setSelectedChat(null);
@@ -258,16 +337,33 @@ const ClearDoubts = () => {
         sender_id: profile.id,
         content: reply.trim()
       };
-      const { error } = await supabase
+      const tempId = `temp-${Date.now()}`;
+      setChatMessages((prev) => [...prev, {
+        ...payload,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        sender: {
+          id: profile.id,
+          full_name: profile.full_name,
+          avatar_url: profile.avatar_url
+        }
+      }]);
+      setReply('');
+
+      const { data, error } = await supabase
         .from('chat_messages')
-        .insert(payload);
+        .insert(payload)
+        .select('*, sender:profiles(id, full_name, avatar_url)')
+        .single();
 
       if (error) throw error;
 
-      setReply('');
-      loadChatMessages(selectedChat.id);
+      setChatMessages((prev) => prev.map((message) => message.id === tempId ? data : message));
+      await markChatAsRead(profile.id, selectedChat.id);
+      fetchStudentChats(false);
     } catch (err) {
       console.error('Error sending reply:', err);
+      setChatMessages((prev) => prev.filter((message) => !String(message.id).startsWith('temp-')));
       openPopup('Error', 'Failed to send message', 'error');
     } finally {
       setSending(false);
@@ -485,6 +581,11 @@ const ClearDoubts = () => {
                           <p className="text-sm break-words">{msg.content || '(no message)'}</p>
                           <p className="text-xs opacity-70 mt-1">
                             {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {msg.sender_id === profile.id ? (
+                              <span className={`ml-2 font-bold ${getOwnMessageStatus(msg).className}`} title={getOwnMessageStatus(msg).label}>
+                                {getOwnMessageStatus(msg).symbol}
+                              </span>
+                            ) : null}
                           </p>
                         </div>
                       </div>
@@ -499,7 +600,7 @@ const ClearDoubts = () => {
                     type="text"
                     value={reply}
                     onChange={e => setReply(e.target.value)}
-                    onKeyPress={e => e.key === 'Enter' && sendReply()}
+                    onKeyDown={e => e.key === 'Enter' && sendReply()}
                     placeholder="Type your reply..."
                     className="flex-1 p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-nani-dark"
                   />

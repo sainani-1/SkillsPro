@@ -77,6 +77,17 @@ export const ChatProvider = ({ children }) => {
 
     loadUnreadCount();
 
+    let activeGroupIds = new Set();
+    const loadMemberGroupIds = async () => {
+      const { data } = await supabase
+        .from('chat_members')
+        .select('group_id')
+        .eq('user_id', profile.id);
+      activeGroupIds = new Set((data || []).map((row) => row.group_id));
+    };
+
+    loadMemberGroupIds();
+
     // Listen for new messages
     const subscription = supabase
       .channel('global_messages')
@@ -84,7 +95,12 @@ export const ChatProvider = ({ children }) => {
         event: 'INSERT',
         schema: 'public',
         table: 'chat_messages'
-      }, payload => {
+      }, async payload => {
+        if (payload.new.sender_id === profile.id) return;
+        if (!activeGroupIds.has(payload.new.group_id)) {
+          await loadMemberGroupIds();
+        }
+        if (!activeGroupIds.has(payload.new.group_id)) return;
         setTotalUnreadCount(prev => prev + 1);
       })
       .subscribe();

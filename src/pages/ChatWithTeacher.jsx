@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { Send, MessageCircle, CheckCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { markChatAsRead } from '../utils/chatReadState';
+import { getChatReadTimes, markChatAsRead } from '../utils/chatReadState';
 import { buildPlanCheckoutPath } from '../utils/planCheckout';
 
 const ChatWithTeacher = () => {
@@ -22,9 +22,47 @@ const ChatWithTeacher = () => {
   const [deleteConfirmFinal, setDeleteConfirmFinal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [error, setError] = useState(null);
+  const [receiverReadAt, setReceiverReadAt] = useState(null);
 
   const [initialLoad, setInitialLoad] = useState(true);
   const premiumAccess = isPremiumPlus(profile);
+
+  const fetchMessageWithSender = async (messageId) => {
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('id, group_id, content, sender_id, created_at, sender:profiles(full_name, avatar_url)')
+      .eq('id', messageId)
+      .maybeSingle();
+    return data;
+  };
+
+  const appendMessageOnce = (message) => {
+    if (!message?.id) return;
+    setMessages((prev) => {
+      if (prev.some((item) => item.id === message.id)) return prev;
+      return [...prev, message];
+    });
+  };
+
+  const loadReceiverReadState = async (currentGroupId = groupId) => {
+    if (!currentGroupId || !teacher?.id) return;
+    try {
+      const readTimes = await getChatReadTimes(teacher.id, [currentGroupId]);
+      setReceiverReadAt(readTimes.get(currentGroupId) || null);
+    } catch {
+      setReceiverReadAt(null);
+    }
+  };
+
+  const getOwnMessageStatus = (message) => {
+    if (String(message.id || '').startsWith('temp-')) {
+      return { label: 'Sending', symbol: '✓', className: 'text-slate-400' };
+    }
+    if (receiverReadAt && new Date(receiverReadAt) >= new Date(message.created_at)) {
+      return { label: 'Read', symbol: '✓✓', className: 'text-sky-300' };
+    }
+    return { label: 'Sent', symbol: '✓✓', className: 'text-slate-300' };
+  };
 
   if (profile?.role === 'student' && !premiumAccess) {
     return (
@@ -104,6 +142,7 @@ const ChatWithTeacher = () => {
   useEffect(() => {
     if (groupId) {
       loadMessages();
+      loadReceiverReadState(groupId);
       const subscription = supabase
         .channel(`chat:${groupId}`)
         .on('postgres_changes', {
@@ -111,14 +150,14 @@ const ChatWithTeacher = () => {
           schema: 'public',
           table: 'chat_messages',
           filter: `group_id=eq.${groupId}`
-        }, payload => {
+        }, async payload => {
           if (payload.new.sender_id === profile?.id) {
             // Own message is added optimistically in sendMessage().
             return;
           }
           const clearedAt = getChatClearedAt(groupId);
           if (!clearedAt || new Date(payload.new.created_at) > new Date(clearedAt)) {
-            setMessages(prev => [...prev, payload.new]);
+            appendMessageOnce((await fetchMessageWithSender(payload.new.id)) || payload.new);
           }
           // Mark chat as read when viewing the page and receiving new messages
           void setChatReadTime(groupId);
@@ -128,6 +167,15 @@ const ChatWithTeacher = () => {
       return () => subscription.unsubscribe();
     }
   }, [groupId]);
+
+  useEffect(() => {
+    if (!groupId || !profile?.id) return undefined;
+    const interval = window.setInterval(() => {
+      loadMessages(false);
+      loadReceiverReadState(groupId);
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [groupId, profile?.id, teacher?.id]);
 
   // On unmount, persist latest read time to clear badges
   useEffect(() => {
@@ -245,9 +293,9 @@ const ChatWithTeacher = () => {
     }
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (showLoadingState = true) => {
     if (!groupId) {
-      setLoading(false);
+      if (showLoadingState) setLoading(false);
       return;
     }
     
@@ -265,13 +313,14 @@ const ChatWithTeacher = () => {
       setMessages(filteredMessages);
       // Mark chat as read on load so sidebar badge clears
       await setChatReadTime(groupId);
+      await loadReceiverReadState(groupId);
       if (initialLoad) {
         setInitialLoad(false);
       }
     } catch (error) {
       console.error('Error loading messages:', error);
     } finally {
-      setLoading(false);
+      if (showLoadingState) setLoading(false);
     }
   };
 
@@ -340,11 +389,15 @@ const ChatWithTeacher = () => {
     setNewMessage('');
     setError(null);
 
-    const { error: sendError } = await supabase.from('chat_messages').insert({
-      group_id: groupId,
-      sender_id: profile.id,
-      content
-    });
+    const { data: savedMessage, error: sendError } = await supabase
+      .from('chat_messages')
+      .insert({
+        group_id: groupId,
+        sender_id: profile.id,
+        content
+      })
+      .select('id, group_id, content, sender_id, created_at, sender:profiles(full_name, avatar_url)')
+      .single();
 
     if (sendError) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -353,6 +406,9 @@ const ChatWithTeacher = () => {
       setError('Failed to send message. Please try again.');
       return;
     }
+
+    setMessages((prev) => prev.map((message) => (message.id === tempId ? savedMessage : message)));
+    void setChatReadTime(groupId);
   };
 
   if (!profile) {
@@ -526,6 +582,11 @@ const ChatWithTeacher = () => {
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">
                     {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {isMe ? (
+                      <span className={`ml-2 font-bold ${getOwnMessageStatus(msg).className}`} title={getOwnMessageStatus(msg).label}>
+                        {getOwnMessageStatus(msg).symbol}
+                      </span>
+                    ) : null}
                   </p>
                 </div>
               </div>
@@ -541,7 +602,7 @@ const ChatWithTeacher = () => {
             type="text"
             value={newMessage}
             onChange={e => setNewMessage(e.target.value)}
-            onKeyPress={e => e.key === 'Enter' && sendMessage()}
+            onKeyDown={e => e.key === 'Enter' && sendMessage()}
             placeholder="Type your message..."
             className="flex-1 border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-nani-dark text-sm"
           />
